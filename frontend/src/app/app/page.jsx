@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '../../context/AuthContext';
 import AppHeader from '../../components/AppHeader';
 import OpLockBar from '../../components/OpLockBar';
 import AppNav from '../../components/AppNav';
@@ -15,8 +17,11 @@ import McpScreen from '../../components/screens/McpScreen';
 import OnboardingNameModal from '../../components/OnboardingNameModal';
 import { useMimarStore } from '../../store/mimarStore';
 import '../../styles/app.css';
+import '../../styles/auth.css';
 
 export default function BlueprintWizardPage() {
+  const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
   const {
     currentScreen,
     finalAccepted,
@@ -26,6 +31,13 @@ export default function BlueprintWizardPage() {
   } = useMimarStore();
 
   useEffect(() => {
+    if (!authLoading && !user) {
+      router.push('/login?redirectTo=/app');
+    }
+  }, [user, authLoading, router]);
+
+  useEffect(() => {
+    if (!user) return;
     document.body.style.overflow = "hidden";
     const restored = restoreProjectState();
     if (restored) {
@@ -36,7 +48,27 @@ export default function BlueprintWizardPage() {
       document.body.style.height = "auto";
       document.documentElement.style.overflow = "auto";
     };
-  }, []);
+  }, [user]);
+
+  if (authLoading) {
+    return (
+      <div className="auth-page-root">
+        <div className="auth-card" style={{ textAlign: 'center', padding: 40 }}>
+          <div style={{ color: 'var(--blueprint-cyan)', fontFamily: 'var(--font-mono)' }}>Verifying security credentials…</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="auth-page-root">
+        <div className="auth-card" style={{ textAlign: 'center', padding: 40 }}>
+          <div style={{ color: 'var(--accent-orange)', fontFamily: 'var(--font-mono)' }}>Redirecting to login…</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell" id="appShell">
