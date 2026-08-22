@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import HeaderAvatar from "../../components/HeaderAvatar";
 import "../../styles/contact.css";
+import "../../styles/auth.css";
 
 export default function ContactPage() {
   const [selectedTopic, setSelectedTopic] = useState("General Inquiry");
@@ -94,7 +96,7 @@ export default function ContactPage() {
           <a href="/" className="brand-logo" title="MimarAi — The Blueprint Studio">
             <img src="/assets/mimarai-logo-hero.png" alt="MimarAi Logo" className="brand-logo-img" />
           </a>
-          <div className="nav-links">
+          <div className="nav-links" style={{ display: "flex", alignItems: "center", gap: "16px" }}>
             <a href="/#how-it-works">Workflow</a>
             <a href="/#architecture">Architecture</a>
             <a href="/#mcp-server">MCP Server</a>
@@ -102,6 +104,7 @@ export default function ContactPage() {
             <Link href="/app" className="btn btn-primary">
               Open Blueprint Wizard →
             </Link>
+            <HeaderAvatar />
           </div>
         </header>
       </div>

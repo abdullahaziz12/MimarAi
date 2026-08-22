@@ -12,6 +12,7 @@ import DiagramScreen from '../../components/screens/DiagramScreen';
 import RenderScreen from '../../components/screens/RenderScreen';
 import FinalScreen from '../../components/screens/FinalScreen';
 import McpScreen from '../../components/screens/McpScreen';
+import OnboardingNameModal from '../../components/OnboardingNameModal';
 import { useMimarStore } from '../../store/mimarStore';
 import '../../styles/app.css';
 
@@ -81,11 +82,13 @@ export default function BlueprintWizardPage() {
       </footer>
 
       {/* TOAST NOTIFICATION */}
-      {toastMessage && (
-        <div className="toast show" id="toast">
-          {toastMessage}
-        </div>
-      )}
+      {/* Toast Notification Container */}
+      <div className={`toast ${toastMessage ? 'show' : ''}`} id="toast">
+        {toastMessage}
+      </div>
+
+      {/* Mandatory Onboarding Name Modal */}
+      <OnboardingNameModal />
     </div>
   );
 }

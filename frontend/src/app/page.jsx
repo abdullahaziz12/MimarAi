@@ -2,9 +2,16 @@
 
 import React, { useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useAuth } from "../context/AuthContext";
+import HeaderAvatar from "../components/HeaderAvatar";
 import "../styles/landing.css";
+import "../styles/auth.css";
 
 export default function LandingPage() {
+  const router = useRouter();
+  const { user } = useAuth();
+
   useEffect(() => {
     document.body.style.overflow = "auto";
     document.body.style.height = "auto";
@@ -26,6 +33,13 @@ export default function LandingPage() {
     } catch (e) {}
   }, []);
 
+  const handleCtaClick = (e) => {
+    if (!user) {
+      e.preventDefault();
+      router.push("/login?redirectTo=/app");
+    }
+  };
+
   return (
     <div className="landing-page-root">
       {/* Top System Status Notice */}
@@ -43,14 +57,20 @@ export default function LandingPage() {
               className="brand-logo-img"
             />
           </a>
-          <div className="nav-links">
+          <div className="nav-links" style={{ display: "flex", alignItems: "center", gap: "16px" }}>
             <a href="#how-it-works">Workflow</a>
             <a href="#architecture">Architecture</a>
             <a href="#mcp-server">MCP Server</a>
             <a href="/contact">Contact Us</a>
-            <Link href="/app" className="btn btn-primary">
+            <Link
+              href="/app"
+              onClick={handleCtaClick}
+              className={`btn btn-primary ${!user ? 'btn-disabled' : ''}`}
+              title={!user ? "Please log in to open the Blueprint Wizard" : "Open Blueprint Wizard"}
+            >
               Open Blueprint Wizard →
             </Link>
+            <HeaderAvatar />
           </div>
         </header>
       </div>
@@ -74,8 +94,10 @@ export default function LandingPage() {
           <div className="hero-cta-group">
             <Link
               href="/app"
-              className="btn btn-primary"
+              onClick={handleCtaClick}
+              className={`btn btn-primary ${!user ? 'btn-disabled' : ''}`}
               style={{ fontSize: "13px", padding: "13px 26px" }}
+              title={!user ? "Please log in to enter the Blueprint Wizard" : "Enter Blueprint Wizard"}
             >
               Enter Blueprint Wizard →
             </Link>
@@ -288,8 +310,10 @@ export default function LandingPage() {
           </p>
           <Link
             href="/app"
-            className="btn btn-primary"
+            onClick={handleCtaClick}
+            className={`btn btn-primary ${!user ? 'btn-disabled' : ''}`}
             style={{ fontSize: "13.5px", padding: "14px 30px" }}
+            title={!user ? "Please log in to open the Blueprint Wizard" : "Open Blueprint Wizard"}
           >
             Open Blueprint Wizard →
           </Link>

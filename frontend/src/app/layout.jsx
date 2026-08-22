@@ -1,4 +1,5 @@
 import './globals.css';
+import { AuthProvider } from '../context/AuthContext';
 
 export const metadata = {
   title: 'MimarAi — Precision Architecture & Planning Layer for AI Coding Agents',
@@ -18,7 +19,9 @@ export default function RootLayout({ children }) {
         <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Sans:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
       </head>
       <body>
-        {children}
+        <AuthProvider>
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );

@@ -4,6 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMimarStore, STAGE_FOR_SCREEN, STAGE_ORDER } from '../store/mimarStore';
+import HeaderAvatar from './HeaderAvatar';
 
 export default function AppHeader() {
   const router = useRouter();
@@ -112,7 +113,7 @@ export default function AppHeader() {
         </span>
       </div>
 
-      <div className="header-right">
+      <div className="header-right" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <a
           href="/"
           onClick={handleStopOrLeave}
@@ -123,6 +124,7 @@ export default function AppHeader() {
         >
           {operationRunning ? '⏹ Stop Generation' : 'Stop Generation'}
         </a>
+        <HeaderAvatar />
       </div>
     </header>
   );
