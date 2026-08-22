@@ -25,10 +25,16 @@ export default function BlueprintWizardPage() {
   } = useMimarStore();
 
   useEffect(() => {
+    document.body.style.overflow = "hidden";
     const restored = restoreProjectState();
     if (restored) {
       showToast("Resumed your Blueprint Wizard session right where you left off.");
     }
+    return () => {
+      document.body.style.overflow = "auto";
+      document.body.style.height = "auto";
+      document.documentElement.style.overflow = "auto";
+    };
   }, []);
 
   return (

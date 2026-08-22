@@ -14,6 +14,12 @@ export default function ContactPage() {
   const [errors, setErrors] = useState({ name: false, email: false, message: false });
   const [toastMsg, setToastMsg] = useState("");
 
+  useEffect(() => {
+    document.body.style.overflow = "auto";
+    document.body.style.height = "auto";
+    document.documentElement.style.overflow = "auto";
+  }, []);
+
   const showToast = (msg) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(""), 3000);

@@ -6,6 +6,10 @@ import "../styles/landing.css";
 
 export default function LandingPage() {
   useEffect(() => {
+    document.body.style.overflow = "auto";
+    document.body.style.height = "auto";
+    document.documentElement.style.overflow = "auto";
+
     try {
       const msg = sessionStorage.getItem("mimarai_toast");
       if (msg) {
