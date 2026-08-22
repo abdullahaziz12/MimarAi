@@ -186,7 +186,7 @@ export default function StructureScreen() {
                     <div className="file-path">auth<span className="dim">.py</span></div>
                     <div className="file-tags" id="authTags">
                       <span className="feature-tag">Role-Based Access Control</span>
-                      {!structureHasRefreshToken && <span className="flag-tag" id="authFlag">Adjusted — Please Review</span>}
+                      {structureHasRefreshToken && <span className="flag-tag" id="authFlag">Adjusted — Please Review</span>}
                     </div>
                   </div>
                   <div className="comment-trigger" data-icon onClick={() => handleOpenComposer('f-auth-route', 'src/routes/auth.py')}>

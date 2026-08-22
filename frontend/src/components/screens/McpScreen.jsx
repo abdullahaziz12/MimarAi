@@ -231,7 +231,7 @@ export default function McpScreen() {
                       {`: {\n      `}
                       <span className="code-key">"url"</span>
                       {`: `}
-                      <span className="code-val">"https://mimarai-backend.onrender.com/mcp"</span>
+                      <span className="code-val">"https://mimaraibackend-euj86d7p.b4a.run/mcp"</span>
                       {`,\n      `}
                       <span className="code-key">"headers"</span>
                       {`: { `}
@@ -264,7 +264,7 @@ export default function McpScreen() {
                       {`: {\n      `}
                       <span className="code-key">"url"</span>
                       {`: `}
-                      <span className="code-val">"https://mimarai-backend.onrender.com/mcp"</span>
+                      <span className="code-val">"https://mimaraibackend-euj86d7p.b4a.run/mcp"</span>
                       {`,\n      `}
                       <span className="code-key">"token"</span>
                       {`: `}
@@ -297,7 +297,7 @@ export default function McpScreen() {
                       {`],\n  `}
                       <span className="code-key">"server"</span>
                       {`: `}
-                      <span className="code-val">"https://mimarai.../mcp"</span>
+                      <span className="code-val">"https://mimaraibackend-euj86d7p.b4a.run/mcp"</span>
                       {`,\n  `}
                       <span className="code-key">"auth_token"</span>
                       {`: `}
