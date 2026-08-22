@@ -27,7 +27,7 @@ export default function ContactPage() {
 
   const isValidEmail = (val) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const nameOk = name.trim().length > 0;
     const emailOk = isValidEmail(email);
@@ -45,11 +45,25 @@ export default function ContactPage() {
     }
 
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      const res = await fetch("https://mimaraibackend-euj86d7p.b4a.run/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          email: email.trim(),
+          topic: selectedTopic,
+          message: message.trim(),
+        }),
+      });
+      if (!res.ok) throw new Error("Server error");
       setSubmitted(true);
       showToast("Message sent successfully.");
-    }, 700);
+    } catch (err) {
+      showToast("Failed to send message. Please try again or email us directly.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleReset = () => {
@@ -237,7 +251,7 @@ export default function ContactPage() {
               </div>
               <div className="channel-item">
                 <span className="channel-label">Email Support</span>
-                <span className="channel-val">support@mimar.ai</span>
+                <a href="mailto:support@mimar.ai" className="channel-val" style={{ textDecoration: 'none', color: 'inherit' }}>support@mimar.ai</a>
               </div>
               <div className="channel-item">
                 <span className="channel-label">Response Time</span>
@@ -259,9 +273,9 @@ export default function ContactPage() {
               <p style={{ fontSize: "13px", color: "var(--ink-secondary)", lineHeight: "1.55", margin: "0 0 12px" }}>
                 For public discussions, architectural RFCs, and bug reports, you can also open an issue on our GitHub repository.
               </p>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: "12px", color: "var(--blueprint-cyan)" }}>
-                github.com/mimarai/studio
-              </span>
+              <a href="https://github.com/abdullahaziz12/MimarAi" target="_blank" rel="noopener noreferrer" style={{ fontFamily: "var(--font-mono)", fontSize: "12px", color: "var(--blueprint-cyan)", textDecoration: "none" }}>
+                github.com/abdullahaziz12/MimarAi
+              </a>
             </div>
           </aside>
         </div>
@@ -275,7 +289,7 @@ export default function ContactPage() {
           </a>
         </div>
         <div style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--ink-secondary)", letterSpacing: ".06em" }}>
-          RENDER + VERCEL + SUPABASE · $0 INFRASTRUCTURE GOAL
+          BACK4APP + VERCEL + SUPABASE · $0 INFRASTRUCTURE GOAL
         </div>
       </footer>
 

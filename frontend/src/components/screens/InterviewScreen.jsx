@@ -43,7 +43,10 @@ export default function InterviewScreen() {
     }
 
     const text = inputVal.trim();
-    if (!text) return;
+    if (!text) {
+      useMimarStore.getState().showToast('Please describe your project before sending.');
+      return;
+    }
 
     // Add user bubble
     useMimarStore.setState(state => ({

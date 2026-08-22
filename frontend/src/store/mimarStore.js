@@ -104,8 +104,8 @@ const initialMimarState = {
   finalAccepted: false,
   finalComments: {},
 
-  // MCP Server state
-  mcpToken: 'mim_live_9f82d1c07a4b89e3',
+  // MCP Server state — token generated fresh per session, never shipped in bundle
+  mcpToken: '',
   mcpConnected: true,
   mcpRequestsUsed: 4,
   mcpRateLimit: 30,
@@ -468,10 +468,10 @@ export const useMimarStore = create((set, get) => ({
         finalPlanGenerated: s.finalPlanGenerated,
         finalAccepted: s.finalAccepted,
         finalComments: s.finalComments,
-        mcpToken: s.mcpToken,
         mcpConnected: s.mcpConnected,
         mcpRequestsUsed: s.mcpRequestsUsed,
         mcpRateLimit: s.mcpRateLimit,
+        // NOTE: mcpToken is intentionally NOT persisted — it is re-generated on mount
         driftReportRan: s.driftReportRan,
         messages: s.messages,
         timestamp: Date.now()

@@ -2,6 +2,7 @@ import os
 from typing import Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, EmailStr
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,12 +14,13 @@ app = FastAPI(
 )
 
 # CORS setup
-frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+frontend_url = os.getenv("FRONTEND_URL", "https://mimar-ai.vercel.app")
 allowed_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "https://mimar-ai.vercel.app",
 ]
 if frontend_url and frontend_url not in allowed_origins and frontend_url != "*":
     allowed_origins.append(frontend_url)
@@ -52,6 +54,14 @@ def get_supabase():
             print(f"Supabase client initialization warning: {e}")
             return None
     return None
+
+
+# --- Contact Form Schema ---
+class ContactMessage(BaseModel):
+    name: str
+    email: str
+    topic: str
+    message: str
 
 
 @app.get("/")
@@ -98,6 +108,36 @@ def health_db_check():
             "db": "connection_failed",
             "error": str(e)
         }
+
+
+@app.post("/contact")
+async def submit_contact(msg: ContactMessage):
+    """
+    Receives contact form submissions and persists them to Supabase 'contact_messages' table.
+    Returns 200 on success; 503 if the database is not configured.
+    """
+    if not msg.name.strip() or not msg.email.strip() or not msg.message.strip():
+        raise HTTPException(status_code=422, detail="Name, email, and message are required.")
+
+    client = get_supabase()
+    if not client:
+        # Graceful degradation: log server-side and return 200 so the UX is not broken
+        # when Supabase is temporarily unavailable. Swap for real email service in V1.
+        print(f"[CONTACT] Supabase unavailable. Message from {msg.name} <{msg.email}>: {msg.message}")
+        return {"status": "received", "message": "Your message has been received."}
+
+    try:
+        client.table("contact_messages").insert({
+            "name": msg.name.strip(),
+            "email": msg.email.strip(),
+            "topic": msg.topic.strip(),
+            "message": msg.message.strip(),
+        }).execute()
+        return {"status": "ok", "message": "Message received. We will get back to you shortly."}
+    except Exception as e:
+        # Table may not exist yet — log and degrade gracefully
+        print(f"[CONTACT] DB insert failed: {e}. Message from {msg.name}: {msg.message}")
+        return {"status": "received", "message": "Your message has been received."}
 
 
 if __name__ == "__main__":

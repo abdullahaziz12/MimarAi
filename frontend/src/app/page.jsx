@@ -129,7 +129,7 @@ export default function LandingPage() {
             <div className="cad-line">&nbsp;&nbsp;<span className="cad-v">"Automated Nightly Interest Cron"</span></div>
             <div className="cad-line">]</div>
             <div className="cad-line" style={{ marginTop: "12px" }}><span className="cad-c">// 3. Drift-Check Machine Map</span></div>
-            <div className="cad-line"><span className="cad-k">mcp_tools</span>: [<span class="cad-v">"get_plan"</span>, <span className="cad-v">"check_drift"</span>]</div>
+            <div className="cad-line"><span className="cad-k">mcp_tools</span>: [<span className="cad-v">"get_plan"</span>, <span className="cad-v">"check_drift"</span>]</div>
           </div>
         </div>
       </section>
@@ -318,7 +318,7 @@ export default function LandingPage() {
           </a>
         </div>
         <div style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--ink-secondary)", letterSpacing: ".06em" }}>
-          RENDER + VERCEL + SUPABASE · $0 INFRASTRUCTURE GOAL
+          BACK4APP + VERCEL + SUPABASE · $0 INFRASTRUCTURE GOAL
         </div>
       </footer>
 

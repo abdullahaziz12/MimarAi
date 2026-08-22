@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useMimarStore, sleep } from '../../store/mimarStore';
 
 export default function McpScreen() {
@@ -20,6 +20,17 @@ export default function McpScreen() {
   const isActive = currentScreen === 'mcp';
   const isAuditRejected = !!rejectedFeatures['f3'];
 
+  // Generate a fresh per-session token on first activation (never hardcoded in bundle)
+  useEffect(() => {
+    if (isActive && !mcpToken) {
+      const sessionToken =
+        'mim_live_' +
+        Math.random().toString(36).substring(2, 10) +
+        Math.random().toString(36).substring(2, 10);
+      setMcpToken(sessionToken);
+    }
+  }, [isActive]);
+
   const handleCopyToken = () => {
     navigator.clipboard?.writeText(mcpToken).catch(() => {});
     setCopiedToken(true);
@@ -37,7 +48,7 @@ export default function McpScreen() {
       Math.random().toString(36).substring(2, 10) +
       Math.random().toString(36).substring(2, 10);
     setMcpToken(newToken);
-    showToast("New project token generated (stored securely hashed).");
+    showToast("New project token generated. Update your agent config snippet.");
   };
 
   const handleCopyAgentConfig = (agent) => {
