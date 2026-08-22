@@ -77,7 +77,7 @@ export default function ContactPage() {
 
       {/* Sticky Navbar */}
       <div className="nav-wrap">
-        <header className="landing-header">
+        <header className="landing-nav">
           <a href="/" className="brand-logo" title="MimarAi — Home">
             <img src="/assets/mimarai-logo-hero.png" alt="MimarAi" className="brand-logo-img" />
           </a>

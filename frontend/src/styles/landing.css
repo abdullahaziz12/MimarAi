@@ -40,7 +40,7 @@
       --font-mono: 'IBM Plex Mono', monospace;
     }
 
-    *, *::before, *::after { box-sizing: border-box; }
+.landing-page-root *,.landing-page-root *::before,.landing-page-root *::after{ box-sizing: border-box; }
     html {
       margin: 0;
       padding: 0;
@@ -69,7 +69,7 @@
     }
 
     /* Top Banner — Scrolls away naturally */
-    .top-notice {
+.landing-page-root .top-notice{
       background: var(--bg-surface-deep);
       border-bottom: 1px solid var(--border-line);
       padding: 9px 24px;
@@ -80,10 +80,10 @@
       letter-spacing: .05em;
       width: 100%;
     }
-    .top-notice b { color: var(--accent-orange); }
+.landing-page-root .top-notice b{ color: var(--accent-orange); }
 
     /* Header Nav — Sticky: stays at top when scrolling */
-    .nav-wrap {
+.landing-page-root .nav-wrap{
       position: sticky;
       top: 0;
       z-index: 1000;
@@ -93,7 +93,7 @@
       border-bottom: 1px solid var(--border-hairline);
       width: 100%;
     }
-    .landing-nav {
+.landing-page-root .landing-nav{
       max-width: 1200px;
       margin: 0 auto;
       padding: 16px 32px;
@@ -102,16 +102,16 @@
       justify-content: space-between;
       width: 100%;
     }
-    .brand-logo {
+.landing-page-root .brand-logo{
       display: flex;
       align-items: center;
       text-decoration: none;
       transition: opacity .18s ease;
     }
-    .brand-logo:hover {
+.landing-page-root .brand-logo:hover{
       opacity: .85;
     }
-    .brand-logo-img {
+.landing-page-root .brand-logo-img{
       height: 56px;
       width: auto;
       object-fit: contain;
@@ -119,12 +119,12 @@
       border-radius: 8px;
     }
 
-    .nav-links {
+.landing-page-root .nav-links{
       display: flex;
       align-items: center;
       gap: 28px;
     }
-    .nav-links a {
+.landing-page-root .nav-links a{
       color: var(--ink-secondary);
       text-decoration: none;
       font-family: var(--font-mono);
@@ -132,9 +132,9 @@
       letter-spacing: .04em;
       transition: color .15s;
     }
-    .nav-links a:not(.btn):hover { color: var(--blueprint-cyan); }
+.landing-page-root .nav-links a:not(.btn):hover{ color: var(--blueprint-cyan); }
     /* Ensure .btn color is never overridden by the link rule */
-    .nav-links .btn-primary {
+.landing-page-root .nav-links .btn-primary{
       color: #fff !important;
       background: var(--accent-orange) !important;
       border-color: var(--accent-orange) !important;
@@ -143,7 +143,7 @@
       padding: 10px 22px;
       box-shadow: 0 2px 16px var(--accent-orange-glow);
     }
-    .nav-links .btn-primary:hover {
+.landing-page-root .nav-links .btn-primary:hover{
       background: var(--accent-orange-hover) !important;
       border-color: var(--accent-orange-hover) !important;
       box-shadow: 0 4px 24px var(--accent-orange-glow);
@@ -151,7 +151,7 @@
       color: #fff !important;
     }
 
-    .btn {
+.landing-page-root .btn{
       font-family: var(--font-mono);
       font-size: 11.5px;
       font-weight: 600;
@@ -168,31 +168,31 @@
       border: 1px solid transparent;
       user-select: none;
     }
-    .btn-primary {
+.landing-page-root .btn-primary{
       background: var(--accent-orange);
       color: #fff;
       border-color: var(--accent-orange);
       box-shadow: 0 2px 12px var(--accent-orange-glow);
     }
-    .btn-primary:hover {
+.landing-page-root .btn-primary:hover{
       background: var(--accent-orange-hover);
       border-color: var(--accent-orange-hover);
       box-shadow: 0 4px 20px var(--accent-orange-glow);
       transform: translateY(-1px);
     }
-    .btn-outline {
+.landing-page-root .btn-outline{
       background: transparent;
       color: var(--blueprint-cyan);
       border-color: var(--blueprint-cyan-border);
     }
-    .btn-outline:hover {
+.landing-page-root .btn-outline:hover{
       background: var(--blueprint-cyan-dim);
       border-color: var(--blueprint-cyan);
       box-shadow: 0 0 14px var(--blueprint-cyan-dim);
     }
 
     /* Hero Section */
-    .hero {
+.landing-page-root .hero{
       max-width: 1200px;
       margin: 0 auto;
       padding: 90px 32px 70px;
@@ -202,7 +202,7 @@
       align-items: center;
     }
 
-    .hero-badge {
+.landing-page-root .hero-badge{
       display: inline-flex;
       align-items: center;
       gap: 8px;
@@ -218,14 +218,14 @@
       margin-bottom: 24px;
       box-shadow: 0 0 16px var(--accent-orange-dim);
     }
-    .hero-badge-dot {
+.landing-page-root .hero-badge-dot{
       width: 6px; height: 6px;
       border-radius: 50%;
       background: var(--accent-orange);
       box-shadow: 0 0 6px var(--accent-orange);
     }
 
-    .hero h1 {
+.landing-page-root .hero h1{
       font-family: var(--font-display);
       font-size: 48px;
       font-weight: 700;
@@ -233,26 +233,26 @@
       letter-spacing: -.03em;
       margin: 0 0 22px;
     }
-    .hero h1 span {
+.landing-page-root .hero h1 span{
       color: var(--blueprint-cyan);
       text-shadow: 0 0 24px var(--blueprint-cyan-glow);
     }
 
-    .hero-lead {
+.landing-page-root .hero-lead{
       font-size: 17px;
       color: var(--ink-secondary);
       line-height: 1.65;
       margin: 0 0 36px;
     }
 
-    .hero-cta-group {
+.landing-page-root .hero-cta-group{
       display: flex;
       align-items: center;
       gap: 16px;
       flex-wrap: wrap;
     }
 
-    .hero-proof {
+.landing-page-root .hero-proof{
       margin-top: 40px;
       display: flex;
       align-items: center;
@@ -261,11 +261,11 @@
       font-size: 11.5px;
       color: var(--ink-muted);
     }
-    .proof-item { display: flex; align-items: center; gap: 7px; }
-    .proof-item svg { width: 15px; height: 15px; color: var(--success-green); }
+.landing-page-root .proof-item{ display: flex; align-items: center; gap: 7px; }
+.landing-page-root .proof-item svg{ width: 15px; height: 15px; color: var(--success-green); }
 
     /* Blueprint Terminal Mockup */
-    .hero-cad {
+.landing-page-root .hero-cad{
       background: var(--bg-surface-deep);
       border: 1px solid var(--border-line-strong);
       border-radius: var(--radius);
@@ -273,7 +273,7 @@
       position: relative;
       box-shadow: 0 24px 60px rgba(0,0,0,0.6);
     }
-    .hero-cad::before {
+.landing-page-root .hero-cad::before{
       content: '';
       position: absolute;
       top: -1px; left: -1px;
@@ -281,7 +281,7 @@
       border-top: 2px solid var(--accent-orange);
       border-left: 2px solid var(--accent-orange);
     }
-    .hero-cad::after {
+.landing-page-root .hero-cad::after{
       content: '';
       position: absolute;
       bottom: -1px; right: -1px;
@@ -290,7 +290,7 @@
       border-right: 2px solid var(--accent-orange);
     }
 
-    .cad-head {
+.landing-page-root .cad-head{
       background: var(--bg-surface);
       padding: 12px 18px;
       display: flex;
@@ -302,29 +302,29 @@
       color: var(--ink-secondary);
     }
 
-    .cad-content {
+.landing-page-root .cad-content{
       padding: 24px 20px;
       font-family: var(--font-mono);
       font-size: 12px;
       color: var(--ink-secondary);
       line-height: 1.75;
     }
-    .cad-line { margin-bottom: 6px; }
-    .cad-k { color: var(--blueprint-cyan); }
-    .cad-v { color: var(--accent-orange); font-weight: 600; }
-    .cad-c { color: var(--ink-muted); }
+.landing-page-root .cad-line{ margin-bottom: 6px; }
+.landing-page-root .cad-k{ color: var(--blueprint-cyan); }
+.landing-page-root .cad-v{ color: var(--accent-orange); font-weight: 600; }
+.landing-page-root .cad-c{ color: var(--ink-muted); }
 
     /* Section Container */
-    .section {
+.landing-page-root .section{
       max-width: 1200px;
       margin: 0 auto;
       padding: 90px 32px;
       border-top: 1px solid var(--border-hairline);
     }
-    .section-header {
+.landing-page-root .section-header{
       margin-bottom: 52px;
     }
-    .section-label {
+.landing-page-root .section-label{
       font-family: var(--font-mono);
       font-size: 11px;
       letter-spacing: .12em;
@@ -335,14 +335,14 @@
       align-items: center;
       gap: 8px;
     }
-    .section-title {
+.landing-page-root .section-title{
       font-family: var(--font-display);
       font-size: 34px;
       font-weight: 700;
       margin: 0 0 14px;
       letter-spacing: -.02em;
     }
-    .section-desc {
+.landing-page-root .section-desc{
       font-size: 16px;
       color: var(--ink-secondary);
       max-width: 680px;
@@ -350,12 +350,12 @@
     }
 
     /* 6-Step Workflow Grid */
-    .flow-grid {
+.landing-page-root .flow-grid{
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 22px;
     }
-    .flow-card {
+.landing-page-root .flow-card{
       background: var(--bg-surface);
       border: 1px solid var(--border-line);
       border-radius: var(--radius);
@@ -363,13 +363,13 @@
       position: relative;
       transition: all .2s ease;
     }
-    .flow-card:hover {
+.landing-page-root .flow-card:hover{
       border-color: var(--border-line-strong);
       transform: translateY(-2px);
       box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
     }
 
-    .flow-num {
+.landing-page-root .flow-num{
       font-family: var(--font-mono);
       font-size: 11px;
       color: var(--accent-orange);
@@ -380,7 +380,7 @@
       align-items: center;
       justify-content: space-between;
     }
-    .flow-step-tag {
+.landing-page-root .flow-step-tag{
       font-size: 9.5px;
       color: var(--blueprint-cyan);
       background: var(--blueprint-cyan-dim);
@@ -388,38 +388,38 @@
       padding: 2px 7px;
       border-radius: 3px;
     }
-    .flow-title {
+.landing-page-root .flow-title{
       font-family: var(--font-display);
       font-size: 18px;
       font-weight: 700;
       margin: 0 0 10px;
       color: var(--ink-primary);
     }
-    .flow-body {
+.landing-page-root .flow-body{
       font-size: 13.5px;
       color: var(--ink-secondary);
       line-height: 1.6;
     }
 
     /* Why MimarAi Differentiators */
-    .diff-grid {
+.landing-page-root .diff-grid{
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 24px;
     }
-    .diff-card {
+.landing-page-root .diff-card{
       background: var(--bg-surface);
       border: 1px solid var(--border-line);
       border-radius: var(--radius);
       padding: 32px;
       transition: all .2s ease;
     }
-    .diff-card:hover {
+.landing-page-root .diff-card:hover{
       border-color: var(--blueprint-cyan);
       transform: translateY(-2px);
     }
 
-    .diff-icon {
+.landing-page-root .diff-icon{
       width: 40px; height: 40px;
       background: var(--bg-surface-elevated);
       border: 1px solid var(--border-line-strong);
@@ -431,20 +431,20 @@
       margin-bottom: 22px;
       box-shadow: 0 0 12px var(--blueprint-cyan-dim);
     }
-    .diff-title {
+.landing-page-root .diff-title{
       font-family: var(--font-display);
       font-size: 19px;
       font-weight: 700;
       margin: 0 0 12px;
     }
-    .diff-body {
+.landing-page-root .diff-body{
       font-size: 14px;
       color: var(--ink-secondary);
       line-height: 1.65;
     }
 
     /* Comparison Box */
-    .compare-wrap {
+.landing-page-root .compare-wrap{
       margin-top: 48px;
       background: var(--bg-surface-deep);
       border: 1px solid var(--border-line);
@@ -453,10 +453,10 @@
       grid-template-columns: 1fr 1fr;
       box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
     }
-    .compare-col { padding: 36px; }
-    .compare-col:first-child { border-right: 1px solid var(--border-line); }
+.landing-page-root .compare-col{ padding: 36px; }
+.landing-page-root .compare-col:first-child{ border-right: 1px solid var(--border-line); }
 
-    .compare-head {
+.landing-page-root .compare-head{
       font-family: var(--font-mono);
       font-size: 12.5px;
       font-weight: 700;
@@ -467,23 +467,23 @@
       align-items: center;
       gap: 8px;
     }
-    .compare-head.bad { color: #F87171; }
-    .compare-head.good { color: #34D399; }
+.landing-page-root .compare-head.bad{ color: #F87171; }
+.landing-page-root .compare-head.good{ color: #34D399; }
 
-    .compare-list {
+.landing-page-root .compare-list{
       list-style: none;
       padding: 0;
       margin: 0;
       font-size: 14px;
       color: var(--ink-secondary);
     }
-    .compare-list li {
+.landing-page-root .compare-list li{
       margin-bottom: 12px;
       padding-left: 24px;
       position: relative;
       line-height: 1.55;
     }
-    .compare-list.bad li::before {
+.landing-page-root .compare-list.bad li::before{
       content: '✕';
       position: absolute;
       left: 0;
@@ -491,7 +491,7 @@
       font-weight: 800;
       font-family: var(--font-mono);
     }
-    .compare-list.good li::before {
+.landing-page-root .compare-list.good li::before{
       content: '✓';
       position: absolute;
       left: 0;
@@ -501,7 +501,7 @@
     }
 
     /* CTA Banner */
-    .cta-banner {
+.landing-page-root .cta-banner{
       background: linear-gradient(180deg, var(--bg-surface) 0%, var(--bg-surface-deep) 100%);
       border: 1px solid var(--border-line-strong);
       border-radius: var(--radius);
@@ -510,14 +510,14 @@
       position: relative;
       box-shadow: 0 20px 48px rgba(0, 0, 0, 0.4);
     }
-    .cta-banner h2 {
+.landing-page-root .cta-banner h2{
       font-family: var(--font-display);
       font-size: 36px;
       font-weight: 700;
       margin: 0 0 16px;
       letter-spacing: -.02em;
     }
-    .cta-banner p {
+.landing-page-root .cta-banner p{
       font-size: 16.5px;
       color: var(--ink-secondary);
       max-width: 600px;
@@ -526,7 +526,7 @@
     }
 
     /* Footer */
-    .landing-footer {
+.landing-page-root .landing-footer{
       max-width: 1200px;
       margin: 0 auto;
       padding: 44px 32px;
@@ -540,15 +540,15 @@
     }
 
     @media (max-width: 960px) {
-      .hero { grid-template-columns: 1fr; padding-top: 40px; }
-      .flow-grid { grid-template-columns: 1fr; }
-      .diff-grid { grid-template-columns: 1fr; }
-      .compare-wrap { grid-template-columns: 1fr; }
-      .compare-col:first-child { border-right: none; border-bottom: 1px solid var(--border-line); }
+.landing-page-root .hero{ grid-template-columns: 1fr; padding-top: 40px; }
+.landing-page-root .flow-grid{ grid-template-columns: 1fr; }
+.landing-page-root .diff-grid{ grid-template-columns: 1fr; }
+.landing-page-root .compare-wrap{ grid-template-columns: 1fr; }
+.landing-page-root .compare-col:first-child{ border-right: none; border-bottom: 1px solid var(--border-line); }
     }
 
     /* Toast Notification */
-    .toast {
+.landing-page-root .toast{
       position: fixed;
       left: 50%;
       transform: translateX(-50%) translateY(20px);
@@ -568,7 +568,7 @@
       white-space: nowrap;
       box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65);
     }
-    .toast.show {
+.landing-page-root .toast.show{
       transform: translateX(-50%) translateY(0);
       opacity: 1;
       pointer-events: auto;
