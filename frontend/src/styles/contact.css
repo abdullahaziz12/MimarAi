@@ -1,6 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
 
-    :root {
+    .contact-page-root {
       --bg-base: #090F1C;
       --bg-surface: #0E172B;
       --bg-surface-elevated: #15223D;
@@ -42,19 +42,9 @@
 
 .contact-page-root *,.contact-page-root *::before,.contact-page-root *::after{ box-sizing: border-box; }
 
-    html {
-      margin: 0;
-      padding: 0;
-      background: var(--bg-base);
-      color: var(--ink-primary);
-      font-family: var(--font-body);
-      font-size: 15px;
-      -webkit-font-smoothing: antialiased;
-      scroll-behavior: smooth;
-      overflow-x: hidden;
-    }
+    
 
-    body {
+    .contact-page-root {
       margin: 0;
       padding: 0;
       background: var(--bg-base);

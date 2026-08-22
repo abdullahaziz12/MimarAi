@@ -1,6 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Sans:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap');
 
-    :root {
+    .landing-page-root {
       --bg-base: #090F1C;
       --bg-surface: #0E172B;
       --bg-surface-elevated: #15223D;
@@ -41,19 +41,9 @@
     }
 
 .landing-page-root *,.landing-page-root *::before,.landing-page-root *::after{ box-sizing: border-box; }
-    html {
-      margin: 0;
-      padding: 0;
-      background: var(--bg-base);
-      color: var(--ink-primary);
-      font-family: var(--font-body);
-      font-size: 15px;
-      -webkit-font-smoothing: antialiased;
-      scroll-behavior: smooth;
-      overflow-x: hidden;
-    }
+    
 
-    body {
+    .landing-page-root {
       margin: 0;
       padding: 0;
       background: var(--bg-base);
@@ -395,7 +385,7 @@
       margin: 0 0 10px;
       color: var(--ink-primary);
     }
-.landing-page-root .flow-body{
+.landing-page-root .flow-.landing-page-root{
       font-size: 13.5px;
       color: var(--ink-secondary);
       line-height: 1.6;
@@ -437,7 +427,7 @@
       font-weight: 700;
       margin: 0 0 12px;
     }
-.landing-page-root .diff-body{
+.landing-page-root .diff-.landing-page-root{
       font-size: 14px;
       color: var(--ink-secondary);
       line-height: 1.65;
