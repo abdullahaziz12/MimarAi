@@ -5,7 +5,7 @@ import Link from "next/link";
 import "../../styles/contact.css";
 
 export default function ContactPage() {
-  const [topic, setTopic] = useState("General Inquiry");
+  const [selectedTopic, setSelectedTopic] = useState("General Inquiry");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
@@ -61,11 +61,10 @@ export default function ContactPage() {
   };
 
   const topics = [
-    { id: "general", label: "General Inquiry" },
-    { id: "bug", label: "Bug Report" },
-    { id: "feature", label: "Feature Request" },
-    { id: "mcp", label: "MCP Integration" },
-    { id: "enterprise", label: "Enterprise / Self-Host" },
+    "General Inquiry",
+    "Bug Report",
+    "Feature Suggestion",
+    "MCP / Architecture"
   ];
 
   return (
@@ -78,172 +77,214 @@ export default function ContactPage() {
       {/* Sticky Navbar */}
       <div className="nav-wrap">
         <header className="landing-nav">
-          <a href="/" className="brand-logo" title="MimarAi — Home">
-            <img src="/assets/mimarai-logo-hero.png" alt="MimarAi" className="brand-logo-img" />
+          <a href="/" className="brand-logo" title="MimarAi — The Blueprint Studio">
+            <img src="/assets/mimarai-logo-hero.png" alt="MimarAi Logo" className="brand-logo-img" />
           </a>
-          <nav className="nav-links">
-            <a href="/#pipeline">Architecture</a>
-            <a href="/#verification">Verification</a>
+          <div className="nav-links">
+            <a href="/#how-it-works">Workflow</a>
+            <a href="/#architecture">Architecture</a>
             <a href="/#mcp-server">MCP Server</a>
-            <a href="/#faq">FAQ</a>
-            <a href="/contact" style={{ color: 'var(--blueprint-cyan)' }}>Contact</a>
-          </nav>
-          <div className="header-actions">
-            <a href="/app" className="btn btn-primary" style={{ fontSize: '13px', padding: '10px 22px' }}>
-              Open Wizard →
-            </a>
+            <a href="/contact" className="active">Contact Us</a>
+            <Link href="/app" className="btn btn-primary">
+              Open Blueprint Wizard →
+            </Link>
           </div>
         </header>
       </div>
 
-      {/* Hero Section */}
-      <section className="contact-hero">
-        <div className="contact-hero-tag">SUPPORT &amp; INQUIRIES</div>
-        <h1>Get in Touch with the <span>MimarAi</span> Team</h1>
-        <p>Questions about the blueprint engine, custom agent integrations, or self-hosting? We respond to all developer inquiries within 24 hours.</p>
-      </section>
-
-      {/* Main Grid */}
-      <section className="contact-layout">
-        <div className="contact-card">
-          {!submitted ? (
-            <div id="contactFormSection">
-              <div className="form-head">
-                <h2>Send Us a Message</h2>
-                <p>Select a topic and fill out the details below.</p>
-              </div>
-
-              <form id="contactForm" onSubmit={handleSubmit} noValidate>
-                <div className="field-wrap">
-                  <label className="field-label">Topic of Inquiry</label>
-                  <div className="topic-grid" id="topicGrid">
-                    {topics.map((t) => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        className={`topic-btn ${topic === t.label ? "active" : ""}`}
-                        onClick={() => setTopic(t.label)}
-                      >
-                        {t.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className={`field-wrap ${errors.name ? "has-error" : ""}`} id="wrapName">
-                  <label className="field-label" htmlFor="senderName">Your Name <span className="req">*</span></label>
-                  <input
-                    type="text"
-                    id="senderName"
-                    name="name"
-                    placeholder="e.g. Alex Mercer"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    autoComplete="name"
-                  />
-                  <div className="field-error-msg">Please enter your name.</div>
-                </div>
-
-                <div className={`field-wrap ${errors.email ? "has-error" : ""}`} id="wrapEmail">
-                  <label className="field-label" htmlFor="senderEmail">Email Address <span className="req">*</span></label>
-                  <input
-                    type="email"
-                    id="senderEmail"
-                    name="email"
-                    placeholder="e.g. alex@example.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    autoComplete="email"
-                  />
-                  <div className="field-error-msg">Please provide a valid email address.</div>
-                </div>
-
-                <div className={`field-wrap ${errors.message ? "has-error" : ""}`} id="wrapMsg">
-                  <label className="field-label" htmlFor="senderMsg">Message <span className="req">*</span></label>
-                  <textarea
-                    id="senderMsg"
-                    name="message"
-                    rows={5}
-                    placeholder="Describe your question, integration challenge, or feature request..."
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                  ></textarea>
-                  <div className="field-error-msg">Please write a brief message.</div>
-                </div>
-
-                <div className="field-wrap">
-                  <button type="submit" className={`btn btn-primary btn-submit ${loading ? "loading" : ""}`} id="submitBtn">
-                    <span className="btn-label">{loading ? "Sending…" : "Submit Message →"}</span>
-                  </button>
-                </div>
-              </form>
-            </div>
-          ) : (
-            <div className="success-state" id="successState" style={{ display: 'block' }}>
-              <div className="success-icon">✓</div>
-              <h2>Message Received</h2>
-              <p>Thank you for reaching out. We have received your inquiry regarding <b>{topic}</b> and will follow up shortly at <b>{email}</b>.</p>
-              <button type="button" className="btn btn-secondary" onClick={handleReset}>
-                Send Another Message
-              </button>
-            </div>
-          )}
+      {/* Main Content */}
+      <main className="main-wrap">
+        <div className="contact-hero">
+          <div className="contact-tag">Feedback &amp; Support</div>
+          <h1>Contact the MimarAi Team</h1>
+          <p>
+            Have questions about the dual-model architecture pipeline, discovered a bug, or want to suggest an MCP integration? Send us a message.
+          </p>
         </div>
 
-        {/* Sidebar Info Cards */}
-        <aside className="contact-sidebar">
-          <div className="info-card">
-            <div className="info-card-label">DIRECT CHANNELS</div>
-            <div className="contact-item">
-              <div className="item-icon">💬</div>
-              <div className="item-body">
-                <div className="item-title">Community Discord</div>
-                <div className="item-sub">Connect with the development team and other blueprint builders.</div>
-                <a href="https://discord.gg" target="_blank" rel="noopener noreferrer" className="item-link">Join the Server ↗</a>
-              </div>
-            </div>
-            <div className="contact-item">
-              <div className="item-icon">🐙</div>
-              <div className="item-body">
-                <div className="item-title">GitHub Repository</div>
-                <div className="item-sub">Submit bug reports, feature requests, or explore the MCP specification.</div>
-                <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="item-link">View on GitHub ↗</a>
-              </div>
-            </div>
-          </div>
+        <div className="contact-layout">
+          {/* Form Card */}
+          <section className="contact-card">
+            {!submitted ? (
+              <div id="formSection">
+                <h2 className="card-title">Send a Message</h2>
+                <p className="card-sub">All fields are required. We review inquiries daily.</p>
 
-          <div className="info-card">
-            <div className="info-card-label">SYSTEM AVAILABILITY</div>
-            <div className="stat-grid">
-              <div className="stat-cell">
-                <div className="stat-val">99.9%</div>
-                <div className="stat-lbl">MCP Hub Uptime</div>
+                <form id="contactForm" onSubmit={handleSubmit} noValidate>
+                  {/* Topic Selector */}
+                  <div className="topic-group">
+                    <span className="topic-label">Inquiry Type</span>
+                    <div className="topic-pills">
+                      {topics.map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          className={`topic-btn ${selectedTopic === t ? "active" : ""}`}
+                          onClick={() => setSelectedTopic(t)}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Name and Email Row */}
+                  <div className="form-grid">
+                    <div className={`form-field ${errors.name ? "has-error" : ""}`} id="fieldWrapName">
+                      <label className="field-label" htmlFor="inputName">
+                        <span>Name<span className="req">*</span></span>
+                      </label>
+                      <input
+                        type="text"
+                        id="inputName"
+                        className="input-text"
+                        placeholder="Your name"
+                        value={name}
+                        onChange={(e) => {
+                          setName(e.target.value);
+                          if (errors.name && e.target.value.trim().length > 0) {
+                            setErrors((prev) => ({ ...prev, name: false }));
+                          }
+                        }}
+                        autoComplete="name"
+                      />
+                      <span className="error-hint">Please enter your name.</span>
+                    </div>
+
+                    <div className={`form-field ${errors.email ? "has-error" : ""}`} id="fieldWrapEmail">
+                      <label className="field-label" htmlFor="inputEmail">
+                        <span>Email<span className="req">*</span></span>
+                      </label>
+                      <input
+                        type="email"
+                        id="inputEmail"
+                        className="input-text"
+                        placeholder="you@company.com"
+                        value={email}
+                        onChange={(e) => {
+                          setEmail(e.target.value);
+                          if (errors.email && isValidEmail(e.target.value)) {
+                            setErrors((prev) => ({ ...prev, email: false }));
+                          }
+                        }}
+                        autoComplete="email"
+                      />
+                      <span className="error-hint">Please enter a valid email address.</span>
+                    </div>
+                  </div>
+
+                  {/* Message Area */}
+                  <div className={`form-field ${errors.message ? "has-error" : ""}`} id="fieldWrapMessage">
+                    <label className="field-label" htmlFor="inputMessage">
+                      <span>Message<span className="req">*</span></span>
+                    </label>
+                    <textarea
+                      id="inputMessage"
+                      className="input-area"
+                      placeholder="Write message or report bug or suggest new feature"
+                      value={message}
+                      onChange={(e) => {
+                        setMessage(e.target.value);
+                        if (errors.message && e.target.value.trim().length > 0) {
+                          setErrors((prev) => ({ ...prev, message: false }));
+                        }
+                      }}
+                    ></textarea>
+                    <span className="error-hint">Please enter your message before submitting.</span>
+                  </div>
+
+                  {/* Form Bottom */}
+                  <div className="form-bottom">
+                    <span style={{ fontSize: "12px", color: "var(--ink-muted)" }}>
+                      Directly routed to core developers
+                    </span>
+                    <button
+                      type="submit"
+                      className={`btn-submit ${loading ? "loading" : ""}`}
+                      id="submitBtn"
+                      disabled={loading}
+                    >
+                      <span className="spinner"></span>
+                      <span className="btn-label">
+                        {loading ? "Sending…" : "Submit Message →"}
+                      </span>
+                    </button>
+                  </div>
+                </form>
               </div>
-              <div className="stat-cell">
-                <div className="stat-val">&lt; 24h</div>
-                <div className="stat-lbl">Avg Response Time</div>
+            ) : (
+              /* Success Confirmation */
+              <div className="success-view" id="successView" style={{ display: "block" }}>
+                <div className="success-badge">✓</div>
+                <h2>Message Sent Successfully</h2>
+                <p>Thank you for reaching out. We have logged your submission and will get back to you shortly.</p>
+                <button type="button" className="btn-reset" id="btnReset" onClick={handleReset}>
+                  Send Another Message
+                </button>
+              </div>
+            )}
+          </section>
+
+          {/* Channels & Info Column */}
+          <aside className="channels-col">
+            <div className="channel-box">
+              <div className="channel-box-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 6v6l4 2" />
+                </svg>
+                <span>Response &amp; Channels</span>
+              </div>
+              <div className="channel-item">
+                <span className="channel-label">Email Support</span>
+                <span className="channel-val">support@mimar.ai</span>
+              </div>
+              <div className="channel-item">
+                <span className="channel-label">Response Time</span>
+                <span className="channel-val">&lt; 24 business hours</span>
+              </div>
+              <div className="channel-item">
+                <span className="channel-label">MCP Server Status</span>
+                <span className="channel-val online">● All Systems Operational</span>
               </div>
             </div>
-            <div className="stat-note">
-              <span className="status-live-dot"></span>
-              All dual-model generation pipelines operational.
+
+            <div className="channel-box">
+              <div className="channel-box-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />
+                </svg>
+                <span>Community &amp; Code</span>
+              </div>
+              <p style={{ fontSize: "13px", color: "var(--ink-secondary)", lineHeight: "1.55", margin: "0 0 12px" }}>
+                For public discussions, architectural RFCs, and bug reports, you can also open an issue on our GitHub repository.
+              </p>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: "12px", color: "var(--blueprint-cyan)" }}>
+                github.com/mimarai/studio
+              </span>
             </div>
-          </div>
-        </aside>
-      </section>
+          </aside>
+        </div>
+      </main>
 
       {/* Footer */}
-      <footer className="contact-footer">
-        <a href="/" className="brand-logo" title="MimarAi — Home">
-          <img src="/assets/mimarai-logo-hero.png" alt="MimarAi" style={{ height: '40px', width: 'auto' }} />
-        </a>
-        <div className="footer-meta">
+      <footer className="landing-footer">
+        <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+          <a href="/" title="MimarAi — The Blueprint Studio" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}>
+            <img src="/assets/mimarai-logo-hero.png" alt="MimarAi Logo" style={{ height: "46px", width: "auto", objectFit: "contain", borderRadius: "6px", display: "block" }} />
+          </a>
+        </div>
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--ink-secondary)", letterSpacing: ".06em" }}>
           RENDER + VERCEL + SUPABASE · $0 INFRASTRUCTURE GOAL
         </div>
       </footer>
 
       {/* Toast Notification */}
-      {toastMsg && <div className="toast show" id="toast">{toastMsg}</div>}
+      {toastMsg && (
+        <div className="toast show" id="toast">
+          {toastMsg}
+        </div>
+      )}
     </div>
   );
 }

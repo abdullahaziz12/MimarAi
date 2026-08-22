@@ -76,14 +76,15 @@ export default function ReviewCommentSheet({ stage }) {
                   <button
                     onClick={() => {
                       handleClose();
-                      // find element and scroll
                       const el = document.querySelector(`[data-id="${id}"]`);
                       if (el) {
                         el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                        const trigger = el.querySelector('.comment-trigger');
+                        if (trigger) trigger.click();
                       }
                     }}
                   >
-                    Locate
+                    Edit
                   </button>
                   <button
                     className="danger"
