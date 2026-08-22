@@ -1,9 +1,10 @@
 import os
-from typing import Optional
-from fastapi import FastAPI, HTTPException
+from typing import Optional, Dict, Any
+from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from dotenv import load_dotenv
+import jwt
 
 load_dotenv()
 
@@ -36,6 +37,7 @@ app.add_middleware(
 # Supabase Client Initialization (Lazy / resilient)
 supabase_url: Optional[str] = os.getenv("SUPABASE_URL")
 supabase_key: Optional[str] = os.getenv("SUPABASE_KEY")
+supabase_jwt_secret: Optional[str] = os.getenv("SUPABASE_JWT_SECRET")
 supabase_client = None
 
 def get_supabase():
@@ -56,7 +58,66 @@ def get_supabase():
     return None
 
 
-# --- Contact Form Schema ---
+# --- JWT Authentication Dependency ---
+async def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
+    """
+    Verifies the Supabase JWT token passed in Authorization: Bearer <token>.
+    Supports both local JWT Secret verification and Supabase Auth API verification.
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Missing or malformed Authorization header. Expected 'Bearer <token>'."
+        )
+
+    token = authorization.split(" ")[1].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication token cannot be empty.")
+
+    # 1. Try direct JWT decode if SUPABASE_JWT_SECRET is set
+    secret = os.getenv("SUPABASE_JWT_SECRET")
+    if secret:
+        try:
+            payload = jwt.decode(
+                token,
+                secret,
+                algorithms=["HS256"],
+                options={"verify_aud": False}
+            )
+            return {
+                "user_id": payload.get("sub"),
+                "email": payload.get("email"),
+                "role": payload.get("role"),
+                "user_metadata": payload.get("user_metadata", {})
+            }
+        except jwt.ExpiredSignatureError:
+            raise HTTPException(status_code=401, detail="Authentication token has expired.")
+        except jwt.InvalidTokenError as e:
+            raise HTTPException(status_code=401, detail=f"Invalid authentication token: {str(e)}")
+
+    # 2. Fallback to Supabase API auth check
+    client = get_supabase()
+    if client:
+        try:
+            user_response = client.auth.get_user(token)
+            if user_response and user_response.user:
+                u = user_response.user
+                return {
+                    "user_id": u.id,
+                    "email": u.email,
+                    "role": u.role,
+                    "user_metadata": u.user_metadata or {}
+                }
+        except Exception as e:
+            raise HTTPException(status_code=401, detail=f"Token verification failed: {str(e)}")
+
+    raise HTTPException(
+        status_code=401,
+        detail="Backend token verification unconfigured. SUPABASE_JWT_SECRET or valid client required."
+    )
+
+
+# --- Schemas ---
 class ContactMessage(BaseModel):
     name: str
     email: str
@@ -68,7 +129,7 @@ class ContactMessage(BaseModel):
 def read_root():
     return {
         "service": "MimarAi Backend API",
-        "version": "0.1.0 (V0 Foundations)",
+        "version": "0.1.0 (V1 Auth Security Foundations)",
         "status": "online"
     }
 
@@ -110,19 +171,29 @@ def health_db_check():
         }
 
 
+@app.get("/me")
+async def get_me(user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Authenticated user endpoint proving frontend-to-backend Auth handoff works end-to-end.
+    """
+    return {
+        "status": "authenticated",
+        "user_id": user.get("user_id"),
+        "email": user.get("email"),
+        "metadata": user.get("user_metadata", {})
+    }
+
+
 @app.post("/contact")
 async def submit_contact(msg: ContactMessage):
     """
     Receives contact form submissions and persists them to Supabase 'contact_messages' table.
-    Returns 200 on success; 503 if the database is not configured.
     """
     if not msg.name.strip() or not msg.email.strip() or not msg.message.strip():
         raise HTTPException(status_code=422, detail="Name, email, and message are required.")
 
     client = get_supabase()
     if not client:
-        # Graceful degradation: log server-side and return 200 so the UX is not broken
-        # when Supabase is temporarily unavailable. Swap for real email service in V1.
         print(f"[CONTACT] Supabase unavailable. Message from {msg.name} <{msg.email}>: {msg.message}")
         return {"status": "received", "message": "Your message has been received."}
 
@@ -135,7 +206,6 @@ async def submit_contact(msg: ContactMessage):
         }).execute()
         return {"status": "ok", "message": "Message received. We will get back to you shortly."}
     except Exception as e:
-        # Table may not exist yet — log and degrade gracefully
         print(f"[CONTACT] DB insert failed: {e}. Message from {msg.name}: {msg.message}")
         return {"status": "received", "message": "Your message has been received."}
 
