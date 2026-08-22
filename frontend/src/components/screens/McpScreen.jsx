@@ -43,11 +43,11 @@ export default function McpScreen() {
   const handleCopyAgentConfig = (agent) => {
     let snippet = '';
     if (agent === 'claude') {
-      snippet = `// CLAUDE.md\n{\n  "mcpServers": {\n    "mimarai": {\n      "url": "https://mimarai-backend.onrender.com/mcp",\n      "headers": { "Authorization": "Bearer ${mcpToken}" }\n    }\n  }\n}`;
+      snippet = `// CLAUDE.md\n{\n  "mcpServers": {\n    "mimarai": {\n      "url": "https://mimaraibackend-euj86d7p.b4a.run/mcp",\n      "headers": { "Authorization": "Bearer ${mcpToken}" }\n    }\n  }\n}`;
     } else if (agent === 'cursor') {
-      snippet = `// .cursorrules / mcp.json\n{\n  "mcpServers": {\n    "mimarai": {\n      "url": "https://mimarai-backend.onrender.com/mcp",\n      "token": "${mcpToken}"\n    }\n  }\n}`;
+      snippet = `// .cursorrules / mcp.json\n{\n  "mcpServers": {\n    "mimarai": {\n      "url": "https://mimaraibackend-euj86d7p.b4a.run/mcp",\n      "token": "${mcpToken}"\n    }\n  }\n}`;
     } else {
-      snippet = `// AGENTS.md\n{\n  "tools": ["get_implementation_plan", "check_drift"],\n  "server": "https://mimarai-backend.onrender.com/mcp",\n  "auth_token": "${mcpToken}"\n}`;
+      snippet = `// AGENTS.md\n{\n  "tools": ["get_implementation_plan", "check_drift"],\n  "server": "https://mimaraibackend-euj86d7p.b4a.run/mcp",\n  "auth_token": "${mcpToken}"\n}`;
     }
     navigator.clipboard?.writeText(snippet).catch(() => {});
     setCopiedAgent(agent);
@@ -142,7 +142,7 @@ export default function McpScreen() {
                 <span>MCP SERVER: ACTIVE &amp; READY</span>
               </div>
               <div className="mcp-status-url">
-                ENDPOINT: <code>https://mimarai-backend.onrender.com/mcp</code>
+                ENDPOINT: <code>https://mimaraibackend-euj86d7p.b4a.run/mcp</code>
               </div>
             </div>
 
