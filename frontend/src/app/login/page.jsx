@@ -22,6 +22,21 @@ function LoginFormContent() {
     }
   }, [user, authLoading, redirectTo, router]);
 
+  if (user) {
+    return (
+      <div className="auth-page-root">
+        <div className="auth-card" style={{ textAlign: 'center', padding: 36 }}>
+          <div style={{ color: 'var(--blueprint-cyan)', fontFamily: 'var(--font-mono)', fontSize: 13, marginBottom: 8 }}>
+            ✓ Authenticated successfully
+          </div>
+          <div style={{ color: 'var(--ink-secondary)', fontSize: 12 }}>
+            Entering Blueprint Wizard…
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Mode: 'login' | 'signup' | 'forgot' | 'unverified' | 'signup_success'
   const [mode, setMode] = useState('login');
 
@@ -144,10 +159,11 @@ function LoginFormContent() {
     setErrorBanner('');
     setSubmitting(true);
     try {
+      const redirectUri = `${window.location.origin}/login?redirectTo=/app`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/app`
+          redirectTo: redirectUri
         }
       });
       if (error) {
