@@ -11,7 +11,7 @@ import '../../styles/auth.css';
 function LoginFormContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectTo = searchParams?.get('redirectTo') || '/app';
+  const redirectTo = '/'; // Redirect target is always landing page '/'
 
   const { user, loading: authLoading } = useAuth();
 
@@ -24,18 +24,17 @@ function LoginFormContent() {
   const [errorBanner, setErrorBanner] = useState('');
   const [infoBanner, setInfoBanner] = useState('');
   const [resendCooldown, setResendCooldown] = useState(0);
-  const [toastPopup, setToastPopup] = useState(null); // { type: 'success' | 'error', message: string }
 
-  // Redirect to app/destination if already logged in
+  // Redirect to landing page immediately if logged in
   useEffect(() => {
     if (!authLoading && user) {
-      setToastPopup({ type: 'success', message: 'Login successful! Redirecting...' });
-      const timer = setTimeout(() => {
-        router.push(redirectTo);
-      }, 1200);
-      return () => clearTimeout(timer);
+      if (!sessionStorage.getItem("mimarai_toast")) {
+        const isGoogle = user.app_metadata?.provider === 'google';
+        sessionStorage.setItem("mimarai_toast", isGoogle ? "Signed in with Google" : "Login successful");
+      }
+      router.push('/');
     }
-  }, [user, authLoading, redirectTo, router]);
+  }, [user, authLoading, router]);
 
   useEffect(() => {
     let timer;
@@ -45,13 +44,17 @@ function LoginFormContent() {
     return () => clearInterval(timer);
   }, [resendCooldown]);
 
-  // Auto-dismiss toast after 3 seconds
-  useEffect(() => {
-    if (toastPopup) {
-      const t = setTimeout(() => setToastPopup(null), 3500);
-      return () => clearTimeout(t);
+  // Toast trigger helper (non-blocking)
+  const triggerToast = (msg) => {
+    const t = document.getElementById("toast");
+    if (t) {
+      t.textContent = msg;
+      t.classList.add("show");
+      setTimeout(() => {
+        t.classList.remove("show");
+      }, 3000);
     }
-  }, [toastPopup]);
+  };
 
   // Validation
   const pwdValidation = validatePasswordRules(password);
@@ -82,12 +85,15 @@ function LoginFormContent() {
           setMode('unverified');
         } else {
           setErrorBanner('Invalid email or password.');
+          triggerToast('Invalid email or password.');
         }
       } else if (data?.user) {
-        router.push(redirectTo);
+        sessionStorage.setItem("mimarai_toast", "Login successful");
+        router.push('/');
       }
     } catch (err) {
       setErrorBanner('Invalid email or password.');
+      triggerToast('Invalid email or password.');
     } finally {
       setSubmitting(false);
     }
@@ -107,18 +113,21 @@ function LoginFormContent() {
         email: email.trim(),
         password: password,
         options: {
-          emailRedirectTo: `${window.location.origin}/app`
+          emailRedirectTo: `${window.location.origin}/`
         }
       });
 
       if (error) {
         setErrorBanner(error.message || 'Could not complete registration. Please check your details.');
+        triggerToast(error.message || 'Could not complete registration. Please check your details.');
       } else {
         setMode('signup_success');
         setResendCooldown(60);
+        triggerToast('Account created. Please verify your email.');
       }
     } catch (err) {
       setErrorBanner('Could not complete registration. Please try again.');
+      triggerToast('Could not complete registration. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -153,7 +162,7 @@ function LoginFormContent() {
     setErrorBanner('');
     setSubmitting(true);
     try {
-      const redirectUri = `${window.location.origin}/login?redirectTo=/app`;
+      const redirectUri = `${window.location.origin}/login?redirectTo=/`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
@@ -161,12 +170,12 @@ function LoginFormContent() {
         }
       });
       if (error) {
-        setToastPopup({ type: 'error', message: 'Google Sign-In failed. Please try again.' });
+        triggerToast(error.message || 'Google Sign-In failed.');
         setErrorBanner(error.message || 'Google Sign-In failed.');
         setSubmitting(false);
       }
     } catch (err) {
-      setToastPopup({ type: 'error', message: 'Google Sign-In failed. Please try again.' });
+      triggerToast('Google Sign-In failed.');
       setErrorBanner('Google Sign-In failed.');
       setSubmitting(false);
     }
@@ -180,7 +189,7 @@ function LoginFormContent() {
         type: 'signup',
         email: email.trim(),
         options: {
-          emailRedirectTo: `${window.location.origin}/app`
+          emailRedirectTo: `${window.location.origin}/`
         }
       });
       setInfoBanner('Verification email resent. Please check your inbox.');
@@ -192,51 +201,13 @@ function LoginFormContent() {
     }
   };
 
-  // Authenticated user: show success card (AFTER all hooks)
+  // Authenticated user: immediately return null (handled by useEffect redirect to '/')
   if (user) {
-    return (
-      <div className="auth-page-root">
-        {toastPopup && (
-          <div style={{
-            position: 'fixed', top: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 9999,
-            padding: '14px 28px', borderRadius: 8,
-            background: toastPopup.type === 'success' ? 'var(--bg-surface-elevated)' : 'var(--danger-red-dim, rgba(239,68,68,0.15))',
-            border: `1px solid ${toastPopup.type === 'success' ? 'var(--success-green)' : 'var(--danger-red)'}`,
-            color: toastPopup.type === 'success' ? 'var(--success-green)' : '#FCA5A5',
-            fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600,
-            boxShadow: '0 8px 32px rgba(0,0,0,0.5)', animation: 'fadeInDown 0.3s ease'
-          }}>
-            {toastPopup.type === 'success' ? '\u2713' : '\u2717'} {toastPopup.message}
-          </div>
-        )}
-        <div className="auth-card" style={{ textAlign: 'center', padding: 36 }}>
-          <div style={{ color: 'var(--blueprint-cyan)', fontFamily: 'var(--font-mono)', fontSize: 13, marginBottom: 8 }}>
-            Login successful!
-          </div>
-          <div style={{ color: 'var(--ink-secondary)', fontSize: 12 }}>
-            Entering Blueprint Wizard...
-          </div>
-        </div>
-      </div>
-    );
+    return null;
   }
 
   return (
     <div className="auth-page-root">
-      {/* Toast Popup */}
-      {toastPopup && (
-        <div style={{
-          position: 'fixed', top: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 9999,
-          padding: '14px 28px', borderRadius: 8,
-          background: toastPopup.type === 'success' ? 'var(--bg-surface-elevated)' : 'var(--danger-red-dim, rgba(239,68,68,0.15))',
-          border: `1px solid ${toastPopup.type === 'success' ? 'var(--success-green)' : 'var(--danger-red)'}`,
-          color: toastPopup.type === 'success' ? 'var(--success-green)' : '#FCA5A5',
-          fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600,
-          boxShadow: '0 8px 32px rgba(0,0,0,0.5)', animation: 'fadeInDown 0.3s ease'
-        }}>
-          {toastPopup.type === 'success' ? '\u2713' : '\u2717'} {toastPopup.message}
-        </div>
-      )}
       {/* Brand Header */}
       <Link href="/" className="auth-header-brand" title="MimarAi Home">
         <img src="/assets/mimarai-logo-hero.png" alt="MimarAi Emblem" className="auth-header-logo" />
@@ -601,6 +572,8 @@ function LoginFormContent() {
           </div>
         )}
       </div>
+      {/* Toast Notification */}
+      <div className="toast" id="toast"></div>
     </div>
   );
 }
