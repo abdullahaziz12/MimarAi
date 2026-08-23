@@ -47,17 +47,30 @@ export default function ContactPage() {
     }
 
     setLoading(true);
+    const payload = {
+      name: name.trim(),
+      email: email.trim(),
+      topic: selectedTopic,
+      message: message.trim(),
+    };
+
     try {
-      const res = await fetch("https://mimaraibackend-euj86d7p.b4a.run/contact", {
+      // 1. Try Vercel Serverless API Route first (/api/contact)
+      let res = await fetch("/api/contact", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(),
-          email: email.trim(),
-          topic: selectedTopic,
-          message: message.trim(),
-        }),
+        body: JSON.stringify(payload),
       });
+
+      // 2. Fallback to external backend container if /api/contact fails
+      if (!res.ok) {
+        res = await fetch("https://mimaraibackend-euj86d7p.b4a.run/contact", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      }
+
       if (!res.ok) throw new Error("Server error");
       setSubmitted(true);
       showToast("Message sent successfully.");
