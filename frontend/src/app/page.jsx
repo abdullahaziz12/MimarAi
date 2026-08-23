@@ -12,10 +12,24 @@ export default function LandingPage() {
   const router = useRouter();
   const { user } = useAuth();
 
+  const [drafts, setDrafts] = React.useState([]);
+
   useEffect(() => {
     document.body.style.overflow = "auto";
     document.body.style.height = "auto";
     document.documentElement.style.overflow = "auto";
+
+    if (user) {
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://mimaraibackend-euj86d7p.b4a.run';
+      fetch(`${backendUrl}/api/projects/drafts`)
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.drafts) {
+            setDrafts(data.drafts);
+          }
+        })
+        .catch(err => console.warn("Failed to load draft projects:", err));
+    }
 
     try {
       const msg = sessionStorage.getItem("mimarai_toast");
@@ -31,7 +45,7 @@ export default function LandingPage() {
         }
       }
     } catch (e) {}
-  }, []);
+  }, [user]);
 
   const handleCtaClick = (e) => {
     if (!user) {
@@ -109,6 +123,53 @@ export default function LandingPage() {
               Explore the 6-Step Flow
             </a>
           </div>
+
+          {/* Phase 9: Continue Draft Projects */}
+          {user && drafts.length > 0 && (
+            <div style={{
+              marginTop: '20px',
+              padding: '14px',
+              borderRadius: '8px',
+              background: 'rgba(15, 23, 42, 0.8)',
+              border: '1px solid rgba(56, 189, 248, 0.25)',
+              maxWidth: '520px'
+            }}>
+              <div style={{ fontSize: '11px', fontWeight: '700', color: '#38BDF8', fontFamily: 'var(--font-mono, monospace)', marginBottom: '8px' }}>
+                📁 CONTINUE PENDING DRAFT PROJECT
+              </div>
+              {drafts.slice(0, 3).map((draft) => (
+                <div
+                  key={draft.id}
+                  onClick={() => {
+                    import('../store/mimarStore').then(({ useMimarStore }) => {
+                      const store = useMimarStore.getState();
+                      store.setProjectId(draft.id);
+                      if (draft.idea_text) store.setIdeaText(draft.idea_text);
+                      if (draft.step0_state) store.setStep0State(draft.step0_state);
+                      if (draft.fixed_inputs) store.setFixedInputs(draft.fixed_inputs);
+                      router.push('/app');
+                    });
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    background: 'rgba(30, 41, 59, 0.6)',
+                    border: '1px solid rgba(148, 163, 184, 0.2)',
+                    marginBottom: '6px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <span style={{ fontSize: '12px', color: '#E2E8F0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '340px' }}>
+                    {draft.idea_text || draft.title || "Untitled Draft Project"}
+                  </span>
+                  <span style={{ fontSize: '11px', color: '#38BDF8', fontWeight: '600' }}>Resume →</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="hero-proof">
             <div className="proof-item">

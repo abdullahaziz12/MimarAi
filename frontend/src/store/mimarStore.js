@@ -111,6 +111,24 @@ const initialMimarState = {
   mcpRateLimit: 30,
   driftReportRan: false,
 
+  // V2 Step 0 State
+  projectId: null,
+  ideaText: '',
+  step0State: {
+    round_count: 0,
+    off_topic_streak: 0,
+    last_label: null,
+    last_sub_case: null,
+    extracted_name: null
+  },
+  step0Status: 'idle', // 'idle' | 'classifying' | 'ready' | 'vague_fallback' | 'off_topic_fallback' | 'error'
+  fixedInputs: {
+    stack: null,
+    database: null,
+    deployment: null,
+    apis: null
+  },
+
   // Chat message history
   messages: [
     {
@@ -227,6 +245,112 @@ export const useMimarStore = create((set, get) => ({
   setManuallyAmended: (amended) => {
     set({ manuallyAmended: amended });
     get().saveProjectState();
+  },
+
+  setProjectId: (id) => { set({ projectId: id }); get().saveProjectState(); },
+  setIdeaText: (text) => { set({ ideaText: text }); get().saveProjectState(); },
+  setStep0Status: (status) => { set({ step0Status: status }); get().saveProjectState(); },
+  setStep0State: (newState) => {
+    set(state => ({ step0State: { ...state.step0State, ...newState } }));
+    get().saveProjectState();
+  },
+  setFixedInputs: (inputs) => {
+    set(state => ({
+      fixedInputs: typeof inputs === 'function' ? inputs(state.fixedInputs) : { ...state.fixedInputs, ...inputs }
+    }));
+    get().saveProjectState();
+  },
+  resetStep0: () => {
+    set({
+      step0Status: 'idle',
+      step0State: { round_count: 0, off_topic_streak: 0, last_label: null, last_sub_case: null, extracted_name: null }
+    });
+    get().saveProjectState();
+  },
+
+  classifyIdeaStep0: async (userText, sessionToken = null) => {
+    const s = get();
+    if (!userText || !userText.trim()) return null;
+    
+    const text = userText.trim();
+    if (text.length > 2000) {
+      s.showToast("Idea description exceeds 2,000 characters limit.");
+      return { status: "error", code: "TOO_LONG", detail: "Exceeds 2,000 characters limit." };
+    }
+
+    s.setOperationRunning(true, 'CLASSIFYING IDEA (STEP 0)');
+    const controller = new AbortController();
+    set({ activeController: controller });
+    const signal = controller.signal;
+
+    let currentProjectId = s.projectId;
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://mimaraibackend-euj86d7p.b4a.run';
+    const authHeaders = {
+      'Content-Type': 'application/json',
+      ...(sessionToken ? { 'Authorization': `Bearer ${sessionToken}` } : {})
+    };
+
+    if (!currentProjectId) {
+      try {
+        const draftRes = await fetch(`${backendUrl}/api/projects/draft`, {
+          method: 'POST',
+          headers: authHeaders,
+          body: JSON.stringify({ idea_text: text }),
+          signal
+        });
+        if (draftRes.ok) {
+          const draftData = await draftRes.json();
+          if (draftData && draftData.id) {
+            currentProjectId = draftData.id;
+            set({ projectId: currentProjectId });
+          }
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          s.showToast("Classification cancelled.");
+          get().setOperationRunning(false);
+          set({ activeController: null });
+          return null;
+        }
+        console.warn("Draft creation fallback:", err);
+      }
+    }
+
+    try {
+      const res = await fetch(`${backendUrl}/api/interview/classify`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          idea_text: text,
+          project_id: currentProjectId,
+          step0_state: s.step0State
+        }),
+        signal
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        const detail = errData.detail || "Classification service unavailable.";
+        if (res.status === 429) {
+          s.showToast("Hourly limit exceeded for idea submissions.");
+          return { status: "error", code: "RATE_LIMIT", detail };
+        }
+        return { status: "error", code: "HTTP_ERROR", detail };
+      }
+
+      const result = await res.json();
+      return result;
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        s.showToast("Classification stopped by user.");
+        return null;
+      }
+      return { status: "error", code: "NETWORK_ERROR", detail: "Network error — classification failed." };
+    } finally {
+      get().setOperationRunning(false);
+      set({ activeController: null });
+      get().saveProjectState();
+    }
   },
 
   // Pipeline runner: runIdeaPipeline
@@ -473,6 +597,11 @@ export const useMimarStore = create((set, get) => ({
         mcpRateLimit: s.mcpRateLimit,
         // NOTE: mcpToken is intentionally NOT persisted — it is re-generated on mount
         driftReportRan: s.driftReportRan,
+        projectId: s.projectId,
+        ideaText: s.ideaText,
+        step0State: s.step0State,
+        step0Status: s.step0Status,
+        fixedInputs: s.fixedInputs,
         messages: s.messages,
         timestamp: Date.now()
       };

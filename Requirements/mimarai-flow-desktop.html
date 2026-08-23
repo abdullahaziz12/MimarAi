@@ -1,0 +1,1681 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MimarAi — Interview ⇄ Plan ⇄ Structure ⇄ Diagram (Desktop Preview)</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+  :root{
+    --bg-base:#0F1B2D; --bg-surface:#142339; --bg-surface-elevated:#1B2C47;
+    --ink-primary:#EDEAE0; --ink-secondary:#A0B3C6; --ink-muted:#6B859E;
+    --border-line:rgba(92,138,166,0.35); --border-line-strong:#5C8AA6; --border-hairline:rgba(92,138,166,0.2);
+    --accent-orange:#E8592E; --accent-orange-bg:rgba(232,89,46,0.12); --accent-orange-border:rgba(232,89,46,0.4);
+    --blueprint-cyan:#5C8AA6; --blueprint-cyan-bg:rgba(92,138,166,0.12);
+    --success-green:#5B7B6B; --success-green-bg:rgba(91,123,107,0.15); --success-green-border:rgba(91,123,107,0.4);
+    --grid-line:rgba(92,138,166,0.08); --radius:3px;
+    --font-display:'IBM Plex Sans', -apple-system, sans-serif;
+    --font-body:'Inter', -apple-system, sans-serif;
+    --font-mono:'IBM Plex Mono', monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%; margin:0;}
+  body{
+    background:var(--bg-base); color:var(--ink-primary); font-family:var(--font-body); font-size:14px;
+    background-image:linear-gradient(var(--grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size:24px 24px;
+  }
+  .preview-tag{
+    position:fixed; top:8px; left:50%; transform:translateX(-50%); font-family:var(--font-mono); font-size:10px;
+    letter-spacing:.08em; text-transform:uppercase; color:var(--ink-muted); background:#080D18;
+    border:1px solid var(--border-hairline); padding:3px 10px; border-radius:4px; z-index:200;
+  }
+  ::-webkit-scrollbar{width:7px; height:7px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  ::-webkit-scrollbar-thumb{background:var(--blueprint-cyan); border-radius:0;}
+
+  /* ============ APP SHELL ============ */
+  .app-shell{height:100vh; display:flex; flex-direction:column;}
+
+  .app-header{
+    height:60px; flex:0 0 auto; background:var(--bg-surface); border-bottom:1px solid var(--border-line);
+    display:flex; align-items:center; justify-content:space-between; padding:0 24px; gap:24px;
+  }
+  .brand-section{display:flex; align-items:center; gap:12px; flex:0 0 auto;}
+  .brand-logo{display:flex; align-items:center; gap:8px; font-family:var(--font-display); font-weight:700; font-size:16px; letter-spacing:-.01em;}
+  .brand-icon{width:22px;height:22px; border:1.5px solid var(--blueprint-cyan); display:grid; place-items:center; background:var(--blueprint-cyan-bg);}
+  .brand-icon::after{content:''; width:7px;height:7px; background:var(--accent-orange);}
+  .brand-badge{font-family:var(--font-mono); font-size:10px; padding:2px 6px; background:var(--bg-surface-elevated); border:1px solid var(--border-line); color:var(--ink-secondary);}
+  .header-title{font-family:var(--font-mono); font-size:11.5px; color:var(--ink-secondary); border-left:1px solid var(--border-line); padding-left:16px; white-space:nowrap;}
+  .header-title b{color:var(--accent-orange); font-weight:600;}
+
+  .global-stage-rail{display:flex; align-items:center; gap:6px; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; flex:1 1 auto; justify-content:center;}
+  .gstage{color:var(--ink-muted); display:flex; align-items:center; gap:6px; padding:4px 2px;}
+  .gstage.done{color:var(--success-green);}
+  .gstage.active{color:var(--accent-orange); font-weight:600;}
+  .gstage-dot{width:6px;height:6px;border-radius:50%; background:currentColor; flex:0 0 auto;}
+  .gstage-sep{width:26px; height:1px; background:var(--border-line);}
+
+  .header-actions{display:flex; align-items:center; gap:10px; flex:0 0 auto;}
+
+  .app-main{flex:1 1 auto; position:relative; overflow:hidden;}
+  .screen{position:absolute; inset:0; overflow-y:auto; transition:transform .32s cubic-bezier(.4,0,.2,1), opacity .28s ease;}
+
+  .app-footer{
+    height:26px; flex:0 0 auto; background:var(--bg-surface); border-top:1px solid var(--border-line);
+    display:flex; align-items:center; justify-content:space-between; padding:0 16px; font-family:var(--font-mono); font-size:10px; color:var(--ink-muted);
+  }
+  .hud-item{display:flex; align-items:center; gap:6px;}
+  .hud-dot{width:6px;height:6px;border-radius:50%; background:var(--success-green);}
+
+  /* ============ BUTTONS ============ */
+  .btn{font-family:var(--font-mono); font-size:12px; font-weight:600; padding:8px 15px; border:1px solid transparent; border-radius:var(--radius); cursor:pointer; display:inline-flex; align-items:center; gap:8px; transition:all .15s ease; white-space:nowrap;}
+  .btn-primary{background:var(--accent-orange); color:#fff; border-color:var(--accent-orange);}
+  .btn-primary:hover{background:#D44419; border-color:#D44419;}
+  .btn-secondary{background:var(--bg-surface-elevated); color:var(--ink-primary); border-color:var(--border-line-strong);}
+  .btn-secondary:hover{border-color:var(--ink-primary);}
+  .btn-outline{background:transparent; color:var(--blueprint-cyan); border-color:var(--blueprint-cyan);}
+  .btn-outline:hover{background:var(--blueprint-cyan-bg);}
+  .btn-outline.active{background:var(--accent-orange-bg); border-color:var(--accent-orange); color:var(--accent-orange);}
+  .btn[disabled]{opacity:.5; pointer-events:none;}
+  .btn .badge-ct{background:var(--accent-orange); color:#fff; font-weight:700; font-size:10px; padding:1px 5px; border-radius:2px;}
+
+  /* ============ SCREEN TOOLBAR (per view) ============ */
+  .toolbar{display:flex; align-items:center; justify-content:space-between; padding:20px 40px; border-bottom:1px solid var(--border-line); background:var(--bg-surface); gap:20px;}
+  .toolbar .label{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--blueprint-cyan); margin-bottom:4px;}
+  .toolbar h2{font-family:var(--font-display); font-size:19px; font-weight:700; margin:0;}
+  .toolbar .sub{font-family:var(--font-mono); font-size:11px; color:var(--ink-muted); margin-top:3px;}
+  .toolbar-actions{display:flex; gap:10px; flex:0 0 auto;}
+
+  .screen-body{max-width:900px; margin:0 auto; padding:32px 40px 80px;}
+
+  /* ============ INTERVIEW SCREEN ============ */
+  .interview-shell{display:grid; grid-template-columns:1fr 360px; gap:24px; padding:28px 40px; height:calc(100% - 60px); min-height:600px;}
+  .chat-engine{background:var(--bg-surface); border:1px solid var(--border-line); border-radius:var(--radius); display:flex; flex-direction:column; overflow:hidden;}
+  .chat-eng-head{padding:12px 18px; background:var(--bg-surface-elevated); border-bottom:1px solid var(--border-line); display:flex; align-items:center; justify-content:space-between;}
+  .chat-eng-head .l{display:flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:12px; font-weight:600;}
+  .hud-dot-live{width:6px;height:6px;border-radius:50%; background:var(--accent-orange); animation:pulse 1.3s ease-in-out infinite;}
+  @keyframes pulse{0%,100%{opacity:1;} 50%{opacity:.35;}}
+  .messages{flex:1 1 auto; overflow-y:auto; padding:24px 22px; display:flex; flex-direction:column; gap:16px;}
+  .row{display:flex; width:100%; animation:riseIn .22s ease both;}
+  @keyframes riseIn{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);}}
+  .row.ai{justify-content:flex-start;} .row.user{justify-content:flex-end;}
+  .bubble{max-width:78%; padding:12px 15px; font-size:14px; line-height:1.55; border-radius:6px; border:1px solid transparent;}
+  .bubble.ai{background:var(--bg-base); border-color:var(--border-line); border-bottom-left-radius:2px;}
+  .bubble.user{background:var(--blueprint-cyan-bg); border-color:var(--blueprint-cyan); border-bottom-right-radius:2px;}
+  .eyebrow{font-family:var(--font-mono); font-size:10px; color:var(--ink-muted); letter-spacing:.06em; text-transform:uppercase; margin:2px 2px 6px;}
+  .status-row{display:flex; align-items:center; gap:9px; padding:9px 13px; min-height:20px; background:var(--bg-base); border:1px solid var(--border-line); border-radius:6px;}
+  .status-dot{width:6px;height:6px;border-radius:50%; background:var(--accent-orange); animation:pulse 1.1s ease-in-out infinite;}
+  .status-text{font-family:var(--font-mono); font-size:12px; color:var(--ink-secondary); transition:opacity .18s ease;}
+  .status-text.stopped{color:var(--ink-muted);}
+  .inputbar{flex:0 0 auto; padding:14px 18px; border-top:1px solid var(--border-line); background:var(--bg-surface-elevated);}
+  .input-shell{display:flex; align-items:flex-end; gap:10px; background:var(--bg-base); border:1px solid var(--border-line); border-radius:var(--radius); padding:8px 8px 8px 16px;}
+  .input-shell:focus-within{border-color:var(--accent-orange);}
+  .input-shell.locked{opacity:.55;}
+  textarea{flex:1 1 auto; resize:none; border:none; outline:none; background:transparent; color:var(--ink-primary); font-family:var(--font-body); font-size:14.5px; line-height:1.4; max-height:140px; padding:6px 0;}
+  textarea::placeholder{color:var(--ink-muted);}
+  .send-btn{flex:0 0 auto; width:36px; height:36px; border-radius:50%; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; background:var(--ink-muted);}
+  .send-btn.ready{background:var(--accent-orange);}
+  .send-btn.stop{background:var(--ink-primary);}
+  .send-btn svg{width:16px;height:16px; display:block;}
+  .icon-arrow{color:#fff;} .icon-stop{color:var(--bg-base);}
+  .hint{text-align:center; font-family:var(--font-mono); font-size:10.5px; color:var(--ink-muted); margin-top:9px; letter-spacing:.02em;}
+
+  .side-panel{background:var(--bg-surface); border:1px solid var(--border-line); border-radius:var(--radius); padding:18px; overflow-y:auto;}
+  .side-panel .label{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--blueprint-cyan); margin-bottom:10px;}
+  .pipe-item{display:flex; align-items:flex-start; gap:10px; padding:11px 0; border-bottom:1px dashed var(--border-line);}
+  .pipe-item:last-child{border-bottom:none;}
+  .pipe-num{width:20px; height:20px; flex:0 0 auto; border:1px solid var(--border-line-strong); display:flex; align-items:center; justify-content:center; font-family:var(--font-mono); font-size:10px; color:var(--ink-secondary);}
+  .pipe-item .t{font-size:12.5px; font-weight:600; color:var(--ink-primary);}
+  .pipe-item .d{font-size:11.5px; color:var(--ink-secondary); margin-top:2px; line-height:1.4;}
+
+  /* ============ DOCUMENT SCREENS (plan / structure / diagram-json / final) ============ */
+  .doc-title{font-family:var(--font-mono); font-size:19px; font-weight:700; margin:2px 0 6px; letter-spacing:-.01em;}
+  .doc-sub{font-size:13px; color:var(--ink-secondary); line-height:1.5; margin-bottom:20px;}
+  .section-label{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--accent-orange); margin:26px 0 12px; display:flex; align-items:center; gap:8px;}
+  .section-label::after{content:""; flex:1; height:1px; background:var(--border-line);}
+  .section-label:first-of-type{margin-top:4px;}
+  .block{position:relative; padding:11px 34px 11px 14px; margin:0 -14px; border-radius:var(--radius); font-size:14.5px; line-height:1.55; color:var(--ink-primary); transition:background .15s ease;}
+  .block.commented{background:var(--accent-orange-bg); box-shadow:inset 2px 0 0 var(--accent-orange-border);}
+  .block:hover, .block.active{background:var(--bg-surface);}
+  .feature-row{display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;}
+  .feature-name{font-weight:600;}
+  .ai-tag{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.04em; text-transform:uppercase; color:var(--accent-orange); background:var(--accent-orange-bg); border:1px solid var(--accent-orange-border); padding:1px 5px; border-radius:2px;}
+  .kv{color:var(--ink-secondary);} .kv b{color:var(--ink-primary); font-weight:600;}
+
+  .tree{font-family:var(--font-mono); font-size:12.5px;}
+  .folder-row{display:flex; align-items:center; gap:8px; padding:9px 8px; border-radius:var(--radius); cursor:pointer; user-select:none;}
+  .folder-row:hover{background:var(--bg-surface);}
+  .folder-row .chev{width:12px;height:12px; color:var(--ink-muted); flex:0 0 auto; transition:transform .15s ease;}
+  .folder-row.open .chev{transform:rotate(90deg);}
+  .folder-row .folder-icon{width:14px;height:14px; color:var(--ink-secondary); flex:0 0 auto;}
+  .folder-row .fname{color:var(--ink-primary); font-weight:600;}
+  .folder-row .fcount{color:var(--ink-muted); font-size:11px; margin-left:auto;}
+  .file-group{max-height:0; overflow:hidden; transition:max-height .22s ease;}
+  .file-group.open{max-height:800px;}
+  .file-row{position:relative; display:flex; align-items:flex-start; gap:9px; padding:9px 9px 9px 34px; margin:0 -8px; border-radius:var(--radius); transition:background .15s ease;}
+  .file-row::before{content:""; position:absolute; left:18px; top:0; bottom:0; width:1px; background:var(--border-line);}
+  .file-row.commented{background:var(--accent-orange-bg); box-shadow:inset 2px 0 0 var(--accent-orange-border);}
+  .file-row.new-file{animation:flashIn .9s ease both;}
+  @keyframes flashIn{0%{background:rgba(91,123,107,0.28);} 100%{background:transparent;}}
+  .file-row:hover, .file-row.active{background:var(--bg-surface);}
+  .file-icon{width:13px;height:13px; color:var(--ink-muted); flex:0 0 auto; margin-top:2px;}
+  .file-main{flex:1 1 auto; min-width:0;}
+  .file-path{color:var(--ink-primary); font-size:12.5px;}
+  .file-path .dim{color:var(--ink-muted);}
+  .file-tags{display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; font-family:var(--font-body);}
+  .feature-tag{font-size:10.5px; color:var(--ink-secondary); background:var(--bg-surface-elevated); border:1px solid var(--border-line); padding:2px 6px; border-radius:2px;}
+  .flag-tag{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.03em; text-transform:uppercase; color:var(--accent-orange); background:var(--accent-orange-bg); border:1px solid var(--accent-orange-border); padding:2px 6px; border-radius:2px;}
+
+  .comment-trigger{position:absolute; top:10px; right:6px; width:24px; height:24px; border-radius:2px; display:flex; align-items:center; justify-content:center; color:var(--ink-muted); background:transparent; opacity:0; transform:translateX(4px); transition:opacity .15s ease, transform .15s ease, color .15s ease, background .15s ease; cursor:pointer;}
+  .file-row .comment-trigger{top:8px; right:4px;}
+  .block.commented .comment-trigger, .file-row.commented .comment-trigger{opacity:1; transform:translateX(0); color:var(--accent-orange);}
+  .block.active .comment-trigger, .file-row.active .comment-trigger{opacity:1; transform:translateX(0);}
+  .comment-trigger svg{width:14px;height:14px;}
+  .comment-trigger:hover{background:var(--bg-surface-elevated);}
+  .block:hover .comment-trigger, .file-row:hover .comment-trigger{opacity:1; transform:translateX(0);}
+
+  .callout{margin-top:26px; padding:14px; background:var(--bg-surface); border:1px solid var(--border-line); border-radius:var(--radius); display:flex; gap:11px;}
+  .callout svg{width:16px;height:16px; color:var(--ink-muted); flex:0 0 auto; margin-top:1px;}
+  .callout p{margin:0; font-size:12.5px; color:var(--ink-secondary); line-height:1.5;}
+  .callout b{color:var(--ink-primary);}
+
+  /* Schema / architecture review cards */
+  .table-card{position:relative; background:var(--bg-surface); border:1px solid var(--border-line); border-radius:var(--radius); margin-bottom:12px; overflow:hidden; transition:background .15s ease, border-color .15s ease; cursor:pointer;}
+  .table-card:hover, .table-card.active{border-color:var(--border-line-strong);}
+  .table-card.commented{background:var(--accent-orange-bg); border-color:var(--accent-orange-border);}
+  .table-head{display:flex; align-items:center; gap:9px; padding:11px 38px 11px 13px; border-bottom:1px solid var(--border-line);}
+  .table-head svg.tbl-icon{width:14px;height:14px; color:var(--ink-muted); flex:0 0 auto;}
+  .table-name{font-family:var(--font-mono); font-size:12.5px; font-weight:600; color:var(--ink-primary);}
+  .table-rowcount{font-size:10.5px; color:var(--ink-muted); margin-left:auto; margin-right:4px; font-family:var(--font-mono);}
+  .col-list{padding:4px 13px 10px; display:grid; grid-template-columns:1fr 1fr; gap:0 20px;}
+  .col-row{display:flex; align-items:center; gap:9px; padding:5px 2px; font-family:var(--font-mono); font-size:11.5px;}
+  .col-name{color:var(--ink-primary);}
+  .col-type{color:var(--ink-muted);}
+  .col-flag{font-size:9px; letter-spacing:.03em; text-transform:uppercase; padding:1px 5px; border-radius:2px; margin-left:auto;}
+  .col-flag.pk{color:var(--accent-orange); background:var(--accent-orange-bg); border:1px solid var(--accent-orange-border);}
+  .col-flag.fk{color:var(--ink-secondary); background:var(--bg-surface-elevated); border:1px solid var(--border-line);}
+  .table-card .comment-trigger{top:8px; right:8px; background:var(--bg-surface-elevated);}
+
+  .service-grid{display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;}
+  .service-card{position:relative; display:flex; flex-direction:column; gap:8px; background:var(--bg-surface); border:1px solid var(--border-line); border-radius:var(--radius); padding:14px 34px 14px 14px; transition:background .15s ease, border-color .15s ease; cursor:pointer;}
+  .service-card:hover, .service-card.active{border-color:var(--border-line-strong);}
+  .service-card.commented{background:var(--accent-orange-bg); border-color:var(--accent-orange-border);}
+  .svc-icon{width:17px;height:17px; color:var(--blueprint-cyan); flex:0 0 auto;}
+  .svc-name{font-family:var(--font-mono); font-size:12.5px; font-weight:600; color:var(--ink-primary);}
+  .svc-desc{font-size:12px; color:var(--ink-secondary); line-height:1.45;}
+  .svc-tags{display:flex; flex-wrap:wrap; gap:5px; margin-top:2px;}
+  .proto-tag{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.02em; color:var(--ink-secondary); background:var(--bg-surface-elevated); border:1px solid var(--border-line); padding:2px 6px; border-radius:2px;}
+  .table-card.commented .comment-trigger, .service-card.commented .comment-trigger{opacity:1; transform:translateX(0); color:var(--accent-orange);}
+  .table-card.active .comment-trigger, .service-card.active .comment-trigger{opacity:1; transform:translateX(0);}
+  .table-card:hover .comment-trigger, .service-card:hover .comment-trigger{opacity:1; transform:translateX(0);}
+
+  /* Composer popover */
+  .composer{margin:8px 0 6px; padding:12px; background:var(--bg-surface-elevated); border:1px solid var(--border-line); border-radius:var(--radius); animation:slideDown .16s ease both;}
+  @keyframes slideDown{from{opacity:0; transform:translateY(-4px);} to{opacity:1; transform:translateY(0);}}
+  .composer textarea{width:100%; resize:none; border:none; outline:none; background:transparent; color:var(--ink-primary); font-family:var(--font-body); font-size:13.5px; line-height:1.4; min-height:44px; padding:2px 2px 8px;}
+  .composer textarea::placeholder{color:var(--ink-muted);}
+  .composer-actions{display:flex; justify-content:flex-end; gap:8px; align-items:center;}
+  .composer-actions .ghost-btn{font-size:12.5px; color:var(--ink-secondary); background:none; border:none; cursor:pointer; padding:6px 8px;}
+  .composer-actions .solid-btn{font-size:12.5px; font-weight:600; color:#fff; background:var(--accent-orange); border:none; border-radius:2px; padding:7px 13px; cursor:pointer;}
+  .composer-actions .danger-btn{font-size:12.5px; color:var(--accent-orange); background:none; border:none; cursor:pointer; padding:6px 4px;}
+
+  /* ============ REVIEW DRAWER (right side, desktop) ============ */
+  .sheet-backdrop{position:absolute; inset:0; background:rgba(6,11,20,.55); opacity:0; pointer-events:none; transition:opacity .2s ease; z-index:15;}
+  .sheet-backdrop.open{opacity:1; pointer-events:auto;}
+  .sheet{position:absolute; top:0; right:0; bottom:0; width:420px; z-index:16; background:var(--bg-surface); border-left:1px solid var(--border-line); display:flex; flex-direction:column; transform:translateX(100%); transition:transform .28s cubic-bezier(.4,0,.2,1); box-shadow:-12px 0 32px rgba(0,0,0,.35);}
+  .sheet.open{transform:translateX(0);}
+  .sheet-head{padding:18px 20px 14px; border-bottom:1px solid var(--border-line);}
+  .sheet-head .title{font-size:16px; font-weight:700; font-family:var(--font-display);}
+  .sheet-head .sub{font-family:var(--font-mono); font-size:11px; color:var(--accent-orange); margin-top:3px; letter-spacing:.04em;}
+  .sheet-msg{padding:14px 20px; border-bottom:1px solid var(--border-line);}
+  .sheet-msg textarea{width:100%; background:var(--bg-surface-elevated); border:1px solid var(--border-line); border-radius:var(--radius); color:var(--ink-primary); font-family:var(--font-body); font-size:13.5px; padding:10px 11px; resize:none; min-height:42px;}
+  .sheet-msg textarea::placeholder{color:var(--ink-muted);}
+  .sheet-list{flex:1 1 auto; overflow-y:auto; padding:8px 20px 14px;}
+  .comment-card{padding:12px 0; border-bottom:1px solid var(--border-line);}
+  .comment-card:last-child{border-bottom:none;}
+  .comment-quote{font-size:12px; color:var(--ink-muted); font-style:italic; border-left:2px solid var(--border-line); padding-left:9px; margin-bottom:7px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;}
+  .comment-body{font-size:13.5px; color:var(--ink-primary); line-height:1.45;}
+  .comment-row-actions{display:flex; justify-content:flex-end; gap:14px; margin-top:8px;}
+  .comment-row-actions button{background:none; border:none; font-size:11.5px; color:var(--ink-secondary); cursor:pointer; padding:2px;}
+  .comment-row-actions button.danger{color:var(--accent-orange);}
+  .comment-row-actions button:hover{color:var(--ink-primary);}
+  .empty-state{padding:40px 10px; text-align:center; color:var(--ink-muted); font-size:13px; line-height:1.5;}
+  .sheet-footer{padding:16px 20px; border-top:1px solid var(--border-line); display:flex; gap:10px;}
+  .sheet-footer .cancel{flex:0 0 auto; background:none; border:1px solid var(--border-line); color:var(--ink-secondary); font-size:13px; padding:11px 16px; border-radius:var(--radius); cursor:pointer;}
+  .sheet-footer .submit{flex:1 1 auto; background:var(--accent-orange); color:#fff; border:none; font-weight:700; font-size:13.5px; padding:11px 14px; border-radius:var(--radius); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;}
+  .sheet-footer .submit[disabled]{opacity:.45; pointer-events:none;}
+
+  .toast{position:fixed; left:50%; transform:translateX(-50%) translateY(120%); bottom:44px; z-index:220; background:var(--bg-surface-elevated); border:1px solid var(--border-line); border-left:3px solid var(--accent-orange); border-radius:var(--radius); padding:13px 18px; font-size:13px; color:var(--ink-primary); opacity:0; transition:transform .25s ease, opacity .25s ease;}
+  .toast.show{transform:translateX(-50%) translateY(0); opacity:1;}
+
+  /* ============ RENDERED DIAGRAMS SCREEN (real blueprint SVG renderer) ============ */
+  .diagram-toolbar{display:flex; align-items:center; justify-content:space-between; padding:16px 40px; border-bottom:1px solid var(--border-line); background:var(--bg-surface); gap:20px;}
+  .toggle-row{display:flex; gap:8px;}
+  .toggle-btn{display:flex; align-items:center; gap:7px; font-family:var(--font-mono); font-size:11.5px; font-weight:500; letter-spacing:.02em; text-transform:uppercase; padding:9px 14px; border-radius:var(--radius); border:1px solid var(--border-line); background:var(--bg-base); color:var(--ink-secondary); cursor:pointer; transition:all .15s ease;}
+  .toggle-btn svg{width:14px;height:14px; flex:0 0 auto;}
+  .toggle-btn.active{background:var(--accent-orange-bg); border-color:var(--accent-orange-border); color:var(--accent-orange);}
+
+  .canvas-wrap{padding:28px 40px 0; display:flex; flex-direction:column;}
+  .canvas-label{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;}
+  .canvas-label .title{font-size:14px; font-weight:600; font-family:var(--font-display);}
+  .canvas-label .sub{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-muted);}
+  .canvas-box{height:560px; background:#080D18; border:1px solid var(--border-line); border-radius:var(--radius); overflow:hidden; position:relative;}
+  .canvas-box::before{content:''; position:absolute; top:-1px; left:-1px; width:8px; height:8px; border-top:2px solid var(--blueprint-cyan); border-left:2px solid var(--blueprint-cyan); z-index:2;}
+  .canvas-box::after{content:''; position:absolute; bottom:-1px; right:-1px; width:8px; height:8px; border-bottom:2px solid var(--blueprint-cyan); border-right:2px solid var(--blueprint-cyan); z-index:2;}
+  .diagram-pane{width:100%; height:100%; display:none; align-items:center; justify-content:center; animation:fadeDiagram .22s ease both;}
+  .diagram-pane.active{display:flex;}
+  @keyframes fadeDiagram{from{opacity:0; transform:scale(.98);} to{opacity:1; transform:scale(1);}}
+  .canvas-box svg{width:100%; height:100%; display:block;}
+  .canvas-footer{display:flex; align-items:center; justify-content:space-between; padding:12px 2px 0; font-family:var(--font-mono); font-size:10.5px; color:var(--ink-muted);}
+  .amended-note{display:flex; align-items:center; gap:6px; color:var(--accent-orange);}
+  .amended-note .amended-dot{width:5px;height:5px;border-radius:50%; background:var(--accent-orange);}
+
+  .ask-ai-btn{position:absolute; right:40px; bottom:36px; z-index:10; display:flex; align-items:center; gap:9px; background:var(--accent-orange); color:#fff; border:none; font-family:var(--font-mono); font-weight:700; font-size:12.5px; letter-spacing:.02em; text-transform:uppercase; padding:13px 20px; border-radius:26px; box-shadow:0 8px 22px rgba(232,89,46,0.35); cursor:pointer;}
+  .ask-ai-btn svg{width:16px;height:16px;}
+  .ask-ai-btn:hover{opacity:.9;}
+
+  .accept-row{display:flex; justify-content:center; padding:24px 40px 40px;}
+  .accept-row .btn{min-width:280px; justify-content:center; padding:12px 20px; font-size:13px;}
+
+  /* Ask AI slide panel — right drawer */
+  .ask-sheet{position:absolute; top:0; right:0; bottom:0; width:420px; z-index:17; background:var(--bg-surface); border-left:1px solid var(--border-line); display:flex; flex-direction:column; transform:translateX(100%); transition:transform .3s cubic-bezier(.4,0,.2,1); box-shadow:-12px 0 32px rgba(0,0,0,.35);}
+  .ask-sheet.open{transform:translateX(0);}
+  .ask-head{display:flex; align-items:center; justify-content:space-between; padding:14px 20px 14px; border-bottom:1px solid var(--border-line);}
+  .ask-head .title{font-size:15px; font-weight:700; font-family:var(--font-display);}
+  .ask-head .sub{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-muted); margin-top:2px;}
+  .ask-close{width:20px;height:20px; color:var(--ink-secondary); cursor:pointer;}
+  .ask-close:hover{color:var(--ink-primary);}
+  .ask-messages{flex:1 1 auto; overflow-y:auto; padding:18px 20px; display:flex; flex-direction:column; gap:14px;}
+  .arow{display:flex; width:100%; animation:riseIn .2s ease both;}
+  .arow.ai{justify-content:flex-start;} .arow.user{justify-content:flex-end;}
+  .abubble{max-width:88%; padding:11px 13px; font-size:13.5px; line-height:1.48; border-radius:10px;}
+  .abubble.ai{background:var(--bg-surface-elevated); border:1px solid var(--border-line); border-radius:10px 10px 10px 2px; color:var(--ink-primary);}
+  .abubble.user{background:var(--accent-orange); color:#fff; border-radius:10px 10px 2px 10px; font-weight:500;}
+  .classify-tag{display:inline-flex; align-items:center; gap:5px; margin-top:8px; font-family:var(--font-mono); font-size:9.5px; letter-spacing:.03em; text-transform:uppercase; padding:3px 7px; border-radius:2px;}
+  .classify-tag.cosmetic{color:var(--success-green); background:var(--success-green-bg); border:1px solid var(--success-green-border);}
+  .classify-tag.structural{color:var(--accent-orange); background:var(--accent-orange-bg); border:1px solid var(--accent-orange-border);}
+  .confirm-row{display:flex; gap:8px; margin-top:10px;}
+  .confirm-row button{font-family:var(--font-mono); font-size:11px; font-weight:600; letter-spacing:.02em; padding:8px 11px; border-radius:2px; cursor:pointer; text-transform:uppercase;}
+  .confirm-row .force-btn{background:var(--accent-orange); color:#fff; border:none;}
+  .confirm-row .cancel-btn{background:none; color:var(--ink-secondary); border:1px solid var(--border-line);}
+  .ask-inputbar{flex:0 0 auto; padding:14px 20px; border-top:1px solid var(--border-line);}
+  .ask-input-shell{display:flex; align-items:flex-end; gap:8px; background:var(--bg-surface-elevated); border:1px solid var(--border-line); border-radius:var(--radius); padding:7px 7px 7px 15px;}
+  .ask-input-shell:focus-within{border-color:var(--accent-orange);}
+  .ask-input-shell textarea{flex:1 1 auto; resize:none; border:none; outline:none; background:transparent; color:var(--ink-primary); font-family:var(--font-body); font-size:13.5px; line-height:1.4; max-height:100px; padding:8px 0;}
+  .ask-send{flex:0 0 auto; width:34px;height:34px; border-radius:50%; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; background:var(--ink-muted);}
+  .ask-send.ready{background:var(--accent-orange);}
+  .ask-send svg{width:15px;height:15px; color:#fff;}
+
+  /* ============ FINAL SCREEN ============ */
+  .json-summary{background:var(--bg-base); border:1px solid var(--border-line); border-radius:var(--radius); padding:12px 14px; font-family:var(--font-mono); font-size:11.5px; color:var(--ink-secondary); line-height:1.6; margin-top:8px;}
+  .json-summary .jk{color:var(--blueprint-cyan);}
+
+  /* ============ PLACEHOLDER: SENT TO AGENT ============ */
+  .placeholder-screen{position:absolute; inset:0; background:var(--bg-base); z-index:30; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:30px; opacity:0; pointer-events:none; transition:opacity .25s ease;}
+  .placeholder-screen.show{opacity:1; pointer-events:auto;}
+  .placeholder-screen .tag{font-family:var(--font-mono); font-size:11px; color:var(--accent-orange); letter-spacing:.08em; text-transform:uppercase; margin-bottom:12px;}
+  .placeholder-screen h2{font-size:22px; margin:0 0 10px; font-family:var(--font-display);}
+  .placeholder-screen p{font-size:14px; color:var(--ink-secondary); line-height:1.5; max-width:380px;}
+  .placeholder-screen .glyph{width:48px;height:48px; color:var(--ink-muted); margin-bottom:20px;}
+
+  @media (max-width:1100px){
+    .interview-shell{grid-template-columns:1fr; height:auto;}
+    .service-grid{grid-template-columns:1fr 1fr;}
+    .col-list{grid-template-columns:1fr;}
+  }
+</style>
+</head>
+<body>
+
+<span class="preview-tag">Desktop preview — not wired to backend</span>
+
+<div class="app-shell" id="appShell">
+
+  <!-- ============ GLOBAL APP HEADER ============ -->
+  <header class="app-header">
+    <div class="brand-section">
+      <div class="brand-logo"><div class="brand-icon"></div><span>MIMAR AI</span></div>
+      <span class="brand-badge">BLUEPRINT WIZARD</span>
+      <span class="header-title" id="headerTitle">STEP 01 · <b id="headerTitleStep">IDEA</b></span>
+    </div>
+    <div class="global-stage-rail" id="globalStageRail">
+      <span class="gstage" data-stage="features"><span class="gstage-dot"></span>Features</span>
+      <span class="gstage-sep"></span><span class="gstage" data-stage="structure"><span class="gstage-dot"></span>Structure</span>
+      <span class="gstage-sep"></span><span class="gstage" data-stage="diagram"><span class="gstage-dot"></span>Diagram</span>
+      <span class="gstage-sep"></span><span class="gstage" data-stage="final"><span class="gstage-dot"></span>Final</span>
+    </div>
+    <div class="header-actions" id="headerActions"></div>
+  </header>
+
+  <!-- ============ MAIN WORKSPACE ============ -->
+  <main class="app-main" id="appMain">
+
+    <!-- ============ SCREEN 1: INTERVIEW ============ -->
+    <div class="screen" id="screen-interview">
+      <div class="interview-shell">
+        <div class="chat-engine">
+          <div class="chat-eng-head">
+            <div class="l"><div class="hud-dot-live"></div>MIMAR ARCHITECT LINTER ENGINE</div>
+            <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--ink-muted); text-transform:uppercase; letter-spacing:.05em;">Session: Active</span>
+          </div>
+          <div class="messages" id="messages">
+            <div class="row ai"><div><div class="eyebrow">MimarAi</div><div class="bubble ai">What are you building? Tell me your idea, and any features you already know you want.</div></div></div>
+          </div>
+          <div class="inputbar">
+            <div class="input-shell" id="inputShell">
+              <textarea id="composer" rows="1" placeholder="Describe your idea…"></textarea>
+              <button class="send-btn" id="sendBtn" aria-label="Send">
+                <svg class="icon-arrow" id="btnIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
+              </button>
+            </div>
+            <div class="hint" id="inputHint">MIMAR DRAFTS WITH TWO MODELS IN PARALLEL BEFORE SHOWING YOU ANYTHING</div>
+          </div>
+        </div>
+
+        <div class="side-panel">
+          <div class="label">Pipeline</div>
+          <div class="pipe-item"><div class="pipe-num">01</div><div><div class="t">Dual-model draft</div><div class="d">Two models independently draft a feature plan from your idea.</div></div></div>
+          <div class="pipe-item"><div class="pipe-num">02</div><div><div class="t">Cross-check</div><div class="d">Outputs are diffed to catch missed or contradictory features.</div></div></div>
+          <div class="pipe-item"><div class="pipe-num">03</div><div><div class="t">Structure</div><div class="d">The accepted plan is mapped to a real file &amp; folder layout.</div></div></div>
+          <div class="pipe-item"><div class="pipe-num">04</div><div><div class="t">Schema &amp; architecture</div><div class="d">Database tables and services are drafted as reviewable JSON.</div></div></div>
+          <div class="pipe-item"><div class="pipe-num">05</div><div><div class="t">Deterministic render</div><div class="d">A CAD-style renderer — not the AI — draws the final ERD &amp; architecture diagrams.</div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ SCREEN 2: IMPLEMENTATION PLAN ============ -->
+    <div class="screen" id="screen-plan">
+      <div class="toolbar">
+        <div>
+          <div class="label">Step 02 · Review</div>
+          <h2>Implementation Plan</h2>
+          <div class="sub">GENERATED MOMENTS AGO</div>
+        </div>
+        <div class="toolbar-actions">
+          <button class="btn btn-secondary" id="reviewBtnPlan"><span>Review</span><span class="badge-ct" id="reviewBadgePlan" style="display:none;">0</span></button>
+          <button class="btn btn-primary" id="acceptBtnPlan">Accept Plan →</button>
+        </div>
+      </div>
+
+      <div class="screen-body" id="docContentPlan">
+        <div class="doc-title">MimarAi — "The Blueprint Studio"</div>
+        <div class="section-label">Idea &amp; Objective</div>
+        <div class="block" data-id="idea">A precision-engineering web app that acts as an AI architect for developers and students — it removes "vibe-coding blind" by running an idea through a dual-model pipeline before a single line of code is written.<div class="comment-trigger" data-icon></div></div>
+        <div class="section-label">Fixed Inputs</div>
+        <div class="block" data-id="stack"><span class="kv">Tech stack — <b>Next.js + FastAPI + SQLAlchemy</b></span><div class="comment-trigger" data-icon></div></div>
+        <div class="block" data-id="db"><span class="kv">Database — <b>Supabase (PostgreSQL)</b></span><div class="comment-trigger" data-icon></div></div>
+        <div class="block" data-id="deploy"><span class="kv">Deployment — <b>Vercel + Render</b></span><div class="comment-trigger" data-icon></div></div>
+        <div class="section-label">Features</div>
+        <div class="block" data-id="f1"><div class="feature-row"><span class="feature-name">Role-Based Access Control</span></div><span class="kv">Admins, loan officers, and auditors each get scoped permissions.</span><div class="comment-trigger" data-icon></div></div>
+        <div class="block" data-id="f2"><div class="feature-row"><span class="feature-name">Loan &amp; Interest Management</span></div><span class="kv">Create, approve, and track loans with configurable interest rules.</span><div class="comment-trigger" data-icon></div></div>
+        <div class="block" data-id="f3"><div class="feature-row"><span class="feature-name">Audit Logging</span><span class="ai-tag">AI-added</span></div><span class="kv">Every approval and rate change is recorded with actor and timestamp.</span><div class="comment-trigger" data-icon></div></div>
+        <div class="block" data-id="f4"><div class="feature-row"><span class="feature-name">Automated Interest Recalculation</span><span class="ai-tag">AI-added</span></div><span class="kv">Recalculates outstanding balances nightly against the rate table.</span><div class="comment-trigger" data-icon></div></div>
+      </div>
+
+      <div class="sheet-backdrop" id="sheetBackdropPlan"></div>
+      <div class="sheet" id="reviewSheetPlan">
+        <div class="sheet-head"><div class="title">Review comments</div><div class="sub" id="sheetSubPlan">0 COMMENTS PENDING</div></div>
+        <div class="sheet-msg"><textarea placeholder="Add an optional message, then submit comments"></textarea></div>
+        <div class="sheet-list" id="sheetListPlan"></div>
+        <div class="sheet-footer"><button class="cancel" id="sheetCancelPlan">Cancel</button><button class="submit" id="sheetSubmitPlan" disabled>Submit comments</button></div>
+      </div>
+    </div>
+
+    <!-- ============ SCREEN 3: PROJECT STRUCTURE ============ -->
+    <div class="screen" id="screen-structure">
+      <div class="toolbar">
+        <div>
+          <div class="label">Step 03 · Review</div>
+          <h2>Project Structure</h2>
+          <div class="sub" id="structMeta">4 FILES · 3 FEATURES MAPPED</div>
+        </div>
+        <div class="toolbar-actions">
+          <button class="btn btn-secondary" id="reviewBtnStruct"><span>Review</span><span class="badge-ct" id="reviewBadgeStruct" style="display:none;">0</span></button>
+          <button class="btn btn-primary" id="acceptBtnStruct">Accept Structure →</button>
+        </div>
+      </div>
+
+      <div class="screen-body" id="docStruct">
+        <div class="doc-title">File &amp; Folder Structure</div>
+        <div class="doc-sub">Generated from your accepted feature list, following FastAPI's standard routes / models / schemas layout. Click any file to comment on it.</div>
+
+        <div class="section-label">src/</div>
+        <div class="tree" id="tree">
+          <div class="folder-row open" data-target="g-routes">
+            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18l6-6-6-6"/></svg>
+            <svg class="folder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+            <span class="fname">routes/</span><span class="fcount" id="routesCount">2 files</span>
+          </div>
+          <div class="file-group open" id="g-routes">
+            <div class="file-row" data-id="f-loan-route" data-path="src/routes/loan.py">
+              <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+              <div class="file-main"><div class="file-path">loan<span class="dim">.py</span></div><div class="file-tags"><span class="feature-tag">Loan &amp; Interest Management</span></div></div>
+              <div class="comment-trigger" data-icon></div>
+            </div>
+            <div class="file-row" data-id="f-auth-route" data-path="src/routes/auth.py">
+              <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+              <div class="file-main"><div class="file-path">auth<span class="dim">.py</span></div>
+                <div class="file-tags" id="authTags"><span class="feature-tag">Role-Based Access Control</span><span class="flag-tag" id="authFlag">Adjusted — Please Review</span></div>
+              </div>
+              <div class="comment-trigger" data-icon></div>
+            </div>
+          </div>
+
+          <div class="folder-row open" data-target="g-models">
+            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18l6-6-6-6"/></svg>
+            <svg class="folder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+            <span class="fname">models/</span><span class="fcount" id="modelsCount">2 files</span>
+          </div>
+          <div class="file-group open" id="g-models">
+            <div class="file-row" data-id="f-loan-model" data-path="src/models/loan.py">
+              <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+              <div class="file-main"><div class="file-path">loan<span class="dim">.py</span></div><div class="file-tags"><span class="feature-tag">Loan &amp; Interest Management</span></div></div>
+              <div class="comment-trigger" data-icon></div>
+            </div>
+            <div class="file-row" data-id="f-audit-model" data-path="src/models/audit_log.py">
+              <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+              <div class="file-main"><div class="file-path">audit_log<span class="dim">.py</span></div><div class="file-tags"><span class="feature-tag">Audit Logging</span><span class="ai-tag">AI-added</span></div></div>
+              <div class="comment-trigger" data-icon></div>
+            </div>
+            <!-- new files land here after a revision -->
+          </div>
+        </div>
+
+        <div class="callout">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+          <p>This tree is the readable view of the underlying JSON map. That JSON is what the <b>V4 drift-checker</b> uses later to confirm your codebase still matches this plan.</p>
+        </div>
+      </div>
+
+      <div class="sheet-backdrop" id="sheetBackdropStruct"></div>
+      <div class="sheet" id="reviewSheetStruct">
+        <div class="sheet-head"><div class="title">Review comments</div><div class="sub" id="sheetSubStruct">0 COMMENTS PENDING</div></div>
+        <div class="sheet-msg"><textarea placeholder="Add an optional message, then submit comments"></textarea></div>
+        <div class="sheet-list" id="sheetListStruct"></div>
+        <div class="sheet-footer"><button class="cancel" id="sheetCancelStruct">Cancel</button><button class="submit" id="sheetSubmitStruct" disabled>Submit comments</button></div>
+      </div>
+    </div>
+
+    <!-- ============ SCREEN 4: SCHEMA & ARCHITECTURE JSON ============ -->
+    <div class="screen" id="screen-diagram">
+      <div class="toolbar">
+        <div>
+          <div class="label">Step 04 · Review</div>
+          <h2>Schema &amp; Architecture</h2>
+          <div class="sub">3 TABLES · 3 SERVICES</div>
+        </div>
+        <div class="toolbar-actions">
+          <button class="btn btn-secondary" id="reviewBtnDiagram"><span>Review</span><span class="badge-ct" id="reviewBadgeDiagram" style="display:none;">0</span></button>
+          <button class="btn btn-primary" id="acceptBtnDiagram">Accept &amp; Render →</button>
+        </div>
+      </div>
+
+      <div class="screen-body" style="max-width:1040px;" id="docDiagram">
+        <div class="doc-title">Database Schema &amp; Architecture</div>
+        <div class="doc-sub">Drafted from your locked features, structure, and fixed inputs. This is the clean JSON before anything gets rendered — comment on anything before diagrams are drawn.</div>
+
+        <div class="section-label">Database Schema</div>
+
+        <div class="table-card" data-id="t-users">
+          <div class="table-head">
+            <svg class="tbl-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>
+            <span class="table-name">users</span>
+            <span class="table-rowcount">4 cols</span>
+          </div>
+          <div class="col-list">
+            <div class="col-row"><span class="col-name">id</span><span class="col-type">uuid</span><span class="col-flag pk">PK</span></div>
+            <div class="col-row"><span class="col-name">email</span><span class="col-type">text, unique</span></div>
+            <div class="col-row"><span class="col-name">role</span><span class="col-type">enum(admin, officer, auditor)</span></div>
+            <div class="col-row"><span class="col-name">created_at</span><span class="col-type">timestamptz</span></div>
+          </div>
+          <div class="comment-trigger" data-icon></div>
+        </div>
+
+        <div class="table-card" data-id="t-loans">
+          <div class="table-head">
+            <svg class="tbl-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>
+            <span class="table-name">loans</span>
+            <span class="table-rowcount">5 cols</span>
+          </div>
+          <div class="col-list">
+            <div class="col-row"><span class="col-name">id</span><span class="col-type">uuid</span><span class="col-flag pk">PK</span></div>
+            <div class="col-row"><span class="col-name">borrower_id</span><span class="col-type">uuid → users.id</span><span class="col-flag fk">FK</span></div>
+            <div class="col-row"><span class="col-name">principal</span><span class="col-type">numeric(12,2)</span></div>
+            <div class="col-row"><span class="col-name">interest_rate</span><span class="col-type">numeric(5,2)</span></div>
+            <div class="col-row"><span class="col-name">status</span><span class="col-type">enum(pending, approved, closed)</span></div>
+          </div>
+          <div class="comment-trigger" data-icon></div>
+        </div>
+
+        <div class="table-card" data-id="t-audit">
+          <div class="table-head">
+            <svg class="tbl-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>
+            <span class="table-name">audit_logs</span>
+            <span class="table-rowcount">4 cols</span>
+          </div>
+          <div class="col-list">
+            <div class="col-row"><span class="col-name">id</span><span class="col-type">uuid</span><span class="col-flag pk">PK</span></div>
+            <div class="col-row"><span class="col-name">actor_id</span><span class="col-type">uuid → users.id</span><span class="col-flag fk">FK</span></div>
+            <div class="col-row"><span class="col-name">action</span><span class="col-type">text</span></div>
+            <div class="col-row"><span class="col-name">occurred_at</span><span class="col-type">timestamptz</span></div>
+          </div>
+          <div class="comment-trigger" data-icon></div>
+        </div>
+
+        <div class="section-label">System Architecture</div>
+
+        <div class="service-grid">
+          <div class="service-card" data-id="s-gateway">
+            <svg class="svc-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg>
+            <div class="svc-main">
+              <div class="svc-name">API Gateway</div>
+              <div class="svc-desc">Routes incoming requests to Auth and Loan services; handles rate limiting.</div>
+              <div class="svc-tags"><span class="proto-tag">HTTPS</span><span class="proto-tag">Next.js edge</span></div>
+            </div>
+            <div class="comment-trigger" data-icon></div>
+          </div>
+
+          <div class="service-card" data-id="s-auth">
+            <svg class="svc-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+            <div class="svc-main">
+              <div class="svc-name">Auth Service</div>
+              <div class="svc-desc">Issues and validates session tokens; enforces role-based access control.</div>
+              <div class="svc-tags"><span class="proto-tag">HTTPS</span><span class="proto-tag">FastAPI</span></div>
+            </div>
+            <div class="comment-trigger" data-icon></div>
+          </div>
+
+          <div class="service-card" data-id="s-loan">
+            <svg class="svc-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg>
+            <div class="svc-main">
+              <div class="svc-name">Loan Service</div>
+              <div class="svc-desc">Handles loan creation, approval, and nightly interest recalculation.</div>
+              <div class="svc-tags"><span class="proto-tag">HTTPS</span><span class="proto-tag">FastAPI</span><span class="proto-tag">Cron</span></div>
+            </div>
+            <div class="comment-trigger" data-icon></div>
+          </div>
+        </div>
+
+        <div class="callout">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+          <p>Nothing is drawn yet. Once you accept, this JSON is handed to a deterministic renderer to produce the <b>Database ERD</b> and <b>System Architecture</b> diagrams — the AI never draws them directly.</p>
+        </div>
+      </div>
+
+      <div class="sheet-backdrop" id="sheetBackdropDiagram"></div>
+      <div class="sheet" id="reviewSheetDiagram">
+        <div class="sheet-head"><div class="title">Review comments</div><div class="sub" id="sheetSubDiagram">0 COMMENTS PENDING</div></div>
+        <div class="sheet-msg"><textarea placeholder="Add an optional message, then submit comments"></textarea></div>
+        <div class="sheet-list" id="sheetListDiagram"></div>
+        <div class="sheet-footer"><button class="cancel" id="sheetCancelDiagram">Cancel</button><button class="submit" id="sheetSubmitDiagram" disabled>Submit comments</button></div>
+      </div>
+    </div>
+
+    <!-- ============ SCREEN 5: RENDERED DIAGRAMS (ERD + ARCHITECTURE, real blueprint renderer) ============ -->
+    <div class="screen" id="screen-render" style="overflow:hidden;">
+      <div class="diagram-toolbar">
+        <div>
+          <div class="label" style="margin-bottom:2px;">Step 05 · Deterministic Renderer</div>
+          <span style="font-family:var(--font-mono); font-size:13px; font-weight:600;">Rendered Diagrams — DATABASE ERD · SYSTEM ARCHITECTURE</span>
+        </div>
+        <div style="display:flex; gap:20px; align-items:center;">
+          <div class="toggle-row">
+            <button class="toggle-btn active" id="btnArch" data-target="arch">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="8" y="14" width="7" height="7" rx="1"/><path d="M6.5 10v3a1 1 0 0 0 1 1H10M17.5 10v3a1 1 0 0 0-1 1h-2.5"/></svg>
+              System Diagram
+            </button>
+            <button class="toggle-btn" id="btnErd" data-target="erd">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>
+              Database ERD
+            </button>
+          </div>
+          <button class="btn btn-secondary" id="reviewBtnRenderStub" style="display:none;"></button>
+        </div>
+      </div>
+
+      <div class="canvas-wrap" style="max-width:1120px; margin:0 auto; width:100%;">
+        <div class="canvas-label">
+          <span class="title" id="canvasTitle">System Architecture</span>
+          <span class="sub" id="canvasSub">3 SERVICES</span>
+        </div>
+        <div class="canvas-box" id="canvasBox">
+          <div class="diagram-pane active" id="paneArch"></div>
+          <div class="diagram-pane" id="paneErd"></div>
+        </div>
+        <div class="canvas-footer">
+          <span>Rendered by deterministic engine · not AI-drawn</span>
+          <span class="amended-note" id="amendedNote" style="display:none;"><span class="amended-dot"></span>Manually Amended</span>
+        </div>
+      </div>
+
+      <button class="ask-ai-btn" id="askAiBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a5 5 0 0 0-5 5v3.2c0 .5-.16 1-.46 1.4L5 15v1h14v-1l-1.54-2.4a2.3 2.3 0 0 1-.46-1.4V8a5 5 0 0 0-5-5z"/><path d="M9.5 19a2.5 2.5 0 0 0 5 0"/></svg>
+        Ask AI
+      </button>
+
+      <div class="accept-row">
+        <button class="btn btn-primary" id="acceptBtnRender">Accept the Diagram →</button>
+      </div>
+
+      <!-- Ask AI slide panel -->
+      <div class="sheet-backdrop" id="sheetBackdropAsk"></div>
+      <div class="ask-sheet" id="askSheet">
+        <div class="ask-head">
+          <div>
+            <div class="title">Talk to AI</div>
+            <div class="sub">Editing: <span id="askTarget">System Architecture</span></div>
+          </div>
+          <svg class="ask-close" id="askClose" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </div>
+        <div class="ask-messages" id="askMessages">
+          <div class="arow ai">
+            <div>
+              <div class="eyebrow">MimarAi</div>
+              <div class="abubble ai">Describe a change in plain language — I'll classify it as cosmetic or structural before applying anything.</div>
+            </div>
+          </div>
+        </div>
+        <div class="ask-inputbar">
+          <div class="ask-input-shell">
+            <textarea id="askComposer" rows="1" placeholder="e.g. rename the users table to accounts"></textarea>
+            <button class="ask-send" id="askSend" aria-label="Send">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ SCREEN 6: FINAL IMPLEMENTATION PLAN ============ -->
+    <div class="screen" id="screen-final">
+      <div class="toolbar">
+        <div>
+          <div class="label">Step 06 · Final Review</div>
+          <h2>Implementation Plan</h2>
+          <div class="sub">FEATURES · STRUCTURE · DIAGRAM — ALL LOCKED</div>
+        </div>
+        <div class="toolbar-actions">
+          <button class="btn btn-secondary" id="reviewBtnFinal"><span>Review</span><span class="badge-ct" id="reviewBadgeFinal" style="display:none;">0</span></button>
+          <button class="btn btn-primary" id="acceptBtnFinal">Send to Agent →</button>
+        </div>
+      </div>
+
+      <div class="screen-body" id="docFinal">
+        <div class="doc-title">MimarAi — "The Blueprint Studio"</div>
+        <div class="doc-sub">The complete, merged plan — this exact file is what gets sent to Claude. Click any section to comment before sending.</div>
+
+        <div class="section-label">Features</div>
+        <div class="block" data-id="ff1"><div class="feature-row"><span class="feature-name">Role-Based Access Control</span></div><span class="kv">Admins, loan officers, and auditors each get scoped permissions.</span><div class="comment-trigger" data-icon></div></div>
+        <div class="block" data-id="ff2"><div class="feature-row"><span class="feature-name">Loan &amp; Interest Management</span></div><span class="kv">Create, approve, and track loans with configurable interest rules.</span><div class="comment-trigger" data-icon></div></div>
+        <div class="block" data-id="ff3"><div class="feature-row"><span class="feature-name">Audit Logging</span><span class="ai-tag">AI-added</span></div><span class="kv">Every approval and rate change is recorded with actor and timestamp.</span><div class="comment-trigger" data-icon></div></div>
+        <div class="block" data-id="ff4"><div class="feature-row"><span class="feature-name">Automated Interest Recalculation</span><span class="ai-tag">AI-added</span></div><span class="kv">Recalculates outstanding balances nightly against the rate table.</span><div class="comment-trigger" data-icon></div></div>
+
+        <div class="section-label">Structure (JSON tree)</div>
+        <div class="block" data-id="ffs1">
+          <span class="kv">File → feature map used by the <b>V4 drift-checker</b>.</span>
+          <div class="json-summary">{<br>&nbsp;&nbsp;<span class="jk">"src/routes/loan.py"</span>: ["Loan &amp; Interest Management"],<br>&nbsp;&nbsp;<span class="jk">"src/models/loan.py"</span>: ["Loan &amp; Interest Management"],<br>&nbsp;&nbsp;<span class="jk">"src/routes/auth.py"</span>: ["Role-Based Access Control"],<br>&nbsp;&nbsp;<span class="jk">"src/models/refresh_token.py"</span>: ["Role-Based Access Control"],<br>&nbsp;&nbsp;<span class="jk">"src/models/audit_log.py"</span>: ["Audit Logging"]<br>}</div>
+          <div class="comment-trigger" data-icon></div>
+        </div>
+
+        <div class="section-label">Schema &amp; Architecture (JSON)</div>
+        <div class="block" data-id="ffd1">
+          <span class="kv">3 tables (<b>users</b>, <b>loans</b>, <b>audit_logs</b>) · 3 services (<b>API Gateway</b>, <b>Auth Service</b>, <b>Loan Service</b>). Merged after diagrams were accepted and rendered.</span>
+          <div class="comment-trigger" data-icon></div>
+        </div>
+
+        <div class="callout">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+          <p>This is your single source of truth. Comment on anything above, or hit <b>Send to Agent</b> to dispatch this exact file to Claude for implementation.</p>
+        </div>
+      </div>
+
+      <div class="sheet-backdrop" id="sheetBackdropFinal"></div>
+      <div class="sheet" id="reviewSheetFinal">
+        <div class="sheet-head"><div class="title">Review comments</div><div class="sub" id="sheetSubFinal">0 COMMENTS PENDING</div></div>
+        <div class="sheet-msg"><textarea placeholder="Add an optional message, then submit comments"></textarea></div>
+        <div class="sheet-list" id="sheetListFinal"></div>
+        <div class="sheet-footer"><button class="cancel" id="sheetCancelFinal">Cancel</button><button class="submit" id="sheetSubmitFinal" disabled>Submit comments</button></div>
+      </div>
+    </div>
+
+    <!-- ============ PLACEHOLDER: SENT TO AGENT ============ -->
+    <div class="placeholder-screen" id="placeholderScreen">
+      <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+      <div class="tag">Step 06 · MCP Export</div>
+      <h2>Sent to Claude</h2>
+      <p>The accepted implementation plan — features, structure JSON, and schema/architecture JSON — has been dispatched to your coding agent.</p>
+    </div>
+
+  </main>
+
+  <!-- ============ APP FOOTER ============ -->
+  <footer class="app-footer">
+    <div class="hud-item"><div class="hud-dot"></div><span id="hudStatus">STATUS: DRAFTING IN PROGRESS</span></div>
+    <div class="hud-item"><span>GRID: 24px LOCK</span><span>SCALE: 1:1</span><span style="color:var(--blueprint-cyan);">DWG: MIM-2026-FLOW</span></div>
+  </footer>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ===================== SCREEN ROUTER ===================== */
+const SCREEN_ORDER = ['interview','plan','structure','diagram','render','final'];
+const STAGE_FOR_SCREEN = { interview:null, plan:'features', structure:'structure', diagram:'diagram', render:'final', final:'final' };
+const STAGE_ORDER = ['features','structure','diagram','final'];
+const headerTitleStep = document.getElementById('headerTitleStep');
+
+function setGlobalStage(screenName){
+  const target = STAGE_FOR_SCREEN[screenName];
+  const targetIdx = target ? STAGE_ORDER.indexOf(target) : -1;
+  document.querySelectorAll('.gstage').forEach(el=>{
+    const idx = STAGE_ORDER.indexOf(el.dataset.stage);
+    el.classList.remove('done','active');
+    if(targetIdx === -1) return;
+    if(idx < targetIdx) el.classList.add('done');
+    else if(idx === targetIdx) el.classList.add('active');
+  });
+}
+function showScreen(target){
+  const idx = SCREEN_ORDER.indexOf(target);
+  SCREEN_ORDER.forEach((name,i)=>{
+    const el = document.getElementById('screen-'+name);
+    if(i===idx){ el.style.transform='translateX(0)'; el.style.opacity='1'; el.style.zIndex=2; }
+    else if(i<idx){ el.style.transform='translateX(-100%)'; el.style.opacity='0'; el.style.zIndex=1; }
+    else { el.style.transform='translateX(100%)'; el.style.opacity='0'; el.style.zIndex=1; }
+  });
+  setGlobalStage(target);
+}
+showScreen('interview');
+
+/* ===================== SHARED HELPERS ===================== */
+let uiLocked = false;
+function withLock(fn){
+  return function(...args){
+    if(uiLocked) return;
+    uiLocked = true;
+    Promise.resolve(fn.apply(this, args)).finally(()=> setTimeout(()=>{ uiLocked=false; }, 260));
+  };
+}
+function sleep(ms, signal){
+  return new Promise((resolve, reject)=>{
+    const t = setTimeout(resolve, ms);
+    if(signal) signal.addEventListener('abort', ()=>{ clearTimeout(t); reject(new DOMException('Aborted','AbortError')); }, {once:true});
+  });
+}
+function escapeHtml(s){ return s.replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(()=> t.classList.remove('show'), 2600);
+}
+document.querySelectorAll('.comment-trigger[data-icon]').forEach(el=>{
+  el.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
+});
+
+/* ===================== INTERVIEW: composer + pipelines ===================== */
+const messages   = document.getElementById('messages');
+const composer   = document.getElementById('composer');
+const sendBtn    = document.getElementById('sendBtn');
+const btnIcon    = document.getElementById('btnIcon');
+const inputShell = document.getElementById('inputShell');
+
+const ARROW_ICON = `<path d="M12 19V5"/><path d="M5 12l7-7 7 7"/>`;
+const STOP_ICON  = `<rect x="6" y="6" width="12" height="12" rx="2"/>`;
+const PIPELINE_STEPS = [
+  "Validating inputs…","Generating feature plan…","Cross-checking with second model…",
+  "Merging & catching missed features…","Validating constraints…","Finalizing your implementation plan…"
+];
+
+let controller = null;
+let running = false;
+let draftBeforeSend = "";
+
+function autoGrow(){ composer.style.height='auto'; composer.style.height = Math.min(composer.scrollHeight,140)+'px'; }
+composer.addEventListener('input', autoGrow);
+
+function setButtonState(state){
+  sendBtn.classList.remove('ready','stop');
+  if(state==='ready'){ sendBtn.classList.add('ready'); btnIcon.innerHTML=ARROW_ICON; btnIcon.setAttribute('class','icon-arrow'); sendBtn.setAttribute('aria-label','Send'); }
+  else if(state==='stop'){ sendBtn.classList.add('stop'); btnIcon.innerHTML=STOP_ICON; btnIcon.setAttribute('class','icon-stop'); sendBtn.setAttribute('aria-label','Stop generating'); }
+  else { btnIcon.innerHTML=ARROW_ICON; btnIcon.setAttribute('class','icon-arrow'); sendBtn.setAttribute('aria-label','Send'); }
+}
+function addUserBubble(text){
+  const row=document.createElement('div'); row.className='row user';
+  row.innerHTML=`<div class="bubble user"></div>`; row.querySelector('.bubble').textContent=text;
+  messages.appendChild(row); scrollDown();
+}
+function addAiBubble(text){
+  const row=document.createElement('div'); row.className='row ai';
+  row.innerHTML=`<div><div class="eyebrow">MimarAi</div><div class="bubble ai"></div></div>`;
+  row.querySelector('.bubble').textContent=text; messages.appendChild(row); scrollDown();
+  return row;
+}
+function scrollDown(){ requestAnimationFrame(()=> messages.scrollTop = messages.scrollHeight); }
+
+/* ---- idea pipeline: interview -> plan ---- */
+async function runIdeaPipeline(userText){
+  running=true; controller=new AbortController(); const signal=controller.signal;
+  setButtonState('stop'); inputShell.classList.add('locked'); composer.disabled=true;
+  headerTitleStep.textContent='GENERATING…';
+
+  const statusRow=document.createElement('div'); statusRow.className='row ai';
+  statusRow.innerHTML=`<div class="status-row"><div class="status-dot"></div><div class="status-text" id="statusText">${PIPELINE_STEPS[0]}</div></div>`;
+  messages.appendChild(statusRow); scrollDown();
+  const statusText=statusRow.querySelector('#statusText'); const statusDot=statusRow.querySelector('.status-dot');
+
+  try{
+    for(let i=0;i<PIPELINE_STEPS.length;i++){
+      await sleep(900, signal);
+      statusText.style.opacity=0; await sleep(120, signal);
+      statusText.textContent=PIPELINE_STEPS[i]; statusText.style.opacity=1;
+    }
+    await sleep(450, signal);
+    statusRow.remove();
+    addAiBubble("Plan ready — redirecting you to the Implementation Plan…");
+    headerTitleStep.textContent='STEP 02 · REVIEW';
+    await sleep(700);
+    showScreen('plan');
+  }catch(err){
+    if(err.name==='AbortError'){
+      statusDot.style.animation='none'; statusDot.style.background='var(--ink-muted)';
+      statusText.classList.add('stopped'); statusText.textContent='Stopped';
+      headerTitleStep.textContent='IDEA';
+      composer.value=draftBeforeSend; autoGrow();
+    }
+  } finally {
+    running=false; controller=null;
+    inputShell.classList.remove('locked'); composer.disabled=false;
+    setButtonState(composer.value.trim() ? 'ready' : 'idle');
+  }
+}
+
+/* ---- generic revision pipeline: interview -> (plan | structure | diagram | final) ---- */
+const REVISION_META = {
+  plan:      { noun:'implementation plan', revising:'REVISING PLAN', review:'STEP 02 · REVIEW' },
+  structure: { noun:'project structure',   revising:'REVISING STRUCTURE', review:'STEP 03 · REVIEW' },
+  diagram:   { noun:'schema & architecture', revising:'REVISING SCHEMA',  review:'STEP 04 · REVIEW' },
+  final:     { noun:'final implementation plan', revising:'REVISING FINAL PLAN', review:'STEP 06 · REVIEW' },
+};
+function commentsStoreFor(target){
+  if(target==='plan') return planComments;
+  if(target==='structure') return structComments;
+  if(target==='diagram') return diagramComments;
+  return finalComments;
+}
+async function runRevisionPipeline(target){
+  running=true; controller=new AbortController(); const signal=controller.signal;
+  setButtonState('stop'); inputShell.classList.add('locked'); composer.disabled=true;
+
+  const meta    = REVISION_META[target];
+  const store   = commentsStoreFor(target);
+  const n       = Object.keys(store).length;
+  const noun    = meta.noun;
+  headerTitleStep.textContent = meta.revising;
+
+  const steps=[];
+  for(let i=1;i<=n;i++) steps.push(`Working on comment ${i} of ${n}…`);
+  steps.push('Validating changes…');
+  steps.push(`Updating ${noun}…`);
+
+  addAiBubble(`Got your comments — updating the ${noun} now.`);
+  const statusRow=document.createElement('div'); statusRow.className='row ai';
+  statusRow.innerHTML=`<div class="status-row"><div class="status-dot"></div><div class="status-text" id="statusText">${steps[0]}</div></div>`;
+  messages.appendChild(statusRow); scrollDown();
+  const statusText=statusRow.querySelector('#statusText'); const statusDot=statusRow.querySelector('.status-dot');
+
+  try{
+    for(let i=0;i<steps.length;i++){
+      await sleep(900, signal);
+      statusText.style.opacity=0; await sleep(120, signal);
+      statusText.textContent=steps[i]; statusText.style.opacity=1;
+    }
+    await sleep(450, signal);
+
+    if(target==='plan'){
+      planComments = {};
+      document.querySelectorAll('#docContentPlan .block.commented').forEach(b=>b.classList.remove('commented'));
+      refreshBadgePlan();
+    } else if(target==='structure'){
+      structComments = {};
+      document.querySelectorAll('#docStruct .file-row.commented').forEach(r=>r.classList.remove('commented'));
+      refreshBadgeStruct();
+      applyStructureUpdate();
+    } else if(target==='diagram'){
+      diagramComments = {};
+      document.querySelectorAll('#docDiagram .table-card.commented, #docDiagram .service-card.commented').forEach(c=>c.classList.remove('commented'));
+      refreshBadgeDiagram();
+    } else {
+      finalComments = {};
+      document.querySelectorAll('#docFinal .block.commented').forEach(b=>b.classList.remove('commented'));
+      refreshBadgeFinal();
+    }
+
+    const redirectNoun = target==='plan' ? 'implementation plan' : target==='structure' ? 'structure' : target==='diagram' ? 'schema' : 'implementation plan';
+    statusRow.remove();
+    addAiBubble(`Done — redirecting you back to the ${redirectNoun}…`);
+    headerTitleStep.textContent = meta.review;
+    await sleep(700);
+    showScreen(target);
+  }catch(err){
+    if(err.name==='AbortError'){
+      statusDot.style.animation='none'; statusDot.style.background='var(--ink-muted)';
+      statusText.classList.add('stopped'); statusText.textContent='Stopped';
+      await sleep(400);
+      showScreen(target);
+      showToast(`Stopped — your ${n} comment${n>1?'s are':' is'} still pending.`);
+    }
+  } finally {
+    running=false; controller=null;
+    inputShell.classList.remove('locked'); composer.disabled=false;
+    setButtonState(composer.value.trim() ? 'ready' : 'idle');
+    resetAcceptButtons();
+  }
+}
+function resetAcceptButtons(){
+  acceptBtnPlan.disabled=false; acceptBtnPlan.textContent='Accept Plan →';
+  acceptBtnStruct.disabled=false; acceptBtnStruct.textContent='Accept Structure →';
+  acceptBtnDiagram.disabled=false; acceptBtnDiagram.textContent='Accept & Render →';
+  acceptBtnFinal.disabled=false; acceptBtnFinal.textContent='Send to Agent →';
+  sheetSubmitPlan.textContent='Submit comments';
+  sheetSubmitStruct.textContent='Submit comments';
+  sheetSubmitDiagram.textContent='Submit comments';
+  sheetSubmitFinal.textContent='Submit comments';
+}
+
+sendBtn.addEventListener('click', ()=>{
+  if(running){ controller.abort(); return; }
+  const text=composer.value.trim(); if(!text) return;
+  draftBeforeSend=text; addUserBubble(text); composer.value=''; autoGrow(); setButtonState('idle');
+  runIdeaPipeline(text);
+});
+composer.addEventListener('keydown', e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendBtn.click(); } });
+composer.addEventListener('input', ()=>{ if(!running) setButtonState(composer.value.trim() ? 'ready' : 'idle'); });
+setButtonState('idle');
+
+/* ===================== PLAN: comments + review ===================== */
+const docContentPlan = document.getElementById('docContentPlan');
+const reviewBtnPlan  = document.getElementById('reviewBtnPlan');
+const reviewBadgePlan= document.getElementById('reviewBadgePlan');
+const acceptBtnPlan  = document.getElementById('acceptBtnPlan');
+const sheetBackdropPlan = document.getElementById('sheetBackdropPlan');
+const reviewSheetPlan   = document.getElementById('reviewSheetPlan');
+const sheetListPlan     = document.getElementById('sheetListPlan');
+const sheetSubPlan      = document.getElementById('sheetSubPlan');
+const sheetSubmitPlan   = document.getElementById('sheetSubmitPlan');
+const sheetCancelPlan   = document.getElementById('sheetCancelPlan');
+
+let planComments = {};
+
+function refreshBadgePlan(){
+  const n=Object.keys(planComments).length;
+  reviewBadgePlan.style.display = n>0 ? 'inline-block':'none';
+  reviewBadgePlan.textContent = n;
+}
+docContentPlan.addEventListener('click', e=>{
+  const trigger=e.target.closest('.comment-trigger'); const block=e.target.closest('.block');
+  if(!block) return;
+  if(!trigger){
+    document.querySelectorAll('#docContentPlan .block.active').forEach(b=> b!==block && b.classList.remove('active'));
+    block.classList.add('active'); return;
+  }
+  openComposerPlan(block);
+});
+function openComposerPlan(block){
+  closeComposerPlan();
+  const id=block.dataset.id; const existing=planComments[id];
+  const box=document.createElement('div'); box.className='composer'; box.id='liveComposerPlan';
+  box.innerHTML = existing ? `
+      <textarea id="cPlanText">${escapeHtml(existing.text)}</textarea>
+      <div class="composer-actions"><button class="danger-btn" id="delPlanC">Delete</button><span style="flex:1"></span>
+      <button class="ghost-btn" id="cancelPlanC">Cancel</button><button class="solid-btn" id="savePlanC">Edit Comment</button></div>`
+    : `<textarea id="cPlanText" placeholder="Leave a comment"></textarea>
+      <div class="composer-actions"><button class="ghost-btn" id="cancelPlanC">Cancel</button><button class="solid-btn" id="savePlanC">Add Comment</button></div>`;
+  block.insertAdjacentElement('afterend', box);
+  box.querySelector('#cPlanText').focus();
+  box.querySelector('#cancelPlanC').addEventListener('click', closeComposerPlan);
+  box.querySelector('#savePlanC').addEventListener('click', withLock(()=>{
+    const text=box.querySelector('#cPlanText').value.trim(); if(!text) return closeComposerPlan();
+    const quote=block.innerText.trim().split('\n')[0].slice(0,140);
+    planComments[id]={text,quote}; block.classList.add('commented'); refreshBadgePlan(); closeComposerPlan();
+  }));
+  const del=box.querySelector('#delPlanC');
+  if(del) del.addEventListener('click', withLock(()=>{ delete planComments[id]; block.classList.remove('commented'); refreshBadgePlan(); closeComposerPlan(); }));
+}
+function closeComposerPlan(){ const b=document.getElementById('liveComposerPlan'); if(b) b.remove(); }
+
+function openSheetPlan(){ renderSheetListPlan(); sheetBackdropPlan.classList.add('open'); reviewSheetPlan.classList.add('open'); }
+function closeSheetPlan(){ sheetBackdropPlan.classList.remove('open'); reviewSheetPlan.classList.remove('open'); }
+function renderSheetListPlan(){
+  const n=Object.keys(planComments).length;
+  sheetSubPlan.textContent = n + (n===1?' COMMENT PENDING':' COMMENTS PENDING');
+  sheetSubmitPlan.disabled = n===0;
+  sheetSubmitPlan.innerHTML = n===0 ? 'Submit comments' : `Submit ${n} comment${n>1?'s':''}`;
+  if(n===0){ sheetListPlan.innerHTML=`<div class="empty-state">No comments yet. Click any line in the plan, then the comment icon, to leave one.</div>`; return; }
+  sheetListPlan.innerHTML='';
+  Object.entries(planComments).forEach(([id,c])=>{
+    const card=document.createElement('div'); card.className='comment-card';
+    card.innerHTML=`<div class="comment-quote">"${escapeHtml(c.quote)}"</div><div class="comment-body">${escapeHtml(c.text)}</div>
+      <div class="comment-row-actions"><button data-edit="${id}">Edit</button><button data-del="${id}" class="danger">Remove</button></div>`;
+    sheetListPlan.appendChild(card);
+  });
+  sheetListPlan.querySelectorAll('[data-del]').forEach(b=> b.addEventListener('click', withLock(()=>{
+    const id=b.dataset.del; delete planComments[id];
+    const blk=docContentPlan.querySelector(`.block[data-id="${id}"]`); if(blk) blk.classList.remove('commented');
+    refreshBadgePlan(); renderSheetListPlan();
+  })));
+  sheetListPlan.querySelectorAll('[data-edit]').forEach(b=> b.addEventListener('click', withLock(()=>{
+    const id=b.dataset.edit; closeSheetPlan();
+    const blk=docContentPlan.querySelector(`.block[data-id="${id}"]`);
+    if(blk){ blk.scrollIntoView({block:'center',behavior:'smooth'}); openComposerPlan(blk); }
+  })));
+}
+reviewBtnPlan.addEventListener('click', withLock(openSheetPlan));
+sheetCancelPlan.addEventListener('click', withLock(closeSheetPlan));
+sheetBackdropPlan.addEventListener('click', withLock(closeSheetPlan));
+sheetSubmitPlan.addEventListener('click', withLock(async ()=>{
+  if(Object.keys(planComments).length===0) return;
+  sheetSubmitPlan.disabled=true; sheetSubmitPlan.textContent='Sending…';
+  await sleep(400); closeSheetPlan();
+  showScreen('interview'); runRevisionPipeline('plan');
+}));
+acceptBtnPlan.addEventListener('click', withLock(async ()=>{
+  acceptBtnPlan.disabled=true; acceptBtnPlan.textContent='Sending…';
+  await sleep(650);
+  showScreen('structure');
+}));
+
+/* ===================== STRUCTURE: comments + review ===================== */
+const docStruct = document.getElementById('docStruct');
+const reviewBtnStruct  = document.getElementById('reviewBtnStruct');
+const reviewBadgeStruct= document.getElementById('reviewBadgeStruct');
+const acceptBtnStruct  = document.getElementById('acceptBtnStruct');
+const sheetBackdropStruct = document.getElementById('sheetBackdropStruct');
+const reviewSheetStruct   = document.getElementById('reviewSheetStruct');
+const sheetListStruct     = document.getElementById('sheetListStruct');
+const sheetSubStruct      = document.getElementById('sheetSubStruct');
+const sheetSubmitStruct   = document.getElementById('sheetSubmitStruct');
+const sheetCancelStruct   = document.getElementById('sheetCancelStruct');
+const placeholderScreen   = document.getElementById('placeholderScreen');
+
+let structComments = {};
+
+document.querySelectorAll('.folder-row').forEach(row=>{
+  row.addEventListener('click', ()=>{
+    row.classList.toggle('open');
+    document.getElementById(row.dataset.target).classList.toggle('open');
+  });
+});
+
+function refreshBadgeStruct(){
+  const n=Object.keys(structComments).length;
+  reviewBadgeStruct.style.display = n>0 ? 'inline-block':'none';
+  reviewBadgeStruct.textContent = n;
+}
+docStruct.addEventListener('click', e=>{
+  const trigger=e.target.closest('.comment-trigger'); const row=e.target.closest('.file-row');
+  if(!row) return;
+  if(!trigger){
+    document.querySelectorAll('#docStruct .file-row.active').forEach(r=> r!==row && r.classList.remove('active'));
+    row.classList.add('active'); return;
+  }
+  openComposerStruct(row);
+});
+function openComposerStruct(row){
+  closeComposerStruct();
+  const id=row.dataset.id; const existing=structComments[id];
+  const box=document.createElement('div'); box.className='composer'; box.id='liveComposerStruct';
+  box.innerHTML = existing ? `
+      <textarea id="cStructText">${escapeHtml(existing.text)}</textarea>
+      <div class="composer-actions"><button class="danger-btn" id="delStructC">Delete</button><span style="flex:1"></span>
+      <button class="ghost-btn" id="cancelStructC">Cancel</button><button class="solid-btn" id="saveStructC">Edit Comment</button></div>`
+    : `<textarea id="cStructText" placeholder="Leave a comment on this file"></textarea>
+      <div class="composer-actions"><button class="ghost-btn" id="cancelStructC">Cancel</button><button class="solid-btn" id="saveStructC">Add Comment</button></div>`;
+  row.insertAdjacentElement('afterend', box);
+  box.querySelector('#cStructText').focus();
+  box.querySelector('#cancelStructC').addEventListener('click', closeComposerStruct);
+  box.querySelector('#saveStructC').addEventListener('click', withLock(()=>{
+    const text=box.querySelector('#cStructText').value.trim(); if(!text) return closeComposerStruct();
+    structComments[id]={text, path: row.dataset.path};
+    row.classList.add('commented'); refreshBadgeStruct(); closeComposerStruct();
+  }));
+  const del=box.querySelector('#delStructC');
+  if(del) del.addEventListener('click', withLock(()=>{ delete structComments[id]; row.classList.remove('commented'); refreshBadgeStruct(); closeComposerStruct(); }));
+}
+function closeComposerStruct(){ const b=document.getElementById('liveComposerStruct'); if(b) b.remove(); }
+
+function openSheetStruct(){ renderSheetListStruct(); sheetBackdropStruct.classList.add('open'); reviewSheetStruct.classList.add('open'); }
+function closeSheetStruct(){ sheetBackdropStruct.classList.remove('open'); reviewSheetStruct.classList.remove('open'); }
+function renderSheetListStruct(){
+  const n=Object.keys(structComments).length;
+  sheetSubStruct.textContent = n + (n===1?' COMMENT PENDING':' COMMENTS PENDING');
+  sheetSubmitStruct.disabled = n===0;
+  sheetSubmitStruct.innerHTML = n===0 ? 'Submit comments' : `Submit ${n} comment${n>1?'s':''}`;
+  if(n===0){ sheetListStruct.innerHTML=`<div class="empty-state">No comments yet. Click any file, then the comment icon, to leave one.</div>`; return; }
+  sheetListStruct.innerHTML='';
+  Object.entries(structComments).forEach(([id,c])=>{
+    const card=document.createElement('div'); card.className='comment-card';
+    card.innerHTML=`<div class="comment-quote">${escapeHtml(c.path)}</div><div class="comment-body">${escapeHtml(c.text)}</div>
+      <div class="comment-row-actions"><button data-edit="${id}">Edit</button><button data-del="${id}" class="danger">Remove</button></div>`;
+    sheetListStruct.appendChild(card);
+  });
+  sheetListStruct.querySelectorAll('[data-del]').forEach(b=> b.addEventListener('click', withLock(()=>{
+    const id=b.dataset.del; delete structComments[id];
+    const row=docStruct.querySelector(`.file-row[data-id="${id}"]`); if(row) row.classList.remove('commented');
+    refreshBadgeStruct(); renderSheetListStruct();
+  })));
+  sheetListStruct.querySelectorAll('[data-edit]').forEach(b=> b.addEventListener('click', withLock(()=>{
+    const id=b.dataset.edit; closeSheetStruct();
+    const row=docStruct.querySelector(`.file-row[data-id="${id}"]`);
+    if(row){ row.scrollIntoView({block:'center',behavior:'smooth'}); openComposerStruct(row); }
+  })));
+}
+reviewBtnStruct.addEventListener('click', withLock(openSheetStruct));
+sheetCancelStruct.addEventListener('click', withLock(closeSheetStruct));
+sheetBackdropStruct.addEventListener('click', withLock(closeSheetStruct));
+sheetSubmitStruct.addEventListener('click', withLock(async ()=>{
+  if(Object.keys(structComments).length===0) return;
+  sheetSubmitStruct.disabled=true; sheetSubmitStruct.textContent='Sending…';
+  await sleep(400); closeSheetStruct();
+  showScreen('interview'); runRevisionPipeline('structure');
+}));
+acceptBtnStruct.addEventListener('click', withLock(async ()=>{
+  acceptBtnStruct.disabled=true; acceptBtnStruct.textContent='Sending…';
+  await sleep(650);
+  showScreen('diagram');
+}));
+
+/* ===================== DIAGRAM: comments + review ===================== */
+const docDiagram = document.getElementById('docDiagram');
+const reviewBtnDiagram  = document.getElementById('reviewBtnDiagram');
+const reviewBadgeDiagram= document.getElementById('reviewBadgeDiagram');
+const acceptBtnDiagram  = document.getElementById('acceptBtnDiagram');
+const sheetBackdropDiagram = document.getElementById('sheetBackdropDiagram');
+const reviewSheetDiagram   = document.getElementById('reviewSheetDiagram');
+const sheetListDiagram     = document.getElementById('sheetListDiagram');
+const sheetSubDiagram      = document.getElementById('sheetSubDiagram');
+const sheetSubmitDiagram   = document.getElementById('sheetSubmitDiagram');
+const sheetCancelDiagram   = document.getElementById('sheetCancelDiagram');
+
+let diagramComments = {};
+
+function refreshBadgeDiagram(){
+  const n=Object.keys(diagramComments).length;
+  reviewBadgeDiagram.style.display = n>0 ? 'inline-block':'none';
+  reviewBadgeDiagram.textContent = n;
+}
+docDiagram.addEventListener('click', e=>{
+  const trigger=e.target.closest('.comment-trigger'); const card=e.target.closest('.table-card, .service-card');
+  if(!card) return;
+  if(!trigger){
+    document.querySelectorAll('#docDiagram .table-card.active, #docDiagram .service-card.active').forEach(c=> c!==card && c.classList.remove('active'));
+    card.classList.add('active'); return;
+  }
+  openComposerDiagram(card);
+});
+function openComposerDiagram(card){
+  closeComposerDiagram();
+  const id=card.dataset.id; const existing=diagramComments[id];
+  const box=document.createElement('div'); box.className='composer'; box.id='liveComposerDiagram';
+  box.innerHTML = existing ? `
+      <textarea id="cDiagramText">${escapeHtml(existing.text)}</textarea>
+      <div class="composer-actions"><button class="danger-btn" id="delDiagramC">Delete</button><span style="flex:1"></span>
+      <button class="ghost-btn" id="cancelDiagramC">Cancel</button><button class="solid-btn" id="saveDiagramC">Edit Comment</button></div>`
+    : `<textarea id="cDiagramText" placeholder="Leave a comment on this table/service"></textarea>
+      <div class="composer-actions"><button class="ghost-btn" id="cancelDiagramC">Cancel</button><button class="solid-btn" id="saveDiagramC">Add Comment</button></div>`;
+  card.insertAdjacentElement('afterend', box);
+  box.querySelector('#cDiagramText').focus();
+  box.querySelector('#cancelDiagramC').addEventListener('click', closeComposerDiagram);
+  box.querySelector('#saveDiagramC').addEventListener('click', withLock(()=>{
+    const text=box.querySelector('#cDiagramText').value.trim(); if(!text) return closeComposerDiagram();
+    const labelEl = card.querySelector('.table-name, .svc-name');
+    const label = labelEl ? labelEl.textContent : id;
+    diagramComments[id]={text,label}; card.classList.add('commented'); refreshBadgeDiagram(); closeComposerDiagram();
+  }));
+  const del=box.querySelector('#delDiagramC');
+  if(del) del.addEventListener('click', withLock(()=>{ delete diagramComments[id]; card.classList.remove('commented'); refreshBadgeDiagram(); closeComposerDiagram(); }));
+}
+function closeComposerDiagram(){ const b=document.getElementById('liveComposerDiagram'); if(b) b.remove(); }
+
+function openSheetDiagram(){ renderSheetListDiagram(); sheetBackdropDiagram.classList.add('open'); reviewSheetDiagram.classList.add('open'); }
+function closeSheetDiagram(){ sheetBackdropDiagram.classList.remove('open'); reviewSheetDiagram.classList.remove('open'); }
+function renderSheetListDiagram(){
+  const n=Object.keys(diagramComments).length;
+  sheetSubDiagram.textContent = n + (n===1?' COMMENT PENDING':' COMMENTS PENDING');
+  sheetSubmitDiagram.disabled = n===0;
+  sheetSubmitDiagram.innerHTML = n===0 ? 'Submit comments' : `Submit ${n} comment${n>1?'s':''}`;
+  if(n===0){ sheetListDiagram.innerHTML=`<div class="empty-state">No comments yet. Click any table or service, then the comment icon, to leave one.</div>`; return; }
+  sheetListDiagram.innerHTML='';
+  Object.entries(diagramComments).forEach(([id,c])=>{
+    const card=document.createElement('div'); card.className='comment-card';
+    card.innerHTML=`<div class="comment-quote">${escapeHtml(c.label)}</div><div class="comment-body">${escapeHtml(c.text)}</div>
+      <div class="comment-row-actions"><button data-edit="${id}">Edit</button><button data-del="${id}" class="danger">Remove</button></div>`;
+    sheetListDiagram.appendChild(card);
+  });
+  sheetListDiagram.querySelectorAll('[data-del]').forEach(b=> b.addEventListener('click', withLock(()=>{
+    const id=b.dataset.del; delete diagramComments[id];
+    const c=docDiagram.querySelector(`[data-id="${id}"]`); if(c) c.classList.remove('commented');
+    refreshBadgeDiagram(); renderSheetListDiagram();
+  })));
+  sheetListDiagram.querySelectorAll('[data-edit]').forEach(b=> b.addEventListener('click', withLock(()=>{
+    const id=b.dataset.edit; closeSheetDiagram();
+    const c=docDiagram.querySelector(`[data-id="${id}"]`);
+    if(c){ c.scrollIntoView({block:'center',behavior:'smooth'}); openComposerDiagram(c); }
+  })));
+}
+reviewBtnDiagram.addEventListener('click', withLock(openSheetDiagram));
+sheetCancelDiagram.addEventListener('click', withLock(closeSheetDiagram));
+sheetBackdropDiagram.addEventListener('click', withLock(closeSheetDiagram));
+sheetSubmitDiagram.addEventListener('click', withLock(async ()=>{
+  if(Object.keys(diagramComments).length===0) return;
+  sheetSubmitDiagram.disabled=true; sheetSubmitDiagram.textContent='Sending…';
+  await sleep(400); closeSheetDiagram();
+  showScreen('interview'); runRevisionPipeline('diagram');
+}));
+acceptBtnDiagram.addEventListener('click', withLock(async ()=>{
+  acceptBtnDiagram.disabled=true; acceptBtnDiagram.textContent='Sending…';
+  await sleep(650);
+  showScreen('render');
+}));
+
+/* ===================== FINAL PLAN: comments + review ===================== */
+const docFinal = document.getElementById('docFinal');
+const reviewBtnFinal  = document.getElementById('reviewBtnFinal');
+const reviewBadgeFinal= document.getElementById('reviewBadgeFinal');
+const acceptBtnFinal  = document.getElementById('acceptBtnFinal');
+const sheetBackdropFinal = document.getElementById('sheetBackdropFinal');
+const reviewSheetFinal   = document.getElementById('reviewSheetFinal');
+const sheetListFinal     = document.getElementById('sheetListFinal');
+const sheetSubFinal      = document.getElementById('sheetSubFinal');
+const sheetSubmitFinal   = document.getElementById('sheetSubmitFinal');
+const sheetCancelFinal   = document.getElementById('sheetCancelFinal');
+
+let finalComments = {};
+
+function refreshBadgeFinal(){
+  const n=Object.keys(finalComments).length;
+  reviewBadgeFinal.style.display = n>0 ? 'inline-block':'none';
+  reviewBadgeFinal.textContent = n;
+}
+docFinal.addEventListener('click', e=>{
+  const trigger=e.target.closest('.comment-trigger'); const block=e.target.closest('.block');
+  if(!block) return;
+  if(!trigger){
+    document.querySelectorAll('#docFinal .block.active').forEach(b=> b!==block && b.classList.remove('active'));
+    block.classList.add('active'); return;
+  }
+  openComposerFinal(block);
+});
+function openComposerFinal(block){
+  closeComposerFinal();
+  const id=block.dataset.id; const existing=finalComments[id];
+  const box=document.createElement('div'); box.className='composer'; box.id='liveComposerFinal';
+  box.innerHTML = existing ? `
+      <textarea id="cFinalText">${escapeHtml(existing.text)}</textarea>
+      <div class="composer-actions"><button class="danger-btn" id="delFinalC">Delete</button><span style="flex:1"></span>
+      <button class="ghost-btn" id="cancelFinalC">Cancel</button><button class="solid-btn" id="saveFinalC">Edit Comment</button></div>`
+    : `<textarea id="cFinalText" placeholder="Leave a comment"></textarea>
+      <div class="composer-actions"><button class="ghost-btn" id="cancelFinalC">Cancel</button><button class="solid-btn" id="saveFinalC">Add Comment</button></div>`;
+  block.insertAdjacentElement('afterend', box);
+  box.querySelector('#cFinalText').focus();
+  box.querySelector('#cancelFinalC').addEventListener('click', closeComposerFinal);
+  box.querySelector('#saveFinalC').addEventListener('click', withLock(()=>{
+    const text=box.querySelector('#cFinalText').value.trim(); if(!text) return closeComposerFinal();
+    const quote=block.innerText.trim().split('\n')[0].slice(0,140);
+    finalComments[id]={text,quote}; block.classList.add('commented'); refreshBadgeFinal(); closeComposerFinal();
+  }));
+  const del=box.querySelector('#delFinalC');
+  if(del) del.addEventListener('click', withLock(()=>{ delete finalComments[id]; block.classList.remove('commented'); refreshBadgeFinal(); closeComposerFinal(); }));
+}
+function closeComposerFinal(){ const b=document.getElementById('liveComposerFinal'); if(b) b.remove(); }
+
+function openSheetFinal(){ renderSheetListFinal(); sheetBackdropFinal.classList.add('open'); reviewSheetFinal.classList.add('open'); }
+function closeSheetFinal(){ sheetBackdropFinal.classList.remove('open'); reviewSheetFinal.classList.remove('open'); }
+function renderSheetListFinal(){
+  const n=Object.keys(finalComments).length;
+  sheetSubFinal.textContent = n + (n===1?' COMMENT PENDING':' COMMENTS PENDING');
+  sheetSubmitFinal.disabled = n===0;
+  sheetSubmitFinal.innerHTML = n===0 ? 'Submit comments' : `Submit ${n} comment${n>1?'s':''}`;
+  if(n===0){ sheetListFinal.innerHTML=`<div class="empty-state">No comments yet. Click any section in the plan, then the comment icon, to leave one.</div>`; return; }
+  sheetListFinal.innerHTML='';
+  Object.entries(finalComments).forEach(([id,c])=>{
+    const card=document.createElement('div'); card.className='comment-card';
+    card.innerHTML=`<div class="comment-quote">"${escapeHtml(c.quote)}"</div><div class="comment-body">${escapeHtml(c.text)}</div>
+      <div class="comment-row-actions"><button data-edit="${id}">Edit</button><button data-del="${id}" class="danger">Remove</button></div>`;
+    sheetListFinal.appendChild(card);
+  });
+  sheetListFinal.querySelectorAll('[data-del]').forEach(b=> b.addEventListener('click', withLock(()=>{
+    const id=b.dataset.del; delete finalComments[id];
+    const blk=docFinal.querySelector(`.block[data-id="${id}"]`); if(blk) blk.classList.remove('commented');
+    refreshBadgeFinal(); renderSheetListFinal();
+  })));
+  sheetListFinal.querySelectorAll('[data-edit]').forEach(b=> b.addEventListener('click', withLock(()=>{
+    const id=b.dataset.edit; closeSheetFinal();
+    const blk=docFinal.querySelector(`.block[data-id="${id}"]`);
+    if(blk){ blk.scrollIntoView({block:'center',behavior:'smooth'}); openComposerFinal(blk); }
+  })));
+}
+reviewBtnFinal.addEventListener('click', withLock(openSheetFinal));
+sheetCancelFinal.addEventListener('click', withLock(closeSheetFinal));
+sheetBackdropFinal.addEventListener('click', withLock(closeSheetFinal));
+sheetSubmitFinal.addEventListener('click', withLock(async ()=>{
+  if(Object.keys(finalComments).length===0) return;
+  sheetSubmitFinal.disabled=true; sheetSubmitFinal.textContent='Sending…';
+  await sleep(400); closeSheetFinal();
+  showScreen('interview'); runRevisionPipeline('final');
+}));
+acceptBtnFinal.addEventListener('click', withLock(async ()=>{
+  acceptBtnFinal.disabled=true; acceptBtnFinal.textContent='Sending…';
+  await sleep(650);
+  document.getElementById('hudStatus').textContent = 'STATUS: SPEC VALIDATED & AGENT READY';
+  placeholderScreen.classList.add('show');
+}));
+
+/* ===================================================================
+   RENDERED DIAGRAMS — real deterministic blueprint SVG renderer
+   (adapted from MimarDiagramRenderer in diagrams.js — CAD-style
+   grid, drafting frame, orthogonal connectors, title stamp — using
+   this project's actual entities instead of a mermaid placeholder)
+   =================================================================== */
+function blueprintFrame(dwgNo, dwgLabel, bodySvg, stampLine){
+  return `
+  <svg class="diagram-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500">
+    <defs>
+      <pattern id="gp-${dwgNo}" width="20" height="20" patternUnits="userSpaceOnUse">
+        <path d="M 20 0 L 0 0 0 20" fill="none" stroke="var(--border-hairline)" stroke-width="1"/>
+      </pattern>
+      <marker id="arrow-${dwgNo}" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--blueprint-cyan)" />
+      </marker>
+      <marker id="arrow-o-${dwgNo}" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent-orange)" />
+      </marker>
+    </defs>
+    <rect width="1000" height="500" fill="var(--bg-base)" />
+    <rect width="1000" height="500" fill="url(#gp-${dwgNo})" />
+    <rect x="15" y="15" width="970" height="470" fill="none" stroke="var(--border-line)" stroke-width="1.5" stroke-dasharray="8 4"/>
+    <text x="30" y="38" fill="var(--blueprint-cyan)" font-family="var(--font-mono)" font-size="11" font-weight="600">${dwgLabel}</text>
+    ${bodySvg}
+    <g transform="translate(730, 430)">
+      <rect width="245" height="45" fill="var(--bg-surface-elevated)" stroke="var(--border-line)" stroke-width="1"/>
+      <text x="10" y="16" fill="var(--ink-muted)" font-family="var(--font-mono)" font-size="9">SCALE: 1:1 | PROJ: LOAN-DESK</text>
+      <text x="10" y="32" fill="var(--blueprint-cyan)" font-family="var(--font-mono)" font-size="10" font-weight="700">${stampLine}</text>
+    </g>
+  </svg>`;
+}
+
+function renderArchitectureSVG(){
+  const body = `
+    <path d="M 210 220 L 290 220" stroke="var(--blueprint-cyan)" stroke-width="2" marker-end="url(#arrow-arch)" />
+    <text x="250" y="210" fill="var(--ink-muted)" font-family="var(--font-mono)" font-size="10" text-anchor="middle">HTTPS / REST</text>
+
+    <path d="M 450 220 L 550 180" stroke="var(--blueprint-cyan)" stroke-width="2" marker-end="url(#arrow-arch)" />
+    <text x="490" y="185" fill="var(--ink-muted)" font-family="var(--font-mono)" font-size="10" text-anchor="middle">JWT issue</text>
+
+    <path d="M 550 240 L 630 240" stroke="var(--blueprint-cyan)" stroke-width="2" marker-end="url(#arrow-arch)" />
+    <text x="590" y="230" fill="var(--ink-muted)" font-family="var(--font-mono)" font-size="10" text-anchor="middle">Token verify</text>
+
+    <path d="M 790 220 L 850 220" stroke="var(--blueprint-cyan)" stroke-width="2" marker-end="url(#arrow-arch)" />
+    <text x="820" y="210" fill="var(--ink-muted)" font-family="var(--font-mono)" font-size="10" text-anchor="middle">SQL / TLS</text>
+
+    <path d="M 710 300 L 710 350 L 630 350" stroke="var(--accent-orange)" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#arrow-o-arch)" />
+    <text x="670" y="340" fill="var(--accent-orange)" font-family="var(--font-mono)" font-size="10" text-anchor="middle">Audit write (async)</text>
+
+    <path d="M 850 260 L 850 320 L 790 320" stroke="var(--blueprint-cyan)" stroke-width="2" marker-end="url(#arrow-arch)" />
+    <text x="850" y="300" fill="var(--ink-muted)" font-family="var(--font-mono)" font-size="9" text-anchor="middle">persists</text>
+
+    <g transform="translate(50, 170)">
+      <rect width="160" height="110" fill="var(--bg-surface)" stroke="var(--border-line-strong)" stroke-width="1.5"/>
+      <rect width="160" height="24" fill="var(--bg-surface-elevated)" stroke="var(--border-line)" stroke-width="1"/>
+      <text x="10" y="16" fill="var(--ink-primary)" font-family="var(--font-mono)" font-size="11" font-weight="600">CLIENT LAYER</text>
+      <text x="10" y="48" fill="var(--ink-primary)" font-family="var(--font-display)" font-size="13" font-weight="600">Next.js SPA</text>
+      <text x="10" y="68" fill="var(--ink-secondary)" font-family="var(--font-mono)" font-size="10">Loan desk UI</text>
+      <text x="10" y="94" fill="var(--blueprint-cyan)" font-family="var(--font-mono)" font-size="9">[PORT: 3000]</text>
+    </g>
+
+    <g transform="translate(290, 170)">
+      <rect width="160" height="110" fill="var(--bg-surface)" stroke="var(--border-line-strong)" stroke-width="1.5"/>
+      <rect width="160" height="24" fill="var(--bg-surface-elevated)" stroke="var(--border-line)" stroke-width="1"/>
+      <text x="10" y="16" fill="var(--ink-primary)" font-family="var(--font-mono)" font-size="11" font-weight="600">API GATEWAY</text>
+      <text x="10" y="48" fill="var(--ink-primary)" font-family="var(--font-display)" font-size="13" font-weight="600">Next.js Edge</text>
+      <text x="10" y="68" fill="var(--ink-secondary)" font-family="var(--font-mono)" font-size="10">Routing &amp; rate limit</text>
+      <text x="10" y="94" fill="var(--blueprint-cyan)" font-family="var(--font-mono)" font-size="9">[PORT: 8080]</text>
+    </g>
+
+    <g transform="translate(550, 130)">
+      <rect width="160" height="90" fill="var(--bg-surface)" stroke="var(--border-line-strong)" stroke-width="1.5"/>
+      <rect width="160" height="20" fill="var(--bg-surface-elevated)" stroke="var(--border-line)" stroke-width="1"/>
+      <text x="10" y="14" fill="var(--ink-primary)" font-family="var(--font-mono)" font-size="10" font-weight="600">AUTH SERVICE</text>
+      <text x="10" y="42" fill="var(--ink-primary)" font-family="var(--font-display)" font-size="12" font-weight="600">FastAPI · JWT</text>
+      <text x="10" y="60" fill="var(--ink-secondary)" font-family="var(--font-mono)" font-size="10">Role-based access</text>
+    </g>
+
+    <g transform="translate(550, 240)">
+      <rect width="160" height="90" fill="var(--bg-surface)" stroke="var(--accent-orange)" stroke-width="1.5"/>
+      <rect width="160" height="20" fill="var(--accent-orange-bg)" stroke="var(--accent-orange-border)" stroke-width="1"/>
+      <text x="10" y="14" fill="var(--accent-orange)" font-family="var(--font-mono)" font-size="10" font-weight="700">LOAN SERVICE</text>
+      <text x="10" y="42" fill="var(--ink-primary)" font-family="var(--font-display)" font-size="12" font-weight="600">FastAPI · Cron</text>
+      <text x="10" y="60" fill="var(--ink-secondary)" font-family="var(--font-mono)" font-size="10">Approval &amp; interest recalc</text>
+    </g>
+
+    <g transform="translate(790, 170)">
+      <rect width="160" height="110" fill="var(--bg-surface)" stroke="var(--success-green)" stroke-width="1.5"/>
+      <rect width="160" height="24" fill="var(--success-green-bg)" stroke="var(--success-green-border)" stroke-width="1"/>
+      <text x="10" y="16" fill="var(--success-green)" font-family="var(--font-mono)" font-size="11" font-weight="700">PERSISTENCE</text>
+      <text x="10" y="48" fill="var(--ink-primary)" font-family="var(--font-display)" font-size="13" font-weight="600">Supabase Postgres</text>
+      <text x="10" y="68" fill="var(--ink-secondary)" font-family="var(--font-mono)" font-size="10">users · loans · audit_logs</text>
+      <text x="10" y="94" fill="var(--success-green)" font-family="var(--font-mono)" font-size="9">[STATUS: REPLICATED]</text>
+    </g>
+  `;
+  const withMarkers = body.replaceAll('arrow-arch','arrow-A').replaceAll('arrow-o-arch','arrow-o-A');
+  return blueprintFrame('A', 'DWG NO. ARCH-2026-LOAN-01 // SYSTEM ARCHITECTURE BLUEPRINT', withMarkers, 'MIMAR AI VALIDATED BLUEPRINT');
+}
+
+function renderERDSVG(){
+  const body = `
+    <path d="M 230 180 L 330 180" stroke="var(--blueprint-cyan)" stroke-width="2" />
+    <text x="280" y="170" fill="var(--blueprint-cyan)" font-family="var(--font-mono)" font-size="10" text-anchor="middle">1 : N</text>
+
+    <path d="M 425 260 L 425 350" stroke="var(--blueprint-cyan)" stroke-width="2" />
+    <text x="440" y="310" fill="var(--blueprint-cyan)" font-family="var(--font-mono)" font-size="10">1 : N</text>
+
+    <path d="M 230 260 L 230 380 L 330 380" stroke="var(--blueprint-cyan)" stroke-width="2" stroke-dasharray="5 4" />
+    <text x="260" y="372" fill="var(--ink-muted)" font-family="var(--font-mono)" font-size="9">actor_id → users.id</text>
+
+    <g transform="translate(40, 90)">
+      <rect width="190" height="180" fill="var(--bg-surface)" stroke="var(--border-line-strong)" stroke-width="1.5"/>
+      <rect width="190" height="28" fill="var(--bg-surface-elevated)" stroke="var(--border-line)"/>
+      <text x="10" y="18" fill="var(--ink-primary)" font-family="var(--font-mono)" font-size="11" font-weight="700">TABLE: users</text>
+      <text x="10" y="48" fill="var(--accent-orange)" font-family="var(--font-mono)" font-size="10">PK  id : uuid</text>
+      <text x="10" y="70" fill="var(--ink-primary)" font-family="var(--font-mono)" font-size="10">email : text, unique</text>
+      <text x="10" y="92" fill="var(--ink-primary)" font-family="var(--font-mono)" font-size="10">role : enum(admin,officer,auditor)</text>
+      <text x="10" y="114" fill="var(--ink-muted)" font-family="var(--font-mono)" font-size="10">created_at : timestamptz</text>
+    </g>
+
+    <g transform="translate(330, 90)">
+      <rect width="190" height="220" fill="var(--bg-surface)" stroke="var(--blueprint-cyan)" stroke-width="1.5"/>
+      <rect width="190" height="28" fill="var(--blueprint-cyan-bg)" stroke="var(--border-line)"/>
+      <text x="10" y="18" fill="var(--blueprint-cyan)" font-family="var(--font-mono)" font-size="11" font-weight="700">TABLE: loans</text>
+      <text x="10" y="48" fill="var(--accent-orange)" font-family="var(--font-mono)" font-size="10">PK  id : uuid</text>
+      <text x="10" y="70" fill="var(--blueprint-cyan)" font-family="var(--font-mono)" font-size="10">FK  borrower_id → users.id</text>
+      <text x="10" y="92" fill="var(--ink-primary)" font-family="var(--font-mono)" font-size="10">principal : numeric(12,2)</text>
+      <text x="10" y="114" fill="var(--ink-primary)" font-family="var(--font-mono)" font-size="10">interest_rate : numeric(5,2)</text>
+      <text x="10" y="136" fill="var(--success-green)" font-family="var(--font-mono)" font-size="10">status : enum(pending,approved,closed)</text>
+    </g>
+
+    <g transform="translate(330, 350)">
+      <rect width="190" height="110" fill="var(--bg-surface)" stroke="var(--success-green)" stroke-width="1.5"/>
+      <rect width="190" height="24" fill="var(--success-green-bg)" stroke="var(--success-green-border)"/>
+      <text x="10" y="16" fill="var(--success-green)" font-family="var(--font-mono)" font-size="10" font-weight="700">TABLE: audit_logs</text>
+      <text x="10" y="42" fill="var(--accent-orange)" font-family="var(--font-mono)" font-size="10">PK  id : uuid</text>
+      <text x="10" y="62" fill="var(--blueprint-cyan)" font-family="var(--font-mono)" font-size="10">FK  actor_id → users.id</text>
+      <text x="10" y="82" fill="var(--ink-primary)" font-family="var(--font-mono)" font-size="10">action : text · occurred_at : timestamptz</text>
+    </g>
+  `;
+  return blueprintFrame('E', 'DWG NO. ERD-2026-LOAN-02 // DATABASE SCHEMA BLUEPRINT', body, 'MIMAR AI VALIDATED BLUEPRINT');
+}
+
+const btnArch     = document.getElementById('btnArch');
+const btnErd      = document.getElementById('btnErd');
+const paneArch    = document.getElementById('paneArch');
+const paneErd     = document.getElementById('paneErd');
+const canvasTitle = document.getElementById('canvasTitle');
+const canvasSub   = document.getElementById('canvasSub');
+const askTarget   = document.getElementById('askTarget');
+const amendedNote = document.getElementById('amendedNote');
+const acceptBtnRender = document.getElementById('acceptBtnRender');
+
+let currentDiagramView = 'arch';
+let renderedDiagrams = { arch:false, erd:false };
+
+async function renderDiagram(kind){
+  if(renderedDiagrams[kind]) return;
+  const target = kind === 'arch' ? paneArch : paneErd;
+  target.innerHTML = kind === 'arch' ? renderArchitectureSVG() : renderERDSVG();
+  renderedDiagrams[kind] = true;
+}
+function switchDiagramView(kind){
+  currentDiagramView = kind;
+  btnArch.classList.toggle('active', kind === 'arch');
+  btnErd.classList.toggle('active', kind === 'erd');
+  paneArch.classList.toggle('active', kind === 'arch');
+  paneErd.classList.toggle('active', kind === 'erd');
+  canvasTitle.textContent = kind === 'arch' ? 'System Architecture' : 'Database ERD';
+  canvasSub.textContent = kind === 'arch' ? '3 SERVICES' : '3 TABLES';
+  askTarget.textContent = kind === 'arch' ? 'System Architecture' : 'Database ERD';
+  renderDiagram(kind);
+}
+btnArch.addEventListener('click', ()=> switchDiagramView('arch'));
+btnErd.addEventListener('click', ()=> switchDiagramView('erd'));
+renderDiagram('arch');
+
+acceptBtnRender.addEventListener('click', withLock(async ()=>{
+  acceptBtnRender.disabled = true; acceptBtnRender.textContent = 'Merging into plan…';
+  await sleep(650);
+  showScreen('final');
+  setTimeout(()=>{ acceptBtnRender.disabled=false; acceptBtnRender.textContent='Accept the Diagram →'; }, 50);
+}));
+
+/* ---- Ask AI slide panel ---- */
+const askAiBtn      = document.getElementById('askAiBtn');
+const sheetBackdropAsk = document.getElementById('sheetBackdropAsk');
+const askSheet       = document.getElementById('askSheet');
+const askClose       = document.getElementById('askClose');
+const askMessages    = document.getElementById('askMessages');
+const askComposer    = document.getElementById('askComposer');
+const askSend        = document.getElementById('askSend');
+
+function openAsk(){
+  sheetBackdropAsk.classList.add('open');
+  askSheet.classList.add('open');
+  askTarget.textContent = currentDiagramView === 'arch' ? 'System Architecture' : 'Database ERD';
+}
+function closeAsk(){
+  sheetBackdropAsk.classList.remove('open');
+  askSheet.classList.remove('open');
+}
+askAiBtn.addEventListener('click', openAsk);
+askClose.addEventListener('click', closeAsk);
+sheetBackdropAsk.addEventListener('click', closeAsk);
+
+function autoGrowAsk(){
+  askComposer.style.height = 'auto';
+  askComposer.style.height = Math.min(askComposer.scrollHeight, 100) + 'px';
+}
+askComposer.addEventListener('input', ()=>{
+  autoGrowAsk();
+  askSend.classList.toggle('ready', askComposer.value.trim().length > 0);
+});
+function scrollAskDown(){ requestAnimationFrame(()=> askMessages.scrollTop = askMessages.scrollHeight); }
+function addAskUserMsg(text){
+  const row = document.createElement('div'); row.className = 'arow user';
+  row.innerHTML = `<div class="abubble user"></div>`;
+  row.querySelector('.abubble').textContent = text;
+  askMessages.appendChild(row); scrollAskDown();
+}
+function addAskAiMsg(html){
+  const row = document.createElement('div'); row.className = 'arow ai';
+  row.innerHTML = `<div><div class="eyebrow">MimarAi</div><div class="abubble ai">${html}</div></div>`;
+  askMessages.appendChild(row); scrollAskDown();
+  return row;
+}
+const STRUCTURAL_HINTS = ['remove table','delete table','drop table','remove service','delete service','remove feature','change relationship','merge table','split service'];
+function classifyAsk(text){
+  const lower = text.toLowerCase();
+  return STRUCTURAL_HINTS.some(h => lower.includes(h)) ? 'structural' : 'cosmetic';
+}
+async function handleAskSend(){
+  const text = askComposer.value.trim();
+  if(!text) return;
+  addAskUserMsg(text);
+  askComposer.value = ''; autoGrowAsk(); askSend.classList.remove('ready');
+
+  const statusRow = document.createElement('div'); statusRow.className = 'arow ai';
+  statusRow.innerHTML = `<div class="status-row"><div class="status-dot"></div><div class="status-text">Classifying request…</div></div>`;
+  askMessages.appendChild(statusRow); scrollAskDown();
+  await sleep(700);
+  statusRow.remove();
+
+  const kind = classifyAsk(text);
+  if(kind === 'cosmetic'){
+    addAskAiMsg(`Applying that now.<div class="classify-tag cosmetic">Cosmetic change</div>`);
+    await sleep(600);
+    addAskAiMsg(`Updated — Gemini applied the change, Groq did a lightweight check. Re-rendering the diagram.`);
+    renderedDiagrams[currentDiagramView] = false;
+    await renderDiagram(currentDiagramView);
+  } else {
+    addAskAiMsg(`This affects a locked feature or structure, so it's refused by default.<div class="classify-tag structural">Structural conflict</div>
+      <div class="confirm-row">
+        <button class="force-btn" id="forceBtn">Force override</button>
+        <button class="cancel-btn" id="cancelForce">Cancel</button>
+      </div>`);
+    const forceBtn = askMessages.querySelector('#forceBtn');
+    const cancelBtn = askMessages.querySelector('#cancelForce');
+    if(forceBtn) forceBtn.addEventListener('click', async ()=>{
+      forceBtn.disabled = true;
+      addAskUserMsg('Yes, force the change.');
+      const statusRow2 = document.createElement('div'); statusRow2.className = 'arow ai';
+      statusRow2.innerHTML = `<div class="status-row"><div class="status-dot"></div><div class="status-text">Propagating upstream…</div></div>`;
+      askMessages.appendChild(statusRow2); scrollAskDown();
+      await sleep(900);
+      statusRow2.remove();
+      addAskAiMsg(`Done — the change was propagated into the locked feature and structure JSON, and the affected item is now labeled <b>Manually Amended</b>. This label will also appear in the Features section.`);
+      amendedNote.style.display = 'flex';
+      renderedDiagrams[currentDiagramView] = false;
+      await renderDiagram(currentDiagramView);
+    });
+    if(cancelBtn) cancelBtn.addEventListener('click', ()=>{ addAskAiMsg('No changes made.'); });
+  }
+}
+askSend.addEventListener('click', handleAskSend);
+askComposer.addEventListener('keydown', (e)=>{
+  if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); handleAskSend(); }
+});
+
+/* ---- visibly "update" the structure after a revision resolves ---- */
+function applyStructureUpdate(){
+  const flag = document.getElementById('authFlag');
+  if(flag) flag.remove();
+
+  const modelsGroup = document.getElementById('g-models');
+  if(modelsGroup && !document.getElementById('f-token-model')){
+    const row = document.createElement('div');
+    row.className = 'file-row new-file';
+    row.dataset.id = 'f-token-model';
+    row.dataset.path = 'src/models/refresh_token.py';
+    row.innerHTML = `
+      <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+      <div class="file-main"><div class="file-path">refresh_token<span class="dim">.py</span></div>
+        <div class="file-tags"><span class="feature-tag">Role-Based Access Control</span><span class="ai-tag">AI-added</span></div></div>
+      <div class="comment-trigger" data-icon></div>`;
+    row.querySelector('.comment-trigger').innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
+    modelsGroup.appendChild(row);
+    document.getElementById('modelsCount').textContent = '3 files';
+    document.getElementById('structMeta').textContent = '5 FILES · 3 FEATURES MAPPED';
+  }
+}
+</script>
+
+</body>
+</html>
