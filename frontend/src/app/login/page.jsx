@@ -15,41 +15,27 @@ function LoginFormContent() {
 
   const { user, loading: authLoading } = useAuth();
 
-  // Redirect to app/destination if already logged in
-  useEffect(() => {
-    if (!authLoading && user) {
-      router.push(redirectTo);
-    }
-  }, [user, authLoading, redirectTo, router]);
-
-  if (user) {
-    return (
-      <div className="auth-page-root">
-        <div className="auth-card" style={{ textAlign: 'center', padding: 36 }}>
-          <div style={{ color: 'var(--blueprint-cyan)', fontFamily: 'var(--font-mono)', fontSize: 13, marginBottom: 8 }}>
-            ✓ Authenticated successfully
-          </div>
-          <div style={{ color: 'var(--ink-secondary)', fontSize: 12 }}>
-            Entering Blueprint Wizard…
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Mode: 'login' | 'signup' | 'forgot' | 'unverified' | 'signup_success'
+  // ALL hooks must be called unconditionally before any return
   const [mode, setMode] = useState('login');
-
-  // Form state
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorBanner, setErrorBanner] = useState('');
   const [infoBanner, setInfoBanner] = useState('');
-
-  // Resend cooldown timer
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [toastPopup, setToastPopup] = useState(null); // { type: 'success' | 'error', message: string }
+
+  // Redirect to app/destination if already logged in
+  useEffect(() => {
+    if (!authLoading && user) {
+      setToastPopup({ type: 'success', message: 'Login successful! Redirecting...' });
+      const timer = setTimeout(() => {
+        router.push(redirectTo);
+      }, 1200);
+      return () => clearTimeout(timer);
+    }
+  }, [user, authLoading, redirectTo, router]);
 
   useEffect(() => {
     let timer;
@@ -58,6 +44,14 @@ function LoginFormContent() {
     }
     return () => clearInterval(timer);
   }, [resendCooldown]);
+
+  // Auto-dismiss toast after 3 seconds
+  useEffect(() => {
+    if (toastPopup) {
+      const t = setTimeout(() => setToastPopup(null), 3500);
+      return () => clearTimeout(t);
+    }
+  }, [toastPopup]);
 
   // Validation
   const pwdValidation = validatePasswordRules(password);
@@ -167,10 +161,12 @@ function LoginFormContent() {
         }
       });
       if (error) {
+        setToastPopup({ type: 'error', message: 'Google Sign-In failed. Please try again.' });
         setErrorBanner(error.message || 'Google Sign-In failed.');
         setSubmitting(false);
       }
     } catch (err) {
+      setToastPopup({ type: 'error', message: 'Google Sign-In failed. Please try again.' });
       setErrorBanner('Google Sign-In failed.');
       setSubmitting(false);
     }
@@ -196,8 +192,51 @@ function LoginFormContent() {
     }
   };
 
+  // Authenticated user: show success card (AFTER all hooks)
+  if (user) {
+    return (
+      <div className="auth-page-root">
+        {toastPopup && (
+          <div style={{
+            position: 'fixed', top: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 9999,
+            padding: '14px 28px', borderRadius: 8,
+            background: toastPopup.type === 'success' ? 'var(--bg-surface-elevated)' : 'var(--danger-red-dim, rgba(239,68,68,0.15))',
+            border: `1px solid ${toastPopup.type === 'success' ? 'var(--success-green)' : 'var(--danger-red)'}`,
+            color: toastPopup.type === 'success' ? 'var(--success-green)' : '#FCA5A5',
+            fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.5)', animation: 'fadeInDown 0.3s ease'
+          }}>
+            {toastPopup.type === 'success' ? '\u2713' : '\u2717'} {toastPopup.message}
+          </div>
+        )}
+        <div className="auth-card" style={{ textAlign: 'center', padding: 36 }}>
+          <div style={{ color: 'var(--blueprint-cyan)', fontFamily: 'var(--font-mono)', fontSize: 13, marginBottom: 8 }}>
+            Login successful!
+          </div>
+          <div style={{ color: 'var(--ink-secondary)', fontSize: 12 }}>
+            Entering Blueprint Wizard...
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="auth-page-root">
+      {/* Toast Popup */}
+      {toastPopup && (
+        <div style={{
+          position: 'fixed', top: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 9999,
+          padding: '14px 28px', borderRadius: 8,
+          background: toastPopup.type === 'success' ? 'var(--bg-surface-elevated)' : 'var(--danger-red-dim, rgba(239,68,68,0.15))',
+          border: `1px solid ${toastPopup.type === 'success' ? 'var(--success-green)' : 'var(--danger-red)'}`,
+          color: toastPopup.type === 'success' ? 'var(--success-green)' : '#FCA5A5',
+          fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.5)', animation: 'fadeInDown 0.3s ease'
+        }}>
+          {toastPopup.type === 'success' ? '\u2713' : '\u2717'} {toastPopup.message}
+        </div>
+      )}
       {/* Brand Header */}
       <Link href="/" className="auth-header-brand" title="MimarAi Home">
         <img src="/assets/mimarai-logo-hero.png" alt="MimarAi Emblem" className="auth-header-logo" />
