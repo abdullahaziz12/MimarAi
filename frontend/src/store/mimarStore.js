@@ -677,8 +677,14 @@ export const useMimarStore = create((set, get) => ({
       const data = JSON.parse(raw);
       if (!data) return false;
 
+      // Filter out any stale error message bubbles from saved chat session
+      const cleanMessages = (data.messages || []).filter(
+        m => !m.text?.includes('Network error') && !m.text?.includes('classification failed') && !m.id?.startsWith('ai-err-')
+      );
+
       set({
         ...data,
+        messages: cleanMessages.length > 0 ? cleanMessages : initialMimarState.messages,
         operationRunning: false,
         activeController: null,
         askAiRunning: false,
