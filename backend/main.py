@@ -122,12 +122,23 @@ import html
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+import re
+from pydantic import BaseModel, field_validator
+
 # --- Schemas ---
 class ContactMessage(BaseModel):
     name: str
-    email: EmailStr
+    email: str
     topic: str
     message: str
+
+    @field_validator('email')
+    @classmethod
+    def validate_email_format(cls, v: str) -> str:
+        v = v.strip()
+        if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", v):
+            raise ValueError("Invalid email address format.")
+        return v
 
 
 # --- Reusable SMTP Email Dispatcher ---
