@@ -138,6 +138,7 @@ export default function SettingsModal({ isOpen, onClose }) {
                 className="form-input"
                 value={user.email || ''}
                 disabled
+                autoComplete="email"
                 style={{ opacity: 0.6, cursor: 'not-allowed' }}
               />
               <span style={{ fontSize: 10, color: 'var(--ink-muted)', marginTop: 2 }}>Email address cannot be changed.</span>
@@ -154,6 +155,7 @@ export default function SettingsModal({ isOpen, onClose }) {
                 className="form-input"
                 value={nameVal}
                 onChange={(e) => setNameVal(e.target.value)}
+                autoComplete="name"
                 maxLength={60}
                 required
               />
@@ -188,6 +190,7 @@ export default function SettingsModal({ isOpen, onClose }) {
                 placeholder="Enter current password"
                 value={oldPassword}
                 onChange={(e) => setOldPassword(e.target.value)}
+                autoComplete="current-password"
                 required
               />
             </div>
@@ -201,6 +204,7 @@ export default function SettingsModal({ isOpen, onClose }) {
                 placeholder="Enter new password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
+                autoComplete="new-password"
                 required
               />
 
@@ -238,6 +242,7 @@ export default function SettingsModal({ isOpen, onClose }) {
                 placeholder="Re-enter new password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
+                autoComplete="new-password"
                 required
               />
               {confirmPassword.length > 0 && !passMatches && (

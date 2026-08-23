@@ -24,6 +24,7 @@ function LoginFormContent() {
   const [errorBanner, setErrorBanner] = useState('');
   const [infoBanner, setInfoBanner] = useState('');
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [isDuplicateEmail, setIsDuplicateEmail] = useState(false);
 
   // Redirect to landing page immediately if logged in
   useEffect(() => {
@@ -117,15 +118,30 @@ function LoginFormContent() {
         }
       });
 
-      if (error) {
+      const isDuplicate = 
+        (error && (
+          error.message?.toLowerCase().includes('already registered') ||
+          error.message?.toLowerCase().includes('already exists') ||
+          error.code === 'user_already_exists'
+        )) ||
+        (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0);
+
+      if (isDuplicate) {
+        setIsDuplicateEmail(true);
+        setErrorBanner('An account with this email already exists.');
+        triggerToast('An account with this email already exists.');
+      } else if (error) {
+        setIsDuplicateEmail(false);
         setErrorBanner(error.message || 'Could not complete registration. Please check your details.');
         triggerToast(error.message || 'Could not complete registration. Please check your details.');
       } else {
+        setIsDuplicateEmail(false);
         setMode('signup_success');
         setResendCooldown(60);
         triggerToast('Account created. Please verify your email.');
       }
     } catch (err) {
+      setIsDuplicateEmail(false);
       setErrorBanner('Could not complete registration. Please try again.');
       triggerToast('Could not complete registration. Please try again.');
     } finally {
@@ -246,8 +262,31 @@ function LoginFormContent() {
 
         {/* Global Banners */}
         {errorBanner && (
-          <div className="auth-error-banner">
+          <div className="auth-error-banner" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>{errorBanner}</span>
+            {isDuplicateEmail && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('login');
+                  setErrorBanner('');
+                  setIsDuplicateEmail(false);
+                }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--blueprint-cyan)',
+                  textDecoration: 'underline',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
+                  marginLeft: 10
+                }}
+              >
+                Log in instead →
+              </button>
+            )}
           </div>
         )}
         {infoBanner && (
@@ -270,6 +309,7 @@ function LoginFormContent() {
                 placeholder="you@company.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
                 required
                 autoFocus
               />
@@ -300,6 +340,7 @@ function LoginFormContent() {
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
                 required
               />
             </div>
@@ -357,6 +398,7 @@ function LoginFormContent() {
                 placeholder="you@company.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
                 required
                 autoFocus
               />
@@ -373,6 +415,7 @@ function LoginFormContent() {
                 placeholder="Create a strong password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                autoComplete="new-password"
                 required
               />
 
@@ -412,6 +455,7 @@ function LoginFormContent() {
                 placeholder="Re-enter password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
+                autoComplete="new-password"
                 required
               />
               {confirmPassword.length > 0 && !passwordsMatch && (
@@ -467,6 +511,7 @@ function LoginFormContent() {
                 placeholder="you@company.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
                 required
                 autoFocus
               />

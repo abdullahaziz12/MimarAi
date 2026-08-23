@@ -61,6 +61,7 @@ export default function OnboardingNameModal() {
               placeholder="e.g. Abdullah Aziz"
               value={nameInput}
               onChange={(e) => setNameInput(e.target.value)}
+              autoComplete="name"
               maxLength={60}
               required
               autoFocus

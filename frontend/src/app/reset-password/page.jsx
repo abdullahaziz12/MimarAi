@@ -33,10 +33,11 @@ export default function ResetPasswordPage() {
       if (error) {
         setErrorBanner(error.message || 'Failed to reset password. Link may have expired.');
       } else {
-        setSuccessBanner('Password reset successfully! Redirecting to Blueprint Wizard…');
+        sessionStorage.setItem("mimarai_toast", "Password updated successfully");
+        setSuccessBanner('Password reset successfully! Redirecting…');
         setTimeout(() => {
-          router.push('/app');
-        }, 2000);
+          router.push('/');
+        }, 1500);
       }
     } catch (err) {
       setErrorBanner('Failed to reset password.');
@@ -81,6 +82,7 @@ export default function ResetPasswordPage() {
               placeholder="Enter new password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
               required
               autoFocus
             />
@@ -121,6 +123,7 @@ export default function ResetPasswordPage() {
               placeholder="Re-enter new password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
+              autoComplete="new-password"
               required
             />
             {confirmPassword.length > 0 && !passwordsMatch && (
