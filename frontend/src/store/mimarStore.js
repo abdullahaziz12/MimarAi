@@ -255,9 +255,31 @@ export const useMimarStore = create((set, get) => ({
     get().saveProjectState();
   },
   setFixedInputs: (inputs) => {
-    set(state => ({
-      fixedInputs: typeof inputs === 'function' ? inputs(state.fixedInputs) : { ...state.fixedInputs, ...inputs }
-    }));
+    set(state => {
+      const newFixedInputs = typeof inputs === 'function' ? inputs(state.fixedInputs) : { ...state.fixedInputs, ...inputs };
+      
+      // Persist to backend asynchronously
+      const projectId = get().projectId;
+      if (projectId) {
+        const getBackendUrl = () => {
+          if (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_BACKEND_URL) return process.env.NEXT_PUBLIC_BACKEND_URL;
+          if (typeof window !== 'undefined') {
+            const host = window.location.hostname;
+            if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:8000';
+          }
+          return 'https://mimaraibackend-euj86d7p.b4a.run';
+        };
+        const backendUrl = getBackendUrl();
+        
+        fetch(`${backendUrl}/api/projects/${projectId}/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fixed_inputs: newFixedInputs })
+        }).catch(err => console.warn("Incremental fixed_inputs persistence failed:", err));
+      }
+
+      return { fixedInputs: newFixedInputs };
+    });
     get().saveProjectState();
   },
   resetStep0: () => {

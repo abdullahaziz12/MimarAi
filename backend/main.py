@@ -365,7 +365,7 @@ class CreateDraftRequest(BaseModel):
     idea_text: Optional[str] = None
 
 class UpdateProjectStatusRequest(BaseModel):
-    status: str
+    status: Optional[str] = None
     fixed_inputs: Optional[Dict[str, Any]] = None
 
 GREETING_WHITELIST = {
@@ -470,10 +470,13 @@ async def update_project_status(
         return {"status": "ok", "project_id": project_id, "updated_status": req.status}
 
     try:
-        payload = {"status": req.status}
+        payload = {}
+        if req.status:
+            payload["status"] = req.status
         if req.fixed_inputs:
             payload["fixed_inputs"] = req.fixed_inputs
-        client.table("projects").update(payload).eq("id", project_id).execute()
+        if payload:
+            client.table("projects").update(payload).eq("id", project_id).execute()
         return {"status": "ok", "project_id": project_id, "updated_status": req.status}
     except Exception as e:
         print(f"[Update Project Status Error] {e}")
