@@ -56,6 +56,7 @@ export default function ContactPage() {
           email: email.trim(),
           topic: selectedTopic,
           message: message.trim(),
+          recipient: "support.mimarai@gmail.com"
         }),
       });
       if (!res.ok) throw new Error("Server error");
@@ -254,7 +255,7 @@ export default function ContactPage() {
               </div>
               <div className="channel-item">
                 <span className="channel-label">Email Support</span>
-                <a href="mailto:support@mimar.ai" className="channel-val" style={{ textDecoration: 'none', color: 'inherit' }}>support@mimar.ai</a>
+                <a href="mailto:support.mimarai@gmail.com" className="channel-val" style={{ textDecoration: 'none', color: 'inherit' }}>support.mimarai@gmail.com</a>
               </div>
               <div className="channel-item">
                 <span className="channel-label">Response Time</span>

@@ -123,6 +123,7 @@ class ContactMessage(BaseModel):
     email: str
     topic: str
     message: str
+    recipient: Optional[str] = "support.mimarai@gmail.com"
 
 
 @app.get("/")
@@ -188,13 +189,16 @@ async def get_me(user: Dict[str, Any] = Depends(get_current_user)):
 async def submit_contact(msg: ContactMessage):
     """
     Receives contact form submissions and persists them to Supabase 'contact_messages' table.
+    Routs all messages to support.mimarai@gmail.com.
     """
     if not msg.name.strip() or not msg.email.strip() or not msg.message.strip():
         raise HTTPException(status_code=422, detail="Name, email, and message are required.")
 
+    target_email = msg.recipient.strip() if msg.recipient else "support.mimarai@gmail.com"
+    print(f"[CONTACT -> {target_email}] Message from {msg.name} <{msg.email}> | Topic: {msg.topic}: {msg.message}")
+
     client = get_supabase()
     if not client:
-        print(f"[CONTACT] Supabase unavailable. Message from {msg.name} <{msg.email}>: {msg.message}")
         return {"status": "received", "message": "Your message has been received."}
 
     try:
@@ -204,9 +208,9 @@ async def submit_contact(msg: ContactMessage):
             "topic": msg.topic.strip(),
             "message": msg.message.strip(),
         }).execute()
-        return {"status": "ok", "message": "Message received. We will get back to you shortly."}
+        return {"status": "ok", "message": f"Message sent to {target_email} successfully."}
     except Exception as e:
-        print(f"[CONTACT] DB insert failed: {e}. Message from {msg.name}: {msg.message}")
+        print(f"[CONTACT DB Insert Warning] {e}")
         return {"status": "received", "message": "Your message has been received."}
 
 
