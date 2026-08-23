@@ -171,14 +171,15 @@
       transform: translateY(-1px);
     }
 .landing-page-root .btn-outline{
-      background: transparent;
-      color: var(--blueprint-cyan);
-      border-color: var(--blueprint-cyan-border);
+      background: rgba(56, 189, 248, 0.1) !important;
+      color: var(--blueprint-cyan) !important;
+      border-color: var(--blueprint-cyan-border) !important;
     }
 .landing-page-root .btn-outline:hover{
-      background: var(--blueprint-cyan-dim);
-      border-color: var(--blueprint-cyan);
-      box-shadow: 0 0 14px var(--blueprint-cyan-dim);
+      background: rgba(56, 189, 248, 0.22) !important;
+      border-color: var(--blueprint-cyan) !important;
+      box-shadow: 0 0 14px var(--blueprint-cyan-dim) !important;
+      transform: translateY(-1px);
     }
 
     /* Hero Section */
