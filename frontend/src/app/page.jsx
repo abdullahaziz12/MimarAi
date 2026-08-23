@@ -22,13 +22,16 @@ export default function LandingPage() {
     if (user) {
       const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://mimaraibackend-euj86d7p.b4a.run';
       fetch(`${backendUrl}/api/projects/drafts`)
-        .then(res => res.json())
+        .then(res => {
+          if (res.ok) return res.json();
+          return null;
+        })
         .then(data => {
           if (data && data.drafts) {
             setDrafts(data.drafts);
           }
         })
-        .catch(err => console.warn("Failed to load draft projects:", err));
+        .catch(() => {});
     }
 
     try {
