@@ -8,7 +8,7 @@ import '../styles/auth.css';
 
 export default function HeaderAvatar() {
   const router = useRouter();
-  const { user, profile, logout, getAvatarColor } = useAuth();
+  const { user, profile, loading, logout, getAvatarColor } = useAuth();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const containerRef = useRef(null);
@@ -22,6 +22,17 @@ export default function HeaderAvatar() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // While session is being resolved, render an invisible placeholder
+  // to prevent flashing "Log In" then avatar (or vice-versa) on navigation.
+  if (loading) {
+    return (
+      <span
+        aria-hidden="true"
+        style={{ display: 'inline-block', width: 68, height: 30, visibility: 'hidden' }}
+      />
+    );
+  }
 
   if (!user) {
     return (
