@@ -15,20 +15,9 @@ app = FastAPI(
 )
 
 # CORS setup
-frontend_url = os.getenv("FRONTEND_URL", "https://mimar-ai.vercel.app")
-allowed_origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "https://mimar-ai.vercel.app",
-]
-if frontend_url and frontend_url not in allowed_origins and frontend_url != "*":
-    allowed_origins.append(frontend_url)
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if frontend_url == "*" else allowed_origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

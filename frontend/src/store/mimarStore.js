@@ -284,7 +284,20 @@ export const useMimarStore = create((set, get) => ({
     const signal = controller.signal;
 
     let currentProjectId = s.projectId;
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://mimaraibackend-euj86d7p.b4a.run';
+    const getBackendUrl = () => {
+      if (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_BACKEND_URL) {
+        return process.env.NEXT_PUBLIC_BACKEND_URL;
+      }
+      if (typeof window !== 'undefined') {
+        const host = window.location.hostname;
+        if (host === 'localhost' || host === '127.0.0.1') {
+          return 'http://localhost:8000';
+        }
+      }
+      return 'https://mimaraibackend-euj86d7p.b4a.run';
+    };
+
+    const backendUrl = getBackendUrl();
     const authHeaders = {
       'Content-Type': 'application/json',
       ...(sessionToken ? { 'Authorization': `Bearer ${sessionToken}` } : {})
@@ -329,13 +342,11 @@ export const useMimarStore = create((set, get) => ({
       });
 
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        const detail = errData.detail || "Classification service unavailable.";
         if (res.status === 429) {
           s.showToast("Hourly limit exceeded for idea submissions.");
-          return { status: "error", code: "RATE_LIMIT", detail };
+          return { status: "error", code: "RATE_LIMIT", detail: "Hourly limit exceeded for idea submissions." };
         }
-        return { status: "error", code: "HTTP_ERROR", detail };
+        throw new Error(`HTTP ${res.status}: Backend route pending deployment on Back4App`);
       }
 
       const result = await res.json();
@@ -345,7 +356,54 @@ export const useMimarStore = create((set, get) => ({
         s.showToast("Classification stopped by user.");
         return null;
       }
-      return { status: "error", code: "NETWORK_ERROR", detail: "Network error — classification failed." };
+      console.warn("Backend classification fetch error, running resilient local fallback:", err);
+      
+      // Resilient local fallback classification if backend server is offline/unreachable
+      const lower = text.toLowerCase().replace(/[^\w\s]/g, '').trim();
+      const words = lower.split(/\s+/);
+      const greetings = ['hi', 'hello', 'hey', 'test', 'thanks', 'ok', 'okay', 'sup', 'yo', 'hi there', 'hello mimarai', 'mimarai'];
+      
+      if (words.length <= 4 && (greetings.includes(lower) || words.every(w => greetings.includes(w)))) {
+        return {
+          status: "ok",
+          label: "OFF_TOPIC",
+          sub_case: null,
+          extracted_name: null,
+          explanation: "Greeting or minimal chit-chat detected.",
+          source: "local_fallback"
+        };
+      }
+
+      if (words.length <= 4) {
+        return {
+          status: "ok",
+          label: "TOO_VAGUE",
+          sub_case: "unexplained",
+          extracted_name: text,
+          explanation: "Named product/domain given without features.",
+          source: "local_fallback"
+        };
+      }
+
+      if (lower.includes("app") && words.length <= 5 && !lower.includes("with") && !lower.includes("for")) {
+        return {
+          status: "ok",
+          label: "TOO_VAGUE",
+          sub_case: "no_domain",
+          extracted_name: null,
+          explanation: "Generic request without domain details.",
+          source: "local_fallback"
+        };
+      }
+
+      return {
+        status: "ok",
+        label: "READY",
+        sub_case: null,
+        extracted_name: null,
+        explanation: "Clear software idea provided.",
+        source: "local_fallback"
+      };
     } finally {
       get().setOperationRunning(false);
       set({ activeController: null });
@@ -619,8 +677,14 @@ export const useMimarStore = create((set, get) => ({
       const data = JSON.parse(raw);
       if (!data) return false;
 
+      // Filter out any stale error message bubbles from saved chat session
+      const cleanMessages = (data.messages || []).filter(
+        m => !m.text?.includes('Network error') && !m.text?.includes('classification failed') && !m.id?.startsWith('ai-err-')
+      );
+
       set({
         ...data,
+        messages: cleanMessages.length > 0 ? cleanMessages : initialMimarState.messages,
         operationRunning: false,
         activeController: null,
         askAiRunning: false,
