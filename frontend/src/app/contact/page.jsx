@@ -56,7 +56,6 @@ export default function ContactPage() {
           email: email.trim(),
           topic: selectedTopic,
           message: message.trim(),
-          recipient: "support.mimarai@gmail.com"
         }),
       });
       if (!res.ok) throw new Error("Server error");

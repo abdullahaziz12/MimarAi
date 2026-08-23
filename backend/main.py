@@ -117,13 +117,59 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[
     )
 
 
+import smtplib
+import html
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
 # --- Schemas ---
 class ContactMessage(BaseModel):
     name: str
-    email: str
+    email: EmailStr
     topic: str
     message: str
-    recipient: Optional[str] = "support.mimarai@gmail.com"
+
+
+# --- Reusable SMTP Email Dispatcher ---
+def send_smtp_email(to_email: str, subject: str, html_body: str, plain_text_body: str) -> bool:
+    """
+    Connects to Gmail SMTP via STARTTLS using environment variables and dispatches
+    a multipart (text/plain + text/html) email. Returns True on success, False on failure.
+    Never exposes or logs credentials.
+    """
+    smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+    smtp_port = int(os.getenv("SMTP_PORT", 587))
+    gmail_user = os.getenv("GMAIL_USER", "support.mimarai@gmail.com")
+    gmail_password = os.getenv("GMAIL_APP_PASSWORD", "").strip()
+
+    if not gmail_password or not gmail_user:
+        print("[SMTP Warning] GMAIL_APP_PASSWORD or GMAIL_USER is not set in environment. Skipping email dispatch.")
+        return False
+
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = f"MimarAI Support <{gmail_user}>"
+        msg["To"] = to_email
+
+        # Attach plain-text fallback first, then HTML version
+        part1 = MIMEText(plain_text_body, "plain", "utf-8")
+        part2 = MIMEText(html_body, "html", "utf-8")
+        msg.attach(part1)
+        msg.attach(part2)
+
+        server = smtplib.SMTP(smtp_server, smtp_port, timeout=12)
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login(gmail_user, gmail_password)
+        server.send_message(msg)
+        server.quit()
+        print(f"[SMTP Success] Email successfully sent to {to_email} with subject: '{subject}'")
+        return True
+    except Exception as e:
+        print(f"[SMTP Error] Failed to send email to {to_email}: {str(e)}")
+        return False
 
 
 @app.get("/")
@@ -188,33 +234,125 @@ async def get_me(user: Dict[str, Any] = Depends(get_current_user)):
 @app.post("/contact")
 async def submit_contact(msg: ContactMessage):
     """
-    Receives contact form submissions and persists them to Supabase 'contact_messages' table.
-    Routs all messages to support.mimarai@gmail.com.
+    Receives contact form submissions, validates data, persists to Supabase DB,
+    dispatches notification email to support.mimarai@gmail.com, and sends an HTML auto-reply to user.
     """
     if not msg.name.strip() or not msg.email.strip() or not msg.message.strip():
         raise HTTPException(status_code=422, detail="Name, email, and message are required.")
 
-    target_email = msg.recipient.strip() if msg.recipient else "support.mimarai@gmail.com"
-    print(f"[CONTACT -> {target_email}] Message from {msg.name} <{msg.email}> | Topic: {msg.topic}: {msg.message}")
+    support_email = "support.mimarai@gmail.com"
+    
+    # 1. HTML escape user inputs to prevent HTML injection in emails
+    safe_name = html.escape(msg.name.strip())
+    safe_email = html.escape(msg.email.strip())
+    safe_topic = html.escape(msg.topic.strip())
+    safe_message = html.escape(msg.message.strip())
 
+    # 2. Database Persistence
+    db_saved = False
     client = get_supabase()
-    if not client:
-        return {"status": "received", "message": "Your message has been received."}
+    if client:
+        try:
+            client.table("contact_messages").insert({
+                "name": msg.name.strip(),
+                "email": msg.email.strip(),
+                "topic": msg.topic.strip(),
+                "message": msg.message.strip(),
+            }).execute()
+            db_saved = True
+        except Exception as e:
+            print(f"[CONTACT DB Warning] Insert failed: {e}")
 
-    try:
-        client.table("contact_messages").insert({
-            "name": msg.name.strip(),
-            "email": msg.email.strip(),
-            "topic": msg.topic.strip(),
-            "message": msg.message.strip(),
-        }).execute()
-        return {"status": "ok", "message": f"Message sent to {target_email} successfully."}
-    except Exception as e:
-        print(f"[CONTACT DB Insert Warning] {e}")
-        return {"status": "received", "message": "Your message has been received."}
+    # 3. Notification Email to support.mimarai@gmail.com
+    notif_subject = f"New {msg.topic.strip()} — MimarAI Contact Form"
+    notif_html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; line-height: 1.6; color: #0F172A; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background: #0B0F19; padding: 24px; border-radius: 8px; color: #F8FAFC; border: 1px solid #1E293B;">
+    <h2 style="color: #38BDF8; margin-top: 0;">New Contact Form Submission</h2>
+    <p><strong>From:</strong> {safe_name} (&lt;<a href="mailto:{safe_email}" style="color: #38BDF8;">{safe_email}</a>&gt;)</p>
+    <p><strong>Inquiry Type:</strong> {safe_topic}</p>
+    <div style="background: #161F32; padding: 16px; border-left: 3px solid #38BDF8; border-radius: 4px; margin: 20px 0;">
+      <div style="font-size: 11px; color: #94A3B8; font-family: monospace; text-transform: uppercase; margin-bottom: 6px;">Message Payload:</div>
+      <div style="color: #E2E8F0; white-space: pre-wrap;">"{safe_message}"</div>
+    </div>
+    <hr style="border: 0; border-top: 1px solid #1E293B; margin: 20px 0;">
+    <p style="font-size: 12px; color: #94A3B8; margin-bottom: 0;">MimarAI Production Pipeline — Automated Notification</p>
+  </div>
+</body>
+</html>"""
+
+    notif_plain = f"""New Contact Form Submission
+
+From: {msg.name.strip()} ({msg.email.strip()})
+Inquiry Type: {msg.topic.strip()}
+
+Message:
+"{msg.message.strip()}"
+
+MimarAI Production Pipeline — Automated Notification"""
+
+    notif_sent = send_smtp_email(support_email, notif_subject, notif_html, notif_plain)
+
+    # 4. User Auto-Reply Email to msg.email
+    user_subject = "We received your message — MimarAI"
+    user_html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; line-height: 1.6; color: #0F172A; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background: #0B0F19; padding: 24px; border-radius: 8px; color: #F8FAFC; border: 1px solid #1E293B;">
+    <h2 style="color: #38BDF8; margin-top: 0;">MimarAI Support Confirmation</h2>
+    <p>Hi <strong>{safe_name}</strong>,</p>
+    <p>Thanks for reaching out to MimarAI! This confirms we've received your <strong>{safe_topic}</strong> and it's now in our queue.</p>
+    <p>Our team reviews inquiries daily and typically responds within 24 business hours. If your message included a bug report, feel free to also open an issue on our GitHub repository for faster visibility:</p>
+    <p style="margin: 16px 0;">
+      <a href="https://github.com/abdullahaziz12/MimarAi" style="color: #38BDF8; font-weight: 600; text-decoration: underline;">github.com/abdullahaziz12/MimarAi</a>
+    </p>
+    <div style="background: #161F32; padding: 16px; border-left: 3px solid #38BDF8; border-radius: 4px; margin: 20px 0;">
+      <div style="font-size: 11px; color: #94A3B8; font-family: monospace; text-transform: uppercase; margin-bottom: 6px;">For reference, here's what you sent us:</div>
+      <div style="color: #E2E8F0; white-space: pre-wrap;">"{safe_message}"</div>
+    </div>
+    <p>We'll follow up soon.</p>
+    <hr style="border: 0; border-top: 1px solid #1E293B; margin: 24px 0;">
+    <p style="font-size: 13px; color: #94A3B8; margin-bottom: 0;">
+      <strong>The MimarAI Team</strong><br>
+      Support: <a href="mailto:support.mimarai@gmail.com" style="color: #38BDF8;">support.mimarai@gmail.com</a>
+    </p>
+  </div>
+</body>
+</html>"""
+
+    user_plain = f"""Hi {msg.name.strip()},
+
+Thanks for reaching out to MimarAI! This confirms we've received your {msg.topic.strip()} and it's now in our queue.
+
+Our team reviews inquiries daily and typically responds within 24 business hours. If your message included a bug report, feel free to also open an issue on our GitHub repository for faster visibility:
+https://github.com/abdullahaziz12/MimarAi
+
+For reference, here's what you sent us:
+"{msg.message.strip()}"
+
+We'll follow up soon.
+
+The MimarAI Team
+Support: support.mimarai@gmail.com"""
+
+    user_sent = send_smtp_email(msg.email.strip(), user_subject, user_html, user_plain)
+
+    if not notif_sent or not user_sent:
+        print(f"[CONTACT WARNING] DB Saved={db_saved}. Notification Sent={notif_sent}, User Auto-Reply Sent={user_sent}.")
+
+    return {
+        "status": "ok",
+        "message": "Message received. We will get back to you shortly.",
+        "email_sent": notif_sent and user_sent,
+        "db_saved": db_saved
+    }
 
 
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+
