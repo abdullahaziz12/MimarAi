@@ -63,9 +63,7 @@ export async function POST(req) {
     if (gmailPass && gmailUser) {
       try {
         const transporter = nodemailer.createTransport({
-          host: process.env.SMTP_SERVER || 'smtp.gmail.com',
-          port: parseInt(process.env.SMTP_PORT || '587', 10),
-          secure: false, // TLS
+          service: 'gmail',
           auth: {
             user: gmailUser,
             pass: gmailPass,
@@ -124,25 +122,34 @@ export async function POST(req) {
 
         const userText = `Hi ${name.trim()},\n\nThanks for reaching out to MimarAI! This confirms we've received your ${safeTopic} and it's now in our queue.\n\nOur team reviews inquiries daily and typically responds within 24 business hours. If your message included a bug report, feel free to also open an issue on our GitHub repository for faster visibility:\nhttps://github.com/abdullahaziz12/MimarAi\n\nFor reference, here's what you sent us:\n"${message.trim()}"\n\nWe'll follow up soon.\n\nThe MimarAI Team\nSupport: support.mimarai@gmail.com`;
 
-        await Promise.all([
-          transporter.sendMail({
-            from: `MimarAI Support <${gmailUser}>`,
+        // Send Notification Email
+        try {
+          await transporter.sendMail({
+            from: `"MimarAI Support" <${gmailUser}>`,
             to: 'support.mimarai@gmail.com',
             subject: notifSubject,
             text: notifText,
             html: notifHtml,
-          }),
-          transporter.sendMail({
-            from: `MimarAI Support <${gmailUser}>`,
+          });
+        } catch (nErr) {
+          console.error('[NOTIF MAIL ERROR]', nErr);
+        }
+
+        // Send User Confirmation Auto-Reply
+        try {
+          await transporter.sendMail({
+            from: `"MimarAI Support" <${gmailUser}>`,
             to: email.trim(),
             subject: userSubject,
             text: userText,
             html: userHtml,
-          }),
-        ]);
-        emailSent = true;
+          });
+          emailSent = true;
+        } catch (uErr) {
+          console.error('[USER CONFIRMATION MAIL ERROR]', uErr);
+        }
       } catch (mailErr) {
-        console.error('[CONTACT API MAIL ERROR]', mailErr);
+        console.error('[CONTACT API GENERAL MAIL ERROR]', mailErr);
       }
     }
 
