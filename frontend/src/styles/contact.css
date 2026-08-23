@@ -74,14 +74,16 @@
     }
 .contact-page-root .top-notice b{ color: var(--accent-orange); }
 
-    /* Sticky Navbar */
+    /* Fixed Navbar — always visible at top of viewport while scrolling */
 .contact-page-root .nav-wrap{
-      position: sticky;
+      position: fixed;
       top: 0;
+      left: 0;
+      right: 0;
       z-index: 1000;
-      background: var(--bg-glass);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
+      background: rgba(9, 15, 28, 0.94);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
       border-bottom: 1px solid var(--border-hairline);
       width: 100%;
     }
@@ -184,11 +186,11 @@
       transform: translateY(-1px);
     }
 
-    /* Main Container */
+    /* Main Container — top padding accounts for fixed nav height (~88px) */
 .contact-page-root .main-wrap{
       max-width: 1080px;
       margin: 0 auto;
-      padding: 64px 28px 100px;
+      padding: 152px 28px 100px;
       flex: 1 0 auto;
       width: 100%;
     }
@@ -576,4 +578,11 @@
 .contact-page-root .contact-layout{ grid-template-columns: 1fr; }
 .contact-page-root .form-grid{ grid-template-columns: 1fr; gap: 0; }
 .contact-page-root .contact-card{ padding: 24px; }
+.contact-page-root .main-wrap{ padding-top: 120px; }
+    }
+
+    @media (max-width: 640px) {
+.contact-page-root .main-wrap{ padding-top: 108px; padding-left: 16px; padding-right: 16px; }
+.contact-page-root .landing-nav{ padding: 12px 16px; }
+.contact-page-root .nav-links a:not(.btn):not(.btn-primary){ display: none; }
     }
