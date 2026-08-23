@@ -342,13 +342,11 @@ export const useMimarStore = create((set, get) => ({
       });
 
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        const detail = errData.detail || "Classification service unavailable.";
         if (res.status === 429) {
           s.showToast("Hourly limit exceeded for idea submissions.");
-          return { status: "error", code: "RATE_LIMIT", detail };
+          return { status: "error", code: "RATE_LIMIT", detail: "Hourly limit exceeded for idea submissions." };
         }
-        return { status: "error", code: "HTTP_ERROR", detail };
+        throw new Error(`HTTP ${res.status}: Backend route pending deployment on Back4App`);
       }
 
       const result = await res.json();
