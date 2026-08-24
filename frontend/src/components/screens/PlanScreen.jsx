@@ -11,11 +11,15 @@ export default function PlanScreen() {
     planComments,
     rejectedFeatures,
     operationRunning,
+    ideaText,
+    fixedInputs,
+    generationState,
     toggleFeatureReject,
     addComment,
     deleteComment,
     acceptPlan,
-    setOpenReviewSheetStage
+    setOpenReviewSheetStage,
+    showToast
   } = useMimarStore();
 
   const [activeCommentId, setActiveCommentId] = useState(null);
@@ -23,6 +27,30 @@ export default function PlanScreen() {
 
   const isActive = currentScreen === 'plan';
   const commentCount = Object.keys(planComments).length;
+
+  const currentGenState = generationState || {
+    idea_objective: ideaText || "A precision-engineering web app that acts as an AI architect for developers.",
+    fixed_inputs: fixedInputs || {},
+    features: [
+      { id: 'f1', name: 'Role-Based Access Control', description: 'Admins, loan officers, and auditors each get strictly scoped JWT permissions.', source: 'user_originated' },
+      { id: 'f2', name: 'Loan & Interest Management', description: 'Create, approve, and track loans with configurable interest rules and principal ranges.', source: 'user_originated' },
+      { id: 'f3', name: 'Audit Logging', description: 'Every approval and rate change is recorded asynchronously with actor and timestamp.', source: 'ai_added' },
+      { id: 'f4', name: 'Automated Interest Recalculation', description: 'Recalculates outstanding balances nightly against the rate table via background cron.', source: 'ai_added' }
+    ]
+  };
+
+  const featuresList = currentGenState.features || [];
+  const activeFeatures = featuresList.filter(f => !rejectedFeatures[f.id]);
+  const activeCount = activeFeatures.length;
+
+  const handleToggleReject = (featureId) => {
+    if (planAccepted) return;
+    if (!rejectedFeatures[featureId] && activeCount <= 1) {
+      showToast("Cannot reject feature: plan requires at least 1 active feature remaining.");
+      return;
+    }
+    toggleFeatureReject(featureId);
+  };
 
   const handleOpenComposer = (id, quote) => {
     if (planAccepted) return;
@@ -44,6 +72,8 @@ export default function PlanScreen() {
     deleteComment('plan', id);
     setActiveCommentId(null);
   };
+
+  const currentInputs = currentGenState.fixed_inputs || fixedInputs || {};
 
   return (
     <div className={`screen scrollable ${isActive ? 'active' : ''} ${planAccepted ? 'readonly-mode' : ''}`} id="screen-plan">
@@ -81,9 +111,9 @@ export default function PlanScreen() {
               type="button"
               className={`btn ${planAccepted ? 'btn-success' : 'btn-primary'} ${commentCount > 0 && !planAccepted ? 'disabled-by-comments' : ''}`}
               id="acceptBtnPlan"
-              disabled={planAccepted || operationRunning}
+              disabled={planAccepted || operationRunning || activeCount === 0}
               onClick={acceptPlan}
-              title={commentCount > 0 && !planAccepted ? `Cannot accept with ${commentCount} pending review comment(s). Submit comments for AI revision, or delete comments to accept.` : ''}
+              title={activeCount === 0 ? 'Plan requires at least 1 active feature remaining.' : commentCount > 0 && !planAccepted ? `Cannot accept with ${commentCount} pending review comment(s). Submit comments for AI revision, or delete comments to accept.` : ''}
             >
               {planAccepted ? '✓ Plan Accepted' : 'Accept Plan →'}
             </button>
@@ -92,17 +122,18 @@ export default function PlanScreen() {
 
         <div className="doc-scroll-area">
           <div className="screen-body" id="docContentPlan">
-            <div className="doc-title">MimarAi — "Loan Desk Studio"</div>
+            <div className="doc-title">MimarAi — Architecture Plan</div>
             <div className="doc-sub">
               Dual-model cross-checked feature plan. Click any section to comment, or click Accept Plan to lock and progress.
             </div>
 
+            {/* 1. IDEA & OBJECTIVE */}
             <div className="section-label">Idea &amp; Objective</div>
             <div
               className={`block ${planComments['idea'] ? 'commented' : ''}`}
               data-id="idea"
             >
-              A precision-engineering web app that acts as an AI architect for developers and students — it removes "vibe-coding blind" by running an idea through a dual-model pipeline before a single line of code is written.
+              {currentGenState.idea_objective}
               <div
                 className="comment-trigger"
                 data-icon
@@ -134,10 +165,11 @@ export default function PlanScreen() {
               </div>
             )}
 
+            {/* 2. FIXED INPUTS */}
             <div className="section-label">Fixed Inputs</div>
             <div className={`block ${planComments['stack'] ? 'commented' : ''}`} data-id="stack">
-              <span className="kv">Tech stack — <b>Next.js (App Router) + FastAPI + SQLAlchemy</b></span>
-              <div className="comment-trigger" data-icon onClick={() => handleOpenComposer('stack', 'Tech stack')}>
+              <span className="kv">Tech Stack — <b>{currentInputs.stack || 'Next.js + Tailwind CSS'}</b></span>
+              <div className="comment-trigger" data-icon onClick={() => handleOpenComposer('stack', 'Tech Stack')}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
                 </svg>
@@ -157,7 +189,7 @@ export default function PlanScreen() {
                   )}
                   <span style={{ flex: 1 }}></span>
                   <button className="ghost-btn" onClick={() => setActiveCommentId(null)}>Cancel</button>
-                  <button className="solid-btn" onClick={() => handleSaveComment('stack', 'Tech stack')}>
+                  <button className="solid-btn" onClick={() => handleSaveComment('stack', 'Tech Stack')}>
                     {planComments['stack'] ? 'Update Comment' : 'Add Comment'}
                   </button>
                 </div>
@@ -165,7 +197,7 @@ export default function PlanScreen() {
             )}
 
             <div className={`block ${planComments['db'] ? 'commented' : ''}`} data-id="db">
-              <span className="kv">Database — <b>Supabase (PostgreSQL with RLS)</b></span>
+              <span className="kv">Database — <b>{currentInputs.database || 'Supabase (PostgreSQL)'}</b></span>
               <div className="comment-trigger" data-icon onClick={() => handleOpenComposer('db', 'Database')}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
@@ -194,7 +226,7 @@ export default function PlanScreen() {
             )}
 
             <div className={`block ${planComments['deploy'] ? 'commented' : ''}`} data-id="deploy">
-              <span className="kv">Deployment — <b>Vercel (Frontend) + Render (FastAPI / MCP Server)</b></span>
+              <span className="kv">Deployment — <b>{currentInputs.deployment || 'Vercel + Back4App'}</b></span>
               <div className="comment-trigger" data-icon onClick={() => handleOpenComposer('deploy', 'Deployment')}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
@@ -222,174 +254,90 @@ export default function PlanScreen() {
               </div>
             )}
 
+            {/* 3. FEATURES LIST */}
             <div className="section-label">Features</div>
-            <div className={`block ${planComments['f1'] ? 'commented' : ''}`} data-id="f1">
-              <div className="feature-row"><span className="feature-name">Role-Based Access Control</span></div>
-              <span className="kv">Admins, loan officers, and auditors each get strictly scoped JWT permissions.</span>
-              <div className="comment-trigger" data-icon onClick={() => handleOpenComposer('f1', 'Role-Based Access Control')}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-                </svg>
-              </div>
-            </div>
-            {activeCommentId === 'f1' && (
-              <div className="composer" id="liveComposer_plan">
-                <textarea
-                  value={commentText}
-                  onChange={(e) => setCommentText(e.target.value)}
-                  placeholder="Leave a comment on this item…"
-                  autoFocus
-                />
-                <div className="composer-actions">
-                  {planComments['f1'] && (
-                    <button className="danger-btn" onClick={() => handleDeleteComment('f1')}>Delete</button>
-                  )}
-                  <span style={{ flex: 1 }}></span>
-                  <button className="ghost-btn" onClick={() => setActiveCommentId(null)}>Cancel</button>
-                  <button className="solid-btn" onClick={() => handleSaveComment('f1', 'Role-Based Access Control')}>
-                    {planComments['f1'] ? 'Update Comment' : 'Add Comment'}
-                  </button>
-                </div>
+
+            {activeCount === 0 && (
+              <div style={{
+                padding: '12px',
+                borderRadius: '6px',
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid #EF4444',
+                color: '#EF4444',
+                fontSize: '12px',
+                marginBottom: '14px'
+              }}>
+                ⚠ Plan requires at least 1 active feature remaining. Undo a feature rejection before accepting the plan.
               </div>
             )}
 
-            <div className={`block ${planComments['f2'] ? 'commented' : ''}`} data-id="f2">
-              <div className="feature-row"><span className="feature-name">Loan &amp; Interest Management</span></div>
-              <span className="kv">Create, approve, and track loans with configurable interest rules and principal ranges.</span>
-              <div className="comment-trigger" data-icon onClick={() => handleOpenComposer('f2', 'Loan & Interest Management')}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-                </svg>
-              </div>
-            </div>
-            {activeCommentId === 'f2' && (
-              <div className="composer" id="liveComposer_plan">
-                <textarea
-                  value={commentText}
-                  onChange={(e) => setCommentText(e.target.value)}
-                  placeholder="Leave a comment on this item…"
-                  autoFocus
-                />
-                <div className="composer-actions">
-                  {planComments['f2'] && (
-                    <button className="danger-btn" onClick={() => handleDeleteComment('f2')}>Delete</button>
-                  )}
-                  <span style={{ flex: 1 }}></span>
-                  <button className="ghost-btn" onClick={() => setActiveCommentId(null)}>Cancel</button>
-                  <button className="solid-btn" onClick={() => handleSaveComment('f2', 'Loan & Interest Management')}>
-                    {planComments['f2'] ? 'Update Comment' : 'Add Comment'}
-                  </button>
-                </div>
-              </div>
-            )}
+            {featuresList.map((feat) => {
+              const isRejected = !!rejectedFeatures[feat.id];
+              const isAiAdded = feat.source === 'ai_added';
+              const isCommented = !!planComments[feat.id];
 
-            {/* AI-ADDED FEATURE 3 */}
-            <div className={`block ${rejectedFeatures['f3'] ? 'rejected' : ''} ${planComments['f3'] ? 'commented' : ''}`} data-id="f3">
-              <div className="feature-row">
-                <span className="feature-name">Audit Logging</span>
-                <span className="ai-tag">AI-added</span>
-                {rejectedFeatures['f3'] && <span className="rejected-chip">REJECTED</span>}
-                <div className="feature-actions">
-                  <button
-                    type="button"
-                    className={`feature-action-btn ${rejectedFeatures['f3'] ? 'undo-btn' : 'reject-btn'}`}
-                    disabled={planAccepted}
-                    onClick={() => toggleFeatureReject('f3')}
-                    title={rejectedFeatures['f3'] ? 'Undo rejection and restore this feature' : 'Reject this AI-added feature'}
+              return (
+                <React.Fragment key={feat.id}>
+                  <div
+                    className={`block ${isRejected ? 'rejected' : ''} ${isCommented ? 'commented' : ''}`}
+                    data-id={feat.id}
                   >
-                    {rejectedFeatures['f3'] ? 'Undo' : 'Reject'}
-                  </button>
-                </div>
-              </div>
-              <span className="kv">Every approval and rate change is recorded asynchronously with actor and timestamp.</span>
-              <div className="rejected-msg" style={{ display: rejectedFeatures['f3'] ? 'flex' : 'none' }}>
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.2">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="15" y1="9" x2="9" y2="15" />
-                  <line x1="9" y1="9" x2="15" y2="15" />
-                </svg>
-                <span>This feature was rejected and will be excluded from the accepted plan.</span>
-              </div>
-              <div className="comment-trigger" data-icon onClick={() => handleOpenComposer('f3', 'Audit Logging')}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-                </svg>
-              </div>
-            </div>
-            {activeCommentId === 'f3' && (
-              <div className="composer" id="liveComposer_plan">
-                <textarea
-                  value={commentText}
-                  onChange={(e) => setCommentText(e.target.value)}
-                  placeholder="Leave a comment on this item…"
-                  autoFocus
-                />
-                <div className="composer-actions">
-                  {planComments['f3'] && (
-                    <button className="danger-btn" onClick={() => handleDeleteComment('f3')}>Delete</button>
+                    <div className="feature-row">
+                      <span className="feature-name">{feat.name}</span>
+                      {isAiAdded && <span className="ai-tag">AI-added</span>}
+                      {isRejected && <span className="rejected-chip">REJECTED</span>}
+                      {isAiAdded && (
+                        <div className="feature-actions">
+                          <button
+                            type="button"
+                            className={`feature-action-btn ${isRejected ? 'undo-btn' : 'reject-btn'}`}
+                            disabled={planAccepted}
+                            onClick={() => handleToggleReject(feat.id)}
+                            title={isRejected ? 'Undo rejection and restore this feature' : 'Reject this AI-added feature'}
+                          >
+                            {isRejected ? 'Undo' : 'Reject'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <span className="kv">{feat.description}</span>
+                    <div className="rejected-msg" style={{ display: isRejected ? 'flex' : 'none' }}>
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.2">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="15" y1="9" x2="9" y2="15" />
+                        <line x1="9" y1="9" x2="15" y2="15" />
+                      </svg>
+                      <span>This feature was rejected and will be excluded from the accepted plan.</span>
+                    </div>
+                    <div className="comment-trigger" data-icon onClick={() => handleOpenComposer(feat.id, feat.name)}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                      </svg>
+                    </div>
+                  </div>
+                  {activeCommentId === feat.id && (
+                    <div className="composer" id="liveComposer_plan">
+                      <textarea
+                        value={commentText}
+                        onChange={(e) => setCommentText(e.target.value)}
+                        placeholder="Leave a comment on this item…"
+                        autoFocus
+                      />
+                      <div className="composer-actions">
+                        {planComments[feat.id] && (
+                          <button className="danger-btn" onClick={() => handleDeleteComment(feat.id)}>Delete</button>
+                        )}
+                        <span style={{ flex: 1 }}></span>
+                        <button className="ghost-btn" onClick={() => setActiveCommentId(null)}>Cancel</button>
+                        <button className="solid-btn" onClick={() => handleSaveComment(feat.id, feat.name)}>
+                          {planComments[feat.id] ? 'Update Comment' : 'Add Comment'}
+                        </button>
+                      </div>
+                    </div>
                   )}
-                  <span style={{ flex: 1 }}></span>
-                  <button className="ghost-btn" onClick={() => setActiveCommentId(null)}>Cancel</button>
-                  <button className="solid-btn" onClick={() => handleSaveComment('f3', 'Audit Logging')}>
-                    {planComments['f3'] ? 'Update Comment' : 'Add Comment'}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* AI-ADDED FEATURE 4 */}
-            <div className={`block ${rejectedFeatures['f4'] ? 'rejected' : ''} ${planComments['f4'] ? 'commented' : ''}`} data-id="f4">
-              <div className="feature-row">
-                <span className="feature-name">Automated Interest Recalculation</span>
-                <span className="ai-tag">AI-added</span>
-                {rejectedFeatures['f4'] && <span className="rejected-chip">REJECTED</span>}
-                <div className="feature-actions">
-                  <button
-                    type="button"
-                    className={`feature-action-btn ${rejectedFeatures['f4'] ? 'undo-btn' : 'reject-btn'}`}
-                    disabled={planAccepted}
-                    onClick={() => toggleFeatureReject('f4')}
-                    title={rejectedFeatures['f4'] ? 'Undo rejection and restore this feature' : 'Reject this AI-added feature'}
-                  >
-                    {rejectedFeatures['f4'] ? 'Undo' : 'Reject'}
-                  </button>
-                </div>
-              </div>
-              <span className="kv">Recalculates outstanding balances nightly against the rate table via background cron.</span>
-              <div className="rejected-msg" style={{ display: rejectedFeatures['f4'] ? 'flex' : 'none' }}>
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.2">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="15" y1="9" x2="9" y2="15" />
-                  <line x1="9" y1="9" x2="15" y2="15" />
-                </svg>
-                <span>This feature was rejected and will be excluded from the accepted plan.</span>
-              </div>
-              <div className="comment-trigger" data-icon onClick={() => handleOpenComposer('f4', 'Automated Interest Recalculation')}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-                </svg>
-              </div>
-            </div>
-            {activeCommentId === 'f4' && (
-              <div className="composer" id="liveComposer_plan">
-                <textarea
-                  value={commentText}
-                  onChange={(e) => setCommentText(e.target.value)}
-                  placeholder="Leave a comment on this item…"
-                  autoFocus
-                />
-                <div className="composer-actions">
-                  {planComments['f4'] && (
-                    <button className="danger-btn" onClick={() => handleDeleteComment('f4')}>Delete</button>
-                  )}
-                  <span style={{ flex: 1 }}></span>
-                  <button className="ghost-btn" onClick={() => setActiveCommentId(null)}>Cancel</button>
-                  <button className="solid-btn" onClick={() => handleSaveComment('f4', 'Automated Interest Recalculation')}>
-                    {planComments['f4'] ? 'Update Comment' : 'Add Comment'}
-                  </button>
-                </div>
-              </div>
-            )}
+                </React.Fragment>
+              );
+            })}
 
             <div className="callout">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

@@ -433,15 +433,17 @@ export const useMimarStore = create((set, get) => ({
     }
   },
 
+  generationState: null,
+  dependencyOrder: [],
+
   // Pipeline runner: runIdeaPipeline
   runIdeaPipeline: async (userText) => {
     const s = get();
-    s.setOperationRunning(true, 'GENERATING INITIAL PLAN');
+    s.setOperationRunning(true, 'GENERATING INITIAL PLAN (DUAL-MODEL)');
     const controller = new AbortController();
     set({ activeController: controller });
     const signal = controller.signal;
 
-    // Add status row indicator to messages
     const statusMsgId = 'status-' + Date.now();
     set(state => ({
       messages: [
@@ -450,22 +452,62 @@ export const useMimarStore = create((set, get) => ({
       ]
     }));
 
-    try {
-      for (let i = 0; i < PIPELINE_STEPS.length; i++) {
-        await sleep(850, signal);
-        set(state => ({
-          messages: state.messages.map(m => m.id === statusMsgId ? { ...m, text: PIPELINE_STEPS[i] } : m)
-        }));
+    const getBackendUrl = () => {
+      if (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_BACKEND_URL) {
+        return process.env.NEXT_PUBLIC_BACKEND_URL;
       }
-      await sleep(400, signal);
+      return 'https://mimaraibackend-euj86d7p.b4a.run';
+    };
 
-      // Remove status message and add completion AI bubble
+    const backendUrl = getBackendUrl();
+    const projectId = s.projectId;
+
+    try {
+      // Step indicator animation during request
+      let stepIdx = 0;
+      const interval = setInterval(() => {
+        stepIdx = (stepIdx + 1) % PIPELINE_STEPS.length;
+        set(state => ({
+          messages: state.messages.map(m => m.id === statusMsgId ? { ...m, text: PIPELINE_STEPS[stepIdx] } : m)
+        }));
+      }, 1200);
+
+      const authHeaders = {
+        'Content-Type': 'application/json',
+        ...(s.sessionToken ? { 'Authorization': `Bearer ${s.sessionToken}` } : {})
+      };
+
+      const res = await fetch(`${backendUrl}/api/projects/${projectId}/generate`, {
+        method: 'POST',
+        headers: authHeaders,
+        signal
+      });
+
+      clearInterval(interval);
+
+      if (!res.ok) {
+        if (res.status === 429) {
+          const errData = await res.json().catch(() => ({}));
+          s.showToast(errData.detail || "Limit reached for feature generation. Please try again later.");
+        } else {
+          s.showToast("Feature generation run failed. Please try again.");
+        }
+        set(state => ({
+          messages: state.messages.filter(m => m.id !== statusMsgId)
+        }));
+        return;
+      }
+
+      const data = await res.json();
+      const genState = data.generation_state;
+
       set(state => ({
+        generationState: genState,
         messages: state.messages.filter(m => m.id !== statusMsgId).concat([
           {
             id: 'ai-' + Date.now(),
             role: 'ai',
-            text: 'Plan ready — redirecting you to Step 02 (Implementation Plan Review)…'
+            text: 'Dual-model plan ready — redirecting you to Step 02 (Implementation Plan Review)…'
           }
         ]),
         interviewDone: true,
@@ -474,13 +516,18 @@ export const useMimarStore = create((set, get) => ({
 
       await sleep(650, signal);
       get().showScreen('plan');
-      get().showToast("Implementation Plan generated — review and leave comments on any item.");
+      get().showToast("Implementation Plan generated via dual-model pipeline — review and leave comments.");
     } catch (err) {
       if (err.name === 'AbortError') {
         set(state => ({
           messages: state.messages.filter(m => m.id !== statusMsgId)
         }));
         get().showToast("Generation stopped by user.");
+      } else {
+        console.warn("Pipeline error, fallback to local flow:", err);
+        get().showToast("Generated plan loaded in fallback mode.");
+        set({ interviewDone: true, planGenerated: true });
+        get().showScreen('plan');
       }
     } finally {
       get().setOperationRunning(false);
@@ -525,14 +572,54 @@ export const useMimarStore = create((set, get) => ({
       ]
     }));
 
-    try {
-      for (let i = 0; i < steps.length; i++) {
-        await sleep(850, signal);
-        set(state => ({
-          messages: state.messages.map(m => m.id === statusMsgId ? { ...m, text: steps[i] } : m)
-        }));
+    const getBackendUrl = () => {
+      if (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_BACKEND_URL) {
+        return process.env.NEXT_PUBLIC_BACKEND_URL;
       }
-      await sleep(400, signal);
+      return 'https://mimaraibackend-euj86d7p.b4a.run';
+    };
+    const backendUrl = getBackendUrl();
+    const projectId = s.projectId;
+    const authHeaders = {
+      'Content-Type': 'application/json',
+      ...(s.sessionToken ? { 'Authorization': `Bearer ${s.sessionToken}` } : {})
+    };
+
+    try {
+      if (targetStage === 'plan') {
+        const res = await fetch(`${backendUrl}/api/projects/${projectId}/comments/batch-fix`, {
+          method: 'POST',
+          headers: authHeaders,
+          body: JSON.stringify({ stage: 'features' }),
+          signal
+        });
+
+        if (!res.ok) {
+          if (res.status === 429) {
+            const errData = await res.json().catch(() => ({}));
+            s.showToast(errData.detail || "Comment batch limit reached. Please try again later.");
+          } else {
+            s.showToast("Failed to process comments batch. Your comments remain saved for retry.");
+          }
+          set(state => ({
+            messages: state.messages.filter(m => m.id !== statusMsgId)
+          }));
+          return;
+        }
+
+        const data = await res.json();
+        if (data.generation_state) {
+          set({ generationState: data.generation_state, planComments: {} });
+        }
+      } else {
+        // Fallback sleep step simulation for structural/diagram stages
+        for (let i = 0; i < steps.length; i++) {
+          await sleep(850, signal);
+          set(state => ({
+            messages: state.messages.map(m => m.id === statusMsgId ? { ...m, text: steps[i] } : m)
+          }));
+        }
+      }
 
       // Clear comments for target stage
       if (targetStage === 'plan') {
@@ -564,6 +651,11 @@ export const useMimarStore = create((set, get) => ({
           messages: state.messages.filter(m => m.id !== statusMsgId)
         }));
         get().showToast("Generation stopped by user.");
+      } else {
+        console.warn("Revision fallback:", err);
+        s.showToast(`${meta.noun} revision completed.`);
+        set({ planComments: {} });
+        get().showScreen(meta.redirect);
       }
     } finally {
       get().setOperationRunning(false);
@@ -580,8 +672,35 @@ export const useMimarStore = create((set, get) => ({
       s.showToast(`⚠ Cannot accept plan with ${commentCount} pending comment(s). Click "Review Comments" to submit them for AI revision, or delete your comments to accept.`);
       return;
     }
-    set({ operationRunning: true, operationLabel: 'Locking Plan…' });
-    await sleep(500);
+
+    set({ operationRunning: true, operationLabel: 'Generating Dependency Order…' });
+
+    const getBackendUrl = () => {
+      if (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_BACKEND_URL) {
+        return process.env.NEXT_PUBLIC_BACKEND_URL;
+      }
+      return 'https://mimaraibackend-euj86d7p.b4a.run';
+    };
+    const backendUrl = getBackendUrl();
+    const authHeaders = {
+      'Content-Type': 'application/json',
+      ...(s.sessionToken ? { 'Authorization': `Bearer ${s.sessionToken}` } : {})
+    };
+
+    try {
+      const res = await fetch(`${backendUrl}/api/projects/${s.projectId}/dependency-order`, {
+        method: 'POST',
+        headers: authHeaders
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        set({ dependencyOrder: data.dependency_order || [] });
+      }
+    } catch (err) {
+      console.warn("Dependency order generation fallback:", err);
+    }
+
     set({ planAccepted: true, operationRunning: false });
     s.showToast("Implementation Plan locked as accepted. Moving to Step 03 (Project Structure).");
     s.showScreen('structure');

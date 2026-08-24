@@ -670,8 +670,524 @@ Output strictly valid JSON with no markdown formatting:
         )
 
 
+# --- V3 Feature Generation Pipeline & Comment System ---
+
+class BatchFixRequest(BaseModel):
+    stage: Optional[str] = "features"
+
+class FeatureRejectRequest(BaseModel):
+    feature_id: str
+
+class CommentCreateRequest(BaseModel):
+    target_feature_id: Optional[str] = None
+    text: str
+    stage: Optional[str] = "features"
+
+class CommentUpdateRequest(BaseModel):
+    text: str
+
+async def call_gemini_api(system_prompt: str, user_prompt: str, timeout: float = 12.0) -> Dict[str, Any]:
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    if not gemini_key:
+        raise HTTPException(status_code=500, detail="Gemini API unconfigured (GEMINI_API_KEY missing).")
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+    payload = {
+        "contents": [
+            {"role": "user", "parts": [{"text": f"{system_prompt}\n\n{user_prompt}"}]}
+        ],
+        "generationConfig": {
+            "temperature": 0.2,
+            "responseMimeType": "application/json"
+        }
+    }
+    
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as http_client:
+                resp = await http_client.post(url, json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    raw = data["candidates"][0]["content"]["parts"][0]["text"]
+                    return json.loads(raw)
+                print(f"[Gemini API Error Attempt {attempt+1}] Status {resp.status_code}: {resp.text}")
+        except Exception as e:
+            print(f"[Gemini Call Exception Attempt {attempt+1}] {e}")
+            if attempt == 1:
+                raise
+    raise HTTPException(status_code=502, detail="Gemini API request failed after retry.")
+
+
+async def call_groq_json(system_prompt: str, user_prompt: str, timeout: float = 10.0) -> Dict[str, Any]:
+    groq_key = os.getenv("GROQ_API_KEY")
+    if not groq_key:
+        raise HTTPException(status_code=500, detail="Groq API unconfigured (GROQ_API_KEY missing).")
+    
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
+    payload = {
+        "model": "llama-3.3-70b-versatile",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        "temperature": 0.1,
+        "response_format": {"type": "json_object"}
+    }
+    
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as http_client:
+                resp = await http_client.post(url, headers=headers, json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    raw = data["choices"][0]["message"]["content"]
+                    return json.loads(raw)
+                print(f"[Groq API Error Attempt {attempt+1}] Status {resp.status_code}: {resp.text}")
+        except Exception as e:
+            print(f"[Groq Call Exception Attempt {attempt+1}] {e}")
+            if attempt == 1:
+                raise
+    raise HTTPException(status_code=502, detail="Groq API request failed after retry.")
+
+
+def check_generation_rate_limit(client, user_id: str, limit_type: str):
+    if not client or not user_id:
+        return
+    try:
+        res = client.table("generation_rate_limits").select("*").eq("user_id", user_id).execute()
+        now = datetime.now(timezone.utc)
+        
+        if limit_type == "pipeline":
+            max_limit = 5
+            window_hours = 24
+            col_count = "pipeline_count"
+            col_start = "pipeline_window_start"
+        else:
+            max_limit = 15
+            window_hours = 1
+            col_count = "batch_count"
+            col_start = "batch_window_start"
+            
+        if res.data:
+            row = res.data[0]
+            start_str = row.get(col_start)
+            window_start = datetime.fromisoformat(start_str.replace("Z", "+00:00")) if start_str else now
+            
+            if now - window_start < timedelta(hours=window_hours):
+                if row.get(col_count, 0) >= max_limit:
+                    unit = "day" if limit_type == "pipeline" else "hour"
+                    raise HTTPException(
+                        status_code=429,
+                        detail=f"Limit reached for feature generation ({max_limit} runs per {unit}). Please try again later."
+                    )
+                client.table("generation_rate_limits").update({col_count: row.get(col_count, 0) + 1}).eq("user_id", user_id).execute()
+            else:
+                client.table("generation_rate_limits").update({col_count: 1, col_start: now.isoformat()}).eq("user_id", user_id).execute()
+        else:
+            client.table("generation_rate_limits").insert({
+                "user_id": user_id,
+                col_count: 1,
+                col_start: now.isoformat()
+            }).execute()
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[Generation Rate Limit Warning] {e}")
+
+
+@app.post("/projects/{project_id}/generate")
+@app.post("/api/projects/{project_id}/generate")
+async def generate_feature_pipeline(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    client = get_supabase()
+    if not client or project_id.startswith("local-draft-"):
+        # Fallback local dummy structure if DB client offline
+        return {
+            "status": "ok",
+            "project_id": project_id,
+            "generation_state": {
+                "idea_objective": "Local fallback feature plan",
+                "features": [
+                    {"id": "feat-1", "name": "Authentication & Authorization", "description": "JWT authentication with role-based access control", "source": "user_originated"},
+                    {"id": "feat-2", "name": "Dashboard & Analytics", "description": "Real-time auditing metrics and project tracking", "source": "ai_added"}
+                ],
+                "rejected_feature_ids": [],
+                "dependency_order": ["feat-1", "feat-2"],
+                "adjusted_flag": False
+            }
+        }
+
+    # 1. Ownership & Concurrency Lock Check
+    proj_res = client.table("projects").select("*").eq("id", project_id).eq("owner_id", user_id).execute()
+    if not proj_res or not proj_res.data:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = proj_res.data[0]
+    if project.get("status") == "locked_generating":
+        raise HTTPException(status_code=429, detail="A generation run is already in progress for this project.")
+
+    # 2. Rate Limit Check (5 per day)
+    check_generation_rate_limit(client, user_id, "pipeline")
+
+    # Set concurrency lock
+    client.table("projects").update({"status": "locked_generating"}).eq("id", project_id).execute()
+
+    try:
+        idea_text = project.get("idea_text") or "Software application"
+        fixed_inputs = project.get("fixed_inputs") or {}
+        context_str = f"Project Idea: {idea_text}\nFixed Inputs: {json.dumps(fixed_inputs)}"
+
+        # Step 1: Parallel Independent Drafting (Gemini + Groq)
+        system_prompt_draft = """You are an expert AI software architect.
+Generate a comprehensive list of core technical features for the user's project idea.
+Output strictly valid JSON with no markdown formatting:
+{
+  "idea_objective": "<1-2 sentence synthesized objective statement>",
+  "features": [
+    {
+      "id": "feat-<short-slug>",
+      "name": "<Feature Name>",
+      "description": "<One-sentence technical description>",
+      "source": "user_originated" | "ai_added"
+    }
+  ]
+}"""
+
+        gemini_task = call_gemini_api(system_prompt_draft, context_str)
+        groq_task = call_groq_json(system_prompt_draft, context_str)
+
+        try:
+            gemini_draft, groq_draft = await asyncio.gather(gemini_task, groq_task)
+        except Exception as e:
+            print(f"[Step 1 Parallel Drafting Failed] {e}")
+            raise HTTPException(status_code=502, detail="Feature generation failed during model drafting pass. Please try again.")
+
+        # Step 2: Diff & Merge
+        gemini_feats = gemini_draft.get("features", [])
+        groq_feats = groq_draft.get("features", [])
+
+        merged_features = list(gemini_feats)
+        gemini_names = {f.get("name", "").lower() for f in gemini_feats}
+
+        for gf in groq_feats:
+            if gf.get("name", "").lower() not in gemini_names:
+                gf["source"] = "ai_added"
+                merged_features.append(gf)
+
+        # Step 3: First Validation (Groq)
+        system_prompt_val = """You are an architectural validator.
+Verify the feature list against fixed inputs and project scope. Check for missing constraints or contradictions.
+Output strictly valid JSON:
+{
+  "is_valid": true | false,
+  "flags": ["<flag explanation if invalid>"]
+}"""
+
+        val1 = await call_groq_json(system_prompt_val, f"Context:\n{context_str}\n\nFeatures:\n{json.dumps(merged_features)}")
+
+        # Step 4: Single Fix Pass (Gemini)
+        adjusted_flag = False
+        final_features = merged_features
+        if not val1.get("is_valid", True) and val1.get("flags"):
+            try:
+                system_prompt_fix = """You are an architectural fixer.
+Fix the flagged issues in the feature list.
+Output strictly valid JSON:
+{
+  "features": [
+    {
+      "id": "feat-<short-slug>",
+      "name": "<Feature Name>",
+      "description": "<One-sentence technical description>",
+      "source": "user_originated" | "ai_added"
+    }
+  ]
+}"""
+                fix_res = await call_gemini_api(system_prompt_fix, f"Features:\n{json.dumps(merged_features)}\n\nFlags:\n{json.dumps(val1.get('flags'))}")
+                if fix_res.get("features"):
+                    final_features = fix_res.get("features")
+            except Exception as fix_err:
+                print(f"[Step 4 Fix Pass Warning] {fix_err}")
+                adjusted_flag = True
+
+        # Step 5: Final Validation (Groq)
+        val2 = await call_groq_json(system_prompt_val, f"Context:\n{context_str}\n\nFeatures:\n{json.dumps(final_features)}")
+        if not val2.get("is_valid", True):
+            adjusted_flag = True
+
+        generation_payload = {
+            "idea_objective": gemini_draft.get("idea_objective") or idea_text,
+            "fixed_inputs": fixed_inputs,
+            "features": final_features,
+            "rejected_feature_ids": [],
+            "dependency_order": [f.get("id") for f in final_features if f.get("id")],
+            "adjusted_flag": adjusted_flag,
+            "generated_at": datetime.now(timezone.utc).isoformat()
+        }
+
+        # Persist generation_state and update status to reviewing
+        client.table("projects").update({
+            "generation_state": generation_payload,
+            "status": "reviewing"
+        }).eq("id", project_id).execute()
+
+        # Audit log
+        client.table("plan_history").insert({
+            "project_id": project_id,
+            "event": "pipeline_generated",
+            "note": f"Dual-model features generated ({len(final_features)} features)"
+        }).execute()
+
+        return {
+            "status": "ok",
+            "project_id": project_id,
+            "generation_state": generation_payload
+        }
+    finally:
+        # Always release project status lock on completion or failure
+        client.table("projects").update({"status": "reviewing"}).eq("id", project_id).execute()
+
+
+@app.post("/projects/{project_id}/comments/batch-fix")
+@app.post("/api/projects/{project_id}/comments/batch-fix")
+async def process_comment_batch(
+    project_id: str,
+    req: BatchFixRequest,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    client = get_supabase()
+    if not client or project_id.startswith("local-draft-"):
+        return {"status": "ok", "message": "Batch processed locally."}
+
+    # 1. Ownership & Concurrency Check
+    proj_res = client.table("projects").select("*").eq("id", project_id).eq("owner_id", user_id).execute()
+    if not proj_res or not proj_res.data:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = proj_res.data[0]
+    if project.get("status") == "locked_generating":
+        raise HTTPException(status_code=429, detail="A generation or comment batch is already in progress.")
+
+    # 2. Rate Limit Check (15 batches per hour)
+    check_generation_rate_limit(client, user_id, "batch")
+
+    # Lock project status
+    client.table("projects").update({"status": "locked_generating"}).eq("id", project_id).execute()
+
+    try:
+        # Fetch pending comments
+        comm_res = client.table("comments").select("*").eq("project_id", project_id).eq("status", "pending").execute()
+        pending_comments = comm_res.data or []
+        if not pending_comments:
+            return {"status": "ok", "message": "No pending comments to process."}
+
+        # Mark pending comments as submitted
+        comment_ids = [c["id"] for c in pending_comments]
+        client.table("comments").update({"status": "submitted"}).in_("id", comment_ids).execute()
+
+        current_state = project.get("generation_state") or {}
+        current_features = current_state.get("features", [])
+
+        # Gemini Batch Fix Pass
+        system_prompt = """You are an AI software architect updating a project feature list based on user comments.
+Incorporate the user comments into the feature list.
+Output strictly valid JSON:
+{
+  "features": [
+    {
+      "id": "feat-<slug>",
+      "name": "<Feature Name>",
+      "description": "<One-sentence technical description>",
+      "source": "user_originated" | "ai_added"
+    }
+  ]
+}"""
+
+        comments_text = "\n".join([f"- Comment on {c.get('target_feature_id', 'general')}: {c.get('text')}" for c in pending_comments])
+        fix_res = await call_gemini_api(system_prompt, f"Current Features:\n{json.dumps(current_features)}\n\nUser Comments:\n{comments_text}")
+
+        updated_features = fix_res.get("features") or current_features
+
+        # Groq Validation
+        system_val = """Verify that the updated feature list is valid and consistent. Output JSON: {"is_valid": true|false, "flags": []}"""
+        val_res = await call_groq_json(system_val, f"Features:\n{json.dumps(updated_features)}")
+
+        # Update generation state
+        current_state["features"] = updated_features
+        if not val_res.get("is_valid", True):
+            current_state["adjusted_flag"] = True
+
+        client.table("projects").update({"generation_state": current_state, "status": "reviewing"}).eq("id", project_id).execute()
+        
+        # Mark comments as resolved
+        client.table("comments").update({"status": "resolved"}).in_("id", comment_ids).execute()
+
+        # Audit log
+        client.table("plan_history").insert({
+            "project_id": project_id,
+            "event": "comment_batch_applied",
+            "note": f"Applied {len(pending_comments)} comments"
+        }).execute()
+
+        return {"status": "ok", "generation_state": current_state}
+    except Exception as e:
+        print(f"[Batch Comment Processing Error] {e}")
+        # All-or-nothing error handling: reset submitted comments back to pending on error
+        try:
+            client.table("comments").update({"status": "pending"}).eq("project_id", project_id).eq("status", "submitted").execute()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Failed to process comment batch. Please try again.")
+    finally:
+        client.table("projects").update({"status": "reviewing"}).eq("id", project_id).execute()
+
+
+@app.post("/projects/{project_id}/features/{feature_id}/reject")
+@app.post("/api/projects/{project_id}/features/{feature_id}/reject")
+async def reject_feature(
+    project_id: str,
+    feature_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    client = get_supabase()
+    if not client or project_id.startswith("local-draft-"):
+        return {"status": "ok", "feature_id": feature_id, "action": "rejected"}
+
+    proj_res = client.table("projects").select("*").eq("id", project_id).eq("owner_id", user_id).execute()
+    if not proj_res or not proj_res.data:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = proj_res.data[0]
+    gen_state = project.get("generation_state") or {}
+    features = gen_state.get("features", [])
+    rejected = set(gen_state.get("rejected_feature_ids", []))
+
+    # Reject toggle logic
+    if feature_id in rejected:
+        rejected.remove(feature_id)
+    else:
+        # Check Minimum 1 active feature guard
+        active_count = sum(1 for f in features if f.get("id") not in rejected and f.get("id") != feature_id)
+        if active_count < 1:
+            raise HTTPException(status_code=400, detail="Cannot reject feature: plan requires at least 1 active feature remaining.")
+        rejected.add(feature_id)
+
+    gen_state["rejected_feature_ids"] = list(rejected)
+    client.table("projects").update({"generation_state": gen_state}).eq("id", project_id).execute()
+
+    return {"status": "ok", "rejected_feature_ids": list(rejected)}
+
+
+@app.post("/projects/{project_id}/dependency-order")
+@app.post("/api/projects/{project_id}/dependency-order")
+async def generate_dependency_order(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    client = get_supabase()
+    if not client or project_id.startswith("local-draft-"):
+        return {"status": "ok", "dependency_order": ["feat-1", "feat-2"]}
+
+    proj_res = client.table("projects").select("*").eq("id", project_id).eq("owner_id", user_id).execute()
+    if not proj_res or not proj_res.data:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = proj_res.data[0]
+    gen_state = project.get("generation_state") or {}
+    features = gen_state.get("features", [])
+    rejected = set(gen_state.get("rejected_feature_ids", []))
+
+    active_features = [f for f in features if f.get("id") not in rejected]
+    if not active_features:
+        raise HTTPException(status_code=400, detail="No active features to order.")
+
+    system_prompt = """You are a software dependency analyzer.
+Order the given active features by topological build dependency (features with no dependencies first, dependent features later).
+Output strictly valid JSON:
+{
+  "dependency_order": ["<feature-id-1>", "<feature-id-2>", ...]
+}"""
+
+    try:
+        order_res = await call_gemini_api(system_prompt, f"Active Features:\n{json.dumps(active_features)}")
+        proposed_order = order_res.get("dependency_order", [])
+
+        # Validate with Groq
+        val_prompt = """Check if the proposed feature order has circular dependencies or missing items. Output JSON: {"is_valid": true|false}"""
+        val_res = await call_groq_json(val_prompt, f"Features:\n{json.dumps(active_features)}\n\nOrder:\n{json.dumps(proposed_order)}")
+
+        if not val_res.get("is_valid", True):
+            # Single Fix Pass for circular dependencies
+            fix_res = await call_gemini_api(system_prompt, f"Fix circular dependencies for Features:\n{json.dumps(active_features)}")
+            proposed_order = fix_res.get("dependency_order") or [f.get("id") for f in active_features]
+            gen_state["adjusted_flag"] = True
+
+        gen_state["dependency_order"] = proposed_order
+        client.table("projects").update({"generation_state": gen_state, "status": "accepted"}).eq("id", project_id).execute()
+
+        return {"status": "ok", "dependency_order": proposed_order}
+    except Exception as e:
+        print(f"[Dependency Order Fallback] {e}")
+        # Default fallback order: order features appear in list
+        default_order = [f.get("id") for f in active_features if f.get("id")]
+        gen_state["dependency_order"] = default_order
+        gen_state["adjusted_flag"] = True
+        client.table("projects").update({"generation_state": gen_state, "status": "accepted"}).eq("id", project_id).execute()
+        return {"status": "ok", "dependency_order": default_order}
+
+
+@app.get("/projects/{project_id}/comments")
+@app.get("/api/projects/{project_id}/comments")
+async def get_project_comments(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    client = get_supabase()
+    if not client or project_id.startswith("local-draft-"):
+        return {"comments": []}
+
+    res = client.table("comments").select("*").eq("project_id", project_id).order("created_at", desc=False).execute()
+    return {"comments": res.data or []}
+
+
+@app.post("/projects/{project_id}/comments")
+@app.post("/api/projects/{project_id}/comments")
+async def add_project_comment(
+    project_id: str,
+    req: CommentCreateRequest,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    client = get_supabase()
+    if not client or project_id.startswith("local-draft-"):
+        return {"id": "local-comm-1", "text": req.text, "status": "pending"}
+
+    proj_res = client.table("projects").select("id").eq("id", project_id).eq("owner_id", user_id).execute()
+    if not proj_res or not proj_res.data:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    res = client.table("comments").insert({
+        "project_id": project_id,
+        "stage": req.stage or "features",
+        "target_feature_id": req.target_feature_id,
+        "text": req.text,
+        "status": "pending"
+    }).execute()
+
+    return res.data[0] if res.data else {"status": "created"}
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+
 
