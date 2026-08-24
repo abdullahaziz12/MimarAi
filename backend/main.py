@@ -187,6 +187,7 @@ def send_smtp_email(to_email: str, subject: str, html_body: str, plain_text_body
 
 
 @app.get("/")
+@app.options("/")
 def read_root():
     return {
         "service": "MimarAi Backend API",
@@ -194,8 +195,13 @@ def read_root():
         "status": "online"
     }
 
+@app.options("/{full_path:path}")
+def options_catchall(full_path: str):
+    return {"status": "ok"}
+
 
 @app.get("/health")
+@app.options("/health")
 def health_check():
     """
     Standard liveness endpoint for keep-alive pings and deployment health checks.
@@ -701,7 +707,7 @@ async def call_gemini_api(system_prompt: str, user_prompt: str, timeout: float =
     if not gemini_key:
         raise HTTPException(status_code=500, detail="Gemini API unconfigured (GEMINI_API_KEY missing).")
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={gemini_key}"
     payload = {
         "contents": [
             {"role": "user", "parts": [{"text": f"{system_prompt}\n\n{user_prompt}"}]}
@@ -736,7 +742,7 @@ async def call_groq_json(system_prompt: str, user_prompt: str, timeout: float = 
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
     payload = {
-        "model": "llama-3.3-70b-versatile",
+        "model": "openai/gpt-oss-120b",
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
