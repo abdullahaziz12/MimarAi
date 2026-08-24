@@ -446,10 +446,9 @@ export const useMimarStore = create((set, get) => ({
 
     const statusMsgId = 'status-' + Date.now();
     set(state => ({
-      messages: [
-        ...state.messages,
+      messages: state.messages.filter(m => m.role !== 'status').concat([
         { id: statusMsgId, role: 'status', text: PIPELINE_STEPS[0] }
-      ]
+      ])
     }));
 
     const getBackendUrl = () => {

@@ -36,11 +36,25 @@ export default function InterviewScreen() {
 
   const isActive = currentScreen === 'interview';
 
+  const isUserNearBottomRef = useRef(true);
+
+  const handleScroll = (e) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.target;
+    isUserNearBottomRef.current = scrollHeight - scrollTop - clientHeight < 120;
+  };
+
   useEffect(() => {
-    if (isActive && messagesEndRef.current) {
+    if (isActive && messagesEndRef.current && isUserNearBottomRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, isActive]);
+
+  // Keep only the single latest status message in chat display
+  const displayMessages = messages.filter((m, idx, arr) => {
+    if (m.role !== 'status') return true;
+    const lastStatusIdx = arr.map(item => item.role).lastIndexOf('status');
+    return idx === lastStatusIdx;
+  });
 
   const handleTextareaInput = (e) => {
     const val = e.target.value;
@@ -281,8 +295,8 @@ export default function InterviewScreen() {
               </span>
             </div>
 
-            <div className="messages" id="messages">
-              {messages.map((m) => {
+            <div className="messages" id="messages" onScroll={handleScroll}>
+              {displayMessages.map((m) => {
                 if (m.role === 'status') {
                   return (
                     <div key={m.id} className="row ai">
