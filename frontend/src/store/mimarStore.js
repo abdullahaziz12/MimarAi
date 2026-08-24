@@ -477,9 +477,13 @@ export const useMimarStore = create((set, get) => ({
         ...(s.sessionToken ? { 'Authorization': `Bearer ${s.sessionToken}` } : {})
       };
 
-      const res = await fetch(`${backendUrl}/api/projects/${projectId}/generate`, {
+      const res = await fetch(`${backendUrl}/api/projects/${projectId || 'local-draft-101'}/generate`, {
         method: 'POST',
         headers: authHeaders,
+        body: JSON.stringify({
+          idea_text: s.ideaText,
+          fixed_inputs: s.fixedInputs
+        }),
         signal
       });
 
@@ -587,10 +591,18 @@ export const useMimarStore = create((set, get) => ({
 
     try {
       if (targetStage === 'plan') {
-        const res = await fetch(`${backendUrl}/api/projects/${projectId}/comments/batch-fix`, {
+        const commentsList = Object.entries(s.planComments).map(([id, c]) => ({
+          target_feature_id: id,
+          text: c.text
+        }));
+        const res = await fetch(`${backendUrl}/api/projects/${projectId || 'local-draft-101'}/comments/batch-fix`, {
           method: 'POST',
           headers: authHeaders,
-          body: JSON.stringify({ stage: 'features' }),
+          body: JSON.stringify({
+            stage: 'features',
+            comments: commentsList,
+            current_features: s.generationState?.features || []
+          }),
           signal
         });
 
