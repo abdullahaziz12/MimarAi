@@ -28,15 +28,17 @@ export default function PlanScreen() {
   const isActive = currentScreen === 'plan';
   const commentCount = Object.keys(planComments).length;
 
+  const defaultFeatures = [
+    { id: 'feat-1', name: `${ideaText || 'Core Application'} Workflow Engine`, description: `Primary operational pipeline and business logic for ${ideaText || 'the application'}.`, source: 'user_originated' },
+    { id: 'feat-2', name: 'User Authentication & Security', description: 'Secure user login, JWT permissions, and role-based authorization.', source: 'user_originated' },
+    { id: 'feat-3', name: 'Data Persistence & API Layer', description: 'Database schema, API endpoints, and transactional data processing.', source: 'user_originated' },
+    { id: 'feat-4', name: 'Audit Trail & Event Logging', description: 'Asynchronous event logging, error tracking, and system metrics.', source: 'ai_added' }
+  ];
+
   const currentGenState = generationState || {
-    idea_objective: ideaText || "A precision-engineering web app that acts as an AI architect for developers.",
+    idea_objective: ideaText ? `A precision-engineered solution for ${ideaText}.` : "A precision-engineered web application architected for scale.",
     fixed_inputs: fixedInputs || {},
-    features: [
-      { id: 'f1', name: 'Role-Based Access Control', description: 'Admins, loan officers, and auditors each get strictly scoped JWT permissions.', source: 'user_originated' },
-      { id: 'f2', name: 'Loan & Interest Management', description: 'Create, approve, and track loans with configurable interest rules and principal ranges.', source: 'user_originated' },
-      { id: 'f3', name: 'Audit Logging', description: 'Every approval and rate change is recorded asynchronously with actor and timestamp.', source: 'ai_added' },
-      { id: 'f4', name: 'Automated Interest Recalculation', description: 'Recalculates outstanding balances nightly against the rate table via background cron.', source: 'ai_added' }
-    ]
+    features: defaultFeatures
   };
 
   const featuresList = currentGenState.features || [];
