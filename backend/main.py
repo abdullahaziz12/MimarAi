@@ -195,10 +195,6 @@ def read_root():
         "status": "online"
     }
 
-@app.options("/{full_path:path}")
-def options_catchall(full_path: str):
-    return {"status": "ok"}
-
 
 @app.get("/health")
 @app.options("/health")
