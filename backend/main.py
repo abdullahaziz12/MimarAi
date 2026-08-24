@@ -15,9 +15,19 @@ app = FastAPI(
 )
 
 # CORS setup
+frontend_url = os.getenv("FRONTEND_URL", "https://mimar-ai.vercel.app")
+allowed_origins = [
+    "https://mimar-ai.vercel.app",
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3000",
+]
+if frontend_url and frontend_url not in allowed_origins:
+    allowed_origins.append(frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -465,19 +475,33 @@ async def update_project_status(
     req: UpdateProjectStatusRequest,
     user: Dict[str, Any] = Depends(get_current_user)
 ):
+    user_id = user.get("user_id")
     client = get_supabase()
     if not client or project_id.startswith("local-draft-"):
         return {"status": "ok", "project_id": project_id, "updated_status": req.status}
 
     try:
+        # Enforce project ownership check
+        try:
+            proj_res = client.table("projects").select("id").eq("id", project_id).eq("owner_id", user_id).execute()
+            if not proj_res or not proj_res.data:
+                raise HTTPException(status_code=404, detail="Project not found")
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[Update Project Status Ownership Check Warning] {e}")
+            raise HTTPException(status_code=404, detail="Project not found")
+
         payload = {}
         if req.status:
             payload["status"] = req.status
         if req.fixed_inputs:
             payload["fixed_inputs"] = req.fixed_inputs
         if payload:
-            client.table("projects").update(payload).eq("id", project_id).execute()
+            client.table("projects").update(payload).eq("id", project_id).eq("owner_id", user_id).execute()
         return {"status": "ok", "project_id": project_id, "updated_status": req.status}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[Update Project Status Error] {e}")
         return {"status": "warning", "message": str(e)}
@@ -492,6 +516,13 @@ async def classify_idea(
     user_id = user.get("user_id")
     idea_text = req.idea_text.strip() if req.idea_text else ""
     
+    # 0. Empty idea_text check
+    if not idea_text:
+        raise HTTPException(
+            status_code=400,
+            detail="Idea text cannot be empty."
+        )
+
     # 1. 2,000 character check (server-side)
     if len(idea_text) > 2000:
         raise HTTPException(
@@ -499,7 +530,21 @@ async def classify_idea(
             detail="Idea description exceeds 2,000 characters limit."
         )
 
-    # 2. Rate limiting check (10 per hour)
+    # 2. Validate project_id existence & ownership if project_id is provided
+    client = get_supabase()
+    if req.project_id and not req.project_id.startswith("local-draft-"):
+        if client and user_id:
+            try:
+                proj_check = client.table("projects").select("id").eq("id", req.project_id).eq("owner_id", user_id).execute()
+                if not proj_check or not proj_check.data:
+                    raise HTTPException(status_code=404, detail="Project not found")
+            except HTTPException:
+                raise
+            except Exception as e:
+                print(f"[Project Validation Error] {e}")
+                raise HTTPException(status_code=404, detail="Project not found")
+
+    # 3. Rate limiting check (10 per hour)
     client = get_supabase()
     if client and user_id:
         try:
