@@ -43,17 +43,20 @@ supabase_key: Optional[str] = os.getenv("SUPABASE_KEY")
 supabase_jwt_secret: Optional[str] = os.getenv("SUPABASE_JWT_SECRET")
 supabase_client = None
 
-def get_supabase():
-    global supabase_client
-    if supabase_client is not None:
-        return supabase_client
-    
+def get_supabase(token: Optional[str] = None):
     url = os.getenv("SUPABASE_URL")
     key = os.getenv("SUPABASE_KEY")
     if url and key and "your-project" not in url:
         try:
             from supabase import create_client
-            supabase_client = create_client(url, key)
+            if token:
+                client = create_client(url, key)
+                client.postgrest.auth(token)
+                return client
+            
+            global supabase_client
+            if supabase_client is None:
+                supabase_client = create_client(url, key)
             return supabase_client
         except Exception as e:
             print(f"Supabase client initialization warning: {e}")
@@ -91,7 +94,8 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[
                 "user_id": payload.get("sub"),
                 "email": payload.get("email"),
                 "role": payload.get("role"),
-                "user_metadata": payload.get("user_metadata", {})
+                "user_metadata": payload.get("user_metadata", {}),
+                "token": token
             }
         except jwt.ExpiredSignatureError:
             raise HTTPException(status_code=401, detail="Authentication token has expired.")
@@ -109,7 +113,8 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[
                     "user_id": u.id,
                     "email": u.email,
                     "role": u.role,
-                    "user_metadata": u.user_metadata or {}
+                    "user_metadata": u.user_metadata or {},
+                    "token": token
                 }
         except Exception as e:
             raise HTTPException(status_code=401, detail=f"Token verification failed: {str(e)}")
@@ -436,7 +441,8 @@ async def create_draft_project(
     user: Dict[str, Any] = Depends(get_current_user)
 ):
     user_id = user.get("user_id")
-    client = get_supabase()
+    token = user.get("token")
+    client = get_supabase(token)
     if not client or not user_id:
         return {"id": "local-draft-" + str(int(datetime.now().timestamp())), "status": "draft", "idea_text": req.idea_text}
 
@@ -462,7 +468,8 @@ async def get_draft_projects(
     user: Dict[str, Any] = Depends(get_current_user)
 ):
     user_id = user.get("user_id")
-    client = get_supabase()
+    token = user.get("token")
+    client = get_supabase(token)
     if not client or not user_id:
         return {"drafts": []}
 
@@ -482,7 +489,8 @@ async def update_project_status(
     user: Dict[str, Any] = Depends(get_current_user)
 ):
     user_id = user.get("user_id")
-    client = get_supabase()
+    token = user.get("token")
+    client = get_supabase(token)
     if not client or project_id.startswith("local-draft-"):
         return {"status": "ok", "project_id": project_id, "updated_status": req.status}
 
@@ -520,6 +528,7 @@ async def classify_idea(
     user: Dict[str, Any] = Depends(get_current_user)
 ):
     user_id = user.get("user_id")
+    token = user.get("token")
     idea_text = req.idea_text.strip() if req.idea_text else ""
     
     # 0. Empty idea_text check
@@ -537,7 +546,7 @@ async def classify_idea(
         )
 
     # 2. Validate project_id existence & ownership if project_id is provided
-    client = get_supabase()
+    client = get_supabase(token)
     if req.project_id and not req.project_id.startswith("local-draft-"):
         if client and user_id:
             try:
@@ -551,7 +560,7 @@ async def classify_idea(
                 raise HTTPException(status_code=404, detail="Project not found")
 
     # 3. Rate limiting check (10 per hour)
-    client = get_supabase()
+    client = get_supabase(token)
     if client and user_id:
         try:
             res = client.table("rate_limits").select("*").eq("user_id", user_id).execute()
@@ -816,7 +825,8 @@ async def generate_feature_pipeline(
     user: Dict[str, Any] = Depends(get_current_user)
 ):
     user_id = user.get("user_id")
-    client = get_supabase()
+    token = user.get("token")
+    client = get_supabase(token)
     
     idea_text = (req and req.idea_text) or "Software application"
     fixed_inputs = (req and req.fixed_inputs) or {}
@@ -942,7 +952,8 @@ async def process_comment_batch(
     user: Dict[str, Any] = Depends(get_current_user)
 ):
     user_id = user.get("user_id")
-    client = get_supabase()
+    token = user.get("token")
+    client = get_supabase(token)
     
     submitted_comments = req.comments or []
     current_features = req.current_features or []
@@ -1022,7 +1033,8 @@ async def reject_feature(
     user: Dict[str, Any] = Depends(get_current_user)
 ):
     user_id = user.get("user_id")
-    client = get_supabase()
+    token = user.get("token")
+    client = get_supabase(token)
     if not client or project_id.startswith("local-draft-"):
         return {"status": "ok", "feature_id": feature_id, "action": "rejected"}
 
@@ -1058,7 +1070,8 @@ async def generate_dependency_order(
     user: Dict[str, Any] = Depends(get_current_user)
 ):
     user_id = user.get("user_id")
-    client = get_supabase()
+    token = user.get("token")
+    client = get_supabase(token)
     if not client or project_id.startswith("local-draft-"):
         return {"status": "ok", "dependency_order": ["feat-1", "feat-2"]}
 
@@ -1117,7 +1130,8 @@ async def get_project_comments(
     user: Dict[str, Any] = Depends(get_current_user)
 ):
     user_id = user.get("user_id")
-    client = get_supabase()
+    token = user.get("token")
+    client = get_supabase(token)
     if not client or project_id.startswith("local-draft-"):
         return {"comments": []}
 
@@ -1133,7 +1147,8 @@ async def add_project_comment(
     user: Dict[str, Any] = Depends(get_current_user)
 ):
     user_id = user.get("user_id")
-    client = get_supabase()
+    token = user.get("token")
+    client = get_supabase(token)
     if not client or project_id.startswith("local-draft-"):
         return {"id": "local-comm-1", "text": req.text, "status": "pending"}
 

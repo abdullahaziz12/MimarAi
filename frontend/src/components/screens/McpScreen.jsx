@@ -54,11 +54,11 @@ export default function McpScreen() {
   const handleCopyAgentConfig = (agent) => {
     let snippet = '';
     if (agent === 'claude') {
-      snippet = `// CLAUDE.md\n{\n  "mcpServers": {\n    "mimarai": {\n      "url": "https://mimaraibackend-euj86d7p.b4a.run/mcp",\n      "headers": { "Authorization": "Bearer ${mcpToken}" }\n    }\n  }\n}`;
+      snippet = `// CLAUDE.md\n{\n  "mcpServers": {\n    "mimarai": {\n      "url": "https://mimaraibackend-603zdm1j.b4a.run/mcp",\n      "headers": { "Authorization": "Bearer ${mcpToken}" }\n    }\n  }\n}`;
     } else if (agent === 'cursor') {
-      snippet = `// .cursorrules / mcp.json\n{\n  "mcpServers": {\n    "mimarai": {\n      "url": "https://mimaraibackend-euj86d7p.b4a.run/mcp",\n      "token": "${mcpToken}"\n    }\n  }\n}`;
+      snippet = `// .cursorrules / mcp.json\n{\n  "mcpServers": {\n    "mimarai": {\n      "url": "https://mimaraibackend-603zdm1j.b4a.run/mcp",\n      "token": "${mcpToken}"\n    }\n  }\n}`;
     } else {
-      snippet = `// AGENTS.md\n{\n  "tools": ["get_implementation_plan", "check_drift"],\n  "server": "https://mimaraibackend-euj86d7p.b4a.run/mcp",\n  "auth_token": "${mcpToken}"\n}`;
+      snippet = `// AGENTS.md\n{\n  "tools": ["get_implementation_plan", "check_drift"],\n  "server": "https://mimaraibackend-603zdm1j.b4a.run/mcp",\n  "auth_token": "${mcpToken}"\n}`;
     }
     navigator.clipboard?.writeText(snippet).catch(() => {});
     setCopiedAgent(agent);
@@ -153,7 +153,7 @@ export default function McpScreen() {
                 <span>MCP SERVER: ACTIVE &amp; READY</span>
               </div>
               <div className="mcp-status-url">
-                ENDPOINT: <code>https://mimaraibackend-euj86d7p.b4a.run/mcp</code>
+                ENDPOINT: <code>https://mimaraibackend-603zdm1j.b4a.run/mcp</code>
               </div>
             </div>
 
@@ -242,7 +242,7 @@ export default function McpScreen() {
                       {`: {\n      `}
                       <span className="code-key">"url"</span>
                       {`: `}
-                      <span className="code-val">"https://mimaraibackend-euj86d7p.b4a.run/mcp"</span>
+                      <span className="code-val">"https://mimaraibackend-603zdm1j.b4a.run/mcp"</span>
                       {`,\n      `}
                       <span className="code-key">"headers"</span>
                       {`: { `}
@@ -275,7 +275,7 @@ export default function McpScreen() {
                       {`: {\n      `}
                       <span className="code-key">"url"</span>
                       {`: `}
-                      <span className="code-val">"https://mimaraibackend-euj86d7p.b4a.run/mcp"</span>
+                      <span className="code-val">"https://mimaraibackend-603zdm1j.b4a.run/mcp"</span>
                       {`,\n      `}
                       <span className="code-key">"token"</span>
                       {`: `}
@@ -308,7 +308,7 @@ export default function McpScreen() {
                       {`],\n  `}
                       <span className="code-key">"server"</span>
                       {`: `}
-                      <span className="code-val">"https://mimaraibackend-euj86d7p.b4a.run/mcp"</span>
+                      <span className="code-val">"https://mimaraibackend-603zdm1j.b4a.run/mcp"</span>
                       {`,\n  `}
                       <span className="code-key">"auth_token"</span>
                       {`: `}

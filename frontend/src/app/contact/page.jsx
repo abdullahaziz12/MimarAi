@@ -64,7 +64,7 @@ export default function ContactPage() {
 
       // 2. Fallback to external backend container if /api/contact fails
       if (!res.ok) {
-        res = await fetch("https://mimaraibackend-euj86d7p.b4a.run/contact", {
+        res = await fetch("https://mimaraibackend-603zdm1j.b4a.run/contact", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),

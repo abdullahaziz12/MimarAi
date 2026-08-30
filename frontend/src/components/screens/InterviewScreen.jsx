@@ -26,7 +26,8 @@ export default function InterviewScreen() {
     setStep0State,
     setFixedInputs,
     setIdeaText,
-    showToast
+    showToast,
+    retryGenerationText
   } = useMimarStore();
 
   const [inputVal, setInputVal] = useState('');
@@ -225,7 +226,7 @@ export default function InterviewScreen() {
   const handleStartGeneration = async () => {
     // Phase 8: Explicit start trigger tap
     if (!ideaText) return;
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://mimaraibackend-euj86d7p.b4a.run';
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://mimaraibackend-603zdm1j.b4a.run';
     if (projectId) {
       fetch(`${backendUrl}/api/projects/${projectId}/status`, {
         method: 'POST',
@@ -341,6 +342,27 @@ export default function InterviewScreen() {
                     }}
                   >
                     🔄 Retry Classification
+                  </button>
+                </div>
+              )}
+
+              {/* Retry button for Phase 8 generation failure handling */}
+              {retryGenerationText && !operationRunning && (
+                <div className="row ai" style={{ marginTop: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => runIdeaPipeline(retryGenerationText)}
+                    style={{
+                      background: '#1E293B',
+                      border: '1px solid #EF4444',
+                      color: '#EF4444',
+                      padding: '6px 12px',
+                      borderRadius: '4px',
+                      fontSize: '12px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    🔄 Retry Generation
                   </button>
                 </div>
               )}

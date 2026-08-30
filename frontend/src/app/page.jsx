@@ -20,7 +20,7 @@ export default function LandingPage() {
     document.documentElement.style.overflow = "auto";
 
     if (user) {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://mimaraibackend-euj86d7p.b4a.run';
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://mimaraibackend-603zdm1j.b4a.run';
       fetch(`${backendUrl}/api/projects/drafts`)
         .then(res => {
           if (res.ok) return res.json();

@@ -6,7 +6,7 @@ export default function DiagnosticBadge() {
   const [dbStatus, setDbStatus] = useState({ state: 'checking', label: 'Checking backend/db…' });
 
   useEffect(() => {
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://mimaraibackend-euj86d7p.b4a.run';
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://mimaraibackend-603zdm1j.b4a.run';
     fetch(`${backendUrl}/health/db`)
       .then(res => res.json())
       .then(data => {

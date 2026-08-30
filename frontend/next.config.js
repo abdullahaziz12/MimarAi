@@ -30,7 +30,7 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com",
               "img-src 'self' data: blob: https:",
-              "connect-src 'self' https://mimaraibackend-euj86d7p.b4a.run https://tgyupsejfuvglbwjneob.supabase.co https://fonts.googleapis.com https://fonts.gstatic.com",
+              "connect-src 'self' https://mimaraibackend-603zdm1j.b4a.run https://tgyupsejfuvglbwjneob.supabase.co https://fonts.googleapis.com https://fonts.gstatic.com",
               "frame-ancestors 'none'",
             ].join('; '),
           },
