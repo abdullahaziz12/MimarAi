@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Contact &amp; Support — MimarAi</title>
+  <link rel="icon" type="image/png" href="assets/mimarai-favicon.png">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+    :root {
+      --bg-base: #090F1C;
+      --bg-surface: #0E172B;
+      --bg-surface-elevated: #15223D;
+      --bg-surface-hover: #1C2E52;
+      --bg-surface-deep: #050912;
+      --bg-glass: rgba(9, 15, 28, 0.92);
+
+      --ink-primary: #F8FAFC;
+      --ink-secondary: #94A3B8;
+      --ink-muted: #64748B;
+      --ink-border: #334155;
+
+      --border-line: rgba(56, 189, 248, 0.14);
+      --border-line-focus: #38BDF8;
+      --border-hairline: rgba(255, 255, 255, 0.06);
+
+      --blueprint-cyan: #38BDF8;
+      --blueprint-cyan-dim: rgba(56, 189, 248, 0.08);
+
+      --accent-orange: #F97316;
+      --accent-orange-hover: #EA580C;
+      --accent-orange-dim: rgba(249, 115, 22, 0.10);
+      --accent-orange-glow: rgba(249, 115, 22, 0.25);
+
+      --success-green: #10B981;
+      --success-green-dim: rgba(16, 185, 129, 0.10);
+
+      --danger-red: #EF4444;
+      --danger-red-dim: rgba(239, 68, 68, 0.10);
+
+      --radius-sm: 4px;
+      --radius: 6px;
+      --radius-lg: 10px;
+
+      --font-display: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'IBM Plex Mono', monospace;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html {
+      margin: 0;
+      padding: 0;
+      background: var(--bg-base);
+      color: var(--ink-primary);
+      font-family: var(--font-body);
+      font-size: 15px;
+      -webkit-font-smoothing: antialiased;
+      scroll-behavior: smooth;
+      overflow-x: hidden;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg-base);
+      color: var(--ink-primary);
+      font-family: var(--font-body);
+      line-height: 1.6;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background-image:
+        linear-gradient(rgba(56, 189, 248, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(56, 189, 248, 0.03) 1px, transparent 1px);
+      background-size: 28px 28px;
+    }
+
+    /* Top Announcement Bar */
+    .top-notice {
+      background: var(--bg-surface-deep);
+      border-bottom: 1px solid var(--border-line);
+      padding: 9px 24px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      text-align: center;
+      color: var(--ink-secondary);
+      letter-spacing: .05em;
+      width: 100%;
+    }
+    .top-notice b { color: var(--accent-orange); }
+
+    /* Sticky Navbar */
+    .nav-wrap {
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      background: var(--bg-glass);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border-hairline);
+      width: 100%;
+    }
+
+    .landing-nav {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+    }
+
+    .brand-logo {
+      display: flex;
+      align-items: center;
+      text-decoration: none;
+      transition: opacity .15s ease;
+    }
+    .brand-logo:hover { opacity: .85; }
+
+    .brand-logo-img {
+      height: 56px;
+      width: auto;
+      object-fit: contain;
+      display: block;
+      border-radius: 8px;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 28px;
+    }
+
+    .nav-links a {
+      color: var(--ink-secondary);
+      text-decoration: none;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      letter-spacing: .04em;
+      transition: color .15s;
+    }
+    .nav-links a:not(.btn):hover { color: var(--blueprint-cyan); }
+    .nav-links a.active:not(.btn) {
+      color: var(--accent-orange);
+      font-weight: 600;
+    }
+
+    .nav-links .btn-primary {
+      color: #fff !important;
+      background: var(--accent-orange) !important;
+      border-color: var(--accent-orange) !important;
+      text-decoration: none;
+      font-size: 12px;
+      padding: 10px 22px;
+      font-family: var(--font-mono);
+      font-weight: 600;
+      letter-spacing: .04em;
+      border-radius: var(--radius);
+      border: 1px solid transparent;
+      box-shadow: 0 2px 14px var(--accent-orange-glow);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all .18s ease;
+    }
+    .nav-links .btn-primary:hover {
+      background: var(--accent-orange-hover) !important;
+      transform: translateY(-1px);
+    }
+
+    /* Main Container */
+    .main-wrap {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 64px 28px 100px;
+      flex: 1 0 auto;
+      width: 100%;
+    }
+
+    /* Header */
+    .contact-hero {
+      margin-bottom: 48px;
+    }
+
+    .contact-tag {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--accent-orange);
+      margin-bottom: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .contact-hero h1 {
+      font-family: var(--font-display);
+      font-size: 36px;
+      font-weight: 700;
+      letter-spacing: -.02em;
+      margin: 0 0 12px;
+      color: var(--ink-primary);
+      line-height: 1.2;
+    }
+
+    .contact-hero p {
+      font-size: 16px;
+      color: var(--ink-secondary);
+      max-width: 620px;
+      line-height: 1.6;
+      margin: 0;
+    }
+
+    /* Layout */
+    .contact-layout {
+      display: grid;
+      grid-template-columns: 1.35fr 0.85fr;
+      gap: 36px;
+      align-items: start;
+    }
+
+    /* Form Card */
+    .contact-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-line);
+      border-radius: var(--radius-lg);
+      padding: 36px;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+    }
+
+    .card-title {
+      font-family: var(--font-display);
+      font-size: 18px;
+      font-weight: 600;
+      margin: 0 0 6px;
+      color: var(--ink-primary);
+    }
+
+    .card-sub {
+      font-size: 13.5px;
+      color: var(--ink-secondary);
+      margin: 0 0 28px;
+    }
+
+    /* Topic Selector */
+    .topic-group {
+      margin-bottom: 22px;
+    }
+
+    .topic-label {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: var(--ink-secondary);
+      margin-bottom: 10px;
+      display: block;
+    }
+
+    .topic-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .topic-btn {
+      font-family: var(--font-body);
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--ink-secondary);
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--radius);
+      padding: 7px 14px;
+      cursor: pointer;
+      transition: all .15s ease;
+      user-select: none;
+    }
+
+    .topic-btn:hover {
+      color: var(--ink-primary);
+      border-color: var(--border-line);
+      background: var(--bg-surface-hover);
+    }
+
+    .topic-btn.active {
+      color: #fff;
+      background: var(--accent-orange-dim);
+      border-color: var(--accent-orange);
+      font-weight: 600;
+    }
+
+    /* Form Fields */
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .form-field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 18px;
+    }
+
+    .field-label {
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--ink-primary);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .req { color: var(--accent-orange); font-size: 12px; margin-left: 2px; }
+
+    .input-text, .input-area {
+      width: 100%;
+      background: var(--bg-surface-deep);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: var(--radius);
+      padding: 11px 14px;
+      color: var(--ink-primary);
+      font-family: var(--font-body);
+      font-size: 14px;
+      outline: none;
+      transition: border-color .15s ease, background .15s ease;
+    }
+
+    .input-area {
+      min-height: 130px;
+      resize: vertical;
+      line-height: 1.55;
+    }
+
+    .input-text::placeholder, .input-area::placeholder {
+      color: var(--ink-muted);
+      font-size: 13.5px;
+    }
+
+    .input-text:focus, .input-area:focus {
+      border-color: var(--blueprint-cyan);
+      background: #060A14;
+    }
+
+    .form-field.has-error .input-text,
+    .form-field.has-error .input-area {
+      border-color: var(--danger-red);
+      background: rgba(239, 68, 68, 0.04);
+    }
+
+    .error-hint {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--danger-red);
+      display: none;
+      margin-top: 3px;
+    }
+
+    .form-field.has-error .error-hint {
+      display: block;
+    }
+
+    /* Submit */
+    .form-bottom {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 8px;
+      gap: 16px;
+    }
+
+    .btn-submit {
+      background: var(--accent-orange);
+      color: #fff;
+      border: 1px solid var(--accent-orange);
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      font-weight: 600;
+      letter-spacing: .03em;
+      padding: 12px 28px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all .15s ease;
+    }
+
+    .btn-submit:hover {
+      background: var(--accent-orange-hover);
+      transform: translateY(-1px);
+    }
+
+    .btn-submit.loading {
+      opacity: .80;
+      pointer-events: none;
+    }
+
+    .spinner {
+      width: 14px; height: 14px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      display: none;
+    }
+    .btn-submit.loading .spinner { display: inline-block; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Right Channels Column */
+    .channels-col {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .channel-box {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-line);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      transition: border-color .15s ease;
+    }
+    .channel-box:hover {
+      border-color: rgba(56, 189, 248, 0.3);
+    }
+
+    .channel-box-title {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--blueprint-cyan);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .channel-item {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      margin-bottom: 14px;
+    }
+    .channel-item:last-child { margin-bottom: 0; }
+
+    .channel-label {
+      font-size: 12px;
+      color: var(--ink-muted);
+    }
+    .channel-val {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--ink-primary);
+    }
+    .channel-val.online { color: var(--success-green); }
+
+    /* Success State */
+    .success-view {
+      display: none;
+      text-align: center;
+      padding: 44px 20px;
+    }
+
+    .success-badge {
+      width: 48px; height: 48px;
+      border-radius: 50%;
+      background: var(--success-green-dim);
+      border: 1px solid var(--success-green);
+      color: var(--success-green);
+      display: grid;
+      place-items: center;
+      margin: 0 auto 16px;
+      font-size: 20px;
+    }
+
+    .success-view h2 {
+      font-family: var(--font-display);
+      font-size: 22px;
+      font-weight: 600;
+      margin: 0 0 8px;
+      color: var(--ink-primary);
+    }
+
+    .success-view p {
+      font-size: 14px;
+      color: var(--ink-secondary);
+      max-width: 420px;
+      margin: 0 auto 24px;
+      line-height: 1.55;
+    }
+
+    .btn-reset {
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--ink-primary);
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-line);
+      padding: 9px 18px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: background .15s ease;
+    }
+    .btn-reset:hover { background: var(--bg-surface-hover); }
+
+    /* Footer */
+    .landing-footer {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 44px 32px;
+      border-top: 1px solid var(--border-hairline);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--ink-muted);
+      width: 100%;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      bottom: 36px;
+      z-index: 9999;
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-line);
+      border-left: 3px solid var(--accent-orange);
+      border-radius: var(--radius);
+      padding: 12px 20px;
+      font-size: 13px;
+      color: var(--ink-primary);
+      opacity: 0;
+      pointer-events: none;
+      transition: transform .2s ease, opacity .2s ease;
+      font-family: var(--font-body);
+      white-space: nowrap;
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+    }
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    @media (max-width: 860px) {
+      .contact-layout { grid-template-columns: 1fr; }
+      .form-grid { grid-template-columns: 1fr; gap: 0; }
+      .contact-card { padding: 24px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Announcement Bar -->
+  <div class="top-notice">
+    ENGINE SPEC: <b>DUAL-MODEL VERIFICATION (GEMINI FLASH + GROQ)</b> · MCP SERVER READY · $0 FREE-TIER ARCHITECTURE
+  </div>
+
+  <!-- Global Sticky Header -->
+  <div class="nav-wrap">
+    <header class="landing-nav">
+      <a href="index.html" class="brand-logo" title="MimarAi — The Blueprint Studio">
+        <img src="assets/mimarai-logo-hero.png" alt="MimarAi Logo" class="brand-logo-img">
+      </a>
+      <div class="nav-links">
+        <a href="index.html#how-it-works">Workflow</a>
+        <a href="index.html#architecture">Architecture</a>
+        <a href="index.html#mcp-server">MCP Server</a>
+        <a href="contact.html" class="active">Contact Us</a>
+        <a href="app.html" class="btn btn-primary">Open Blueprint Wizard →</a>
+      </div>
+    </header>
+  </div>
+
+  <!-- Main Content -->
+  <main class="main-wrap">
+
+    <div class="contact-hero">
+      <div class="contact-tag">Feedback &amp; Support</div>
+      <h1>Contact the MimarAi Team</h1>
+      <p>Have questions about the dual-model architecture pipeline, discovered a bug, or want to suggest an MCP integration? Send us a message.</p>
+    </div>
+
+    <div class="contact-layout">
+
+      <!-- Form Card -->
+      <section class="contact-card">
+        <div id="formSection">
+          <h2 class="card-title">Send a Message</h2>
+          <p class="card-sub">All fields are required. We review inquiries daily.</p>
+
+          <form id="contactForm" novalidate>
+
+            <!-- Topic Selector -->
+            <div class="topic-group">
+              <span class="topic-label">Inquiry Type</span>
+              <div class="topic-pills">
+                <button type="button" class="topic-btn active" data-topic="General Inquiry">General Inquiry</button>
+                <button type="button" class="topic-btn" data-topic="Bug Report">Bug Report</button>
+                <button type="button" class="topic-btn" data-topic="Feature Suggestion">Feature Suggestion</button>
+                <button type="button" class="topic-btn" data-topic="MCP / Architecture">MCP / Architecture</button>
+              </div>
+            </div>
+
+            <!-- Name and Email Row -->
+            <div class="form-grid">
+              <div class="form-field" id="fieldWrapName">
+                <label class="field-label" for="inputName">
+                  <span>Name<span class="req">*</span></span>
+                </label>
+                <input type="text" id="inputName" class="input-text" placeholder="Your name" autocomplete="name">
+                <span class="error-hint">Please enter your name.</span>
+              </div>
+
+              <div class="form-field" id="fieldWrapEmail">
+                <label class="field-label" for="inputEmail">
+                  <span>Email<span class="req">*</span></span>
+                </label>
+                <input type="email" id="inputEmail" class="input-text" placeholder="you@company.com" autocomplete="email">
+                <span class="error-hint">Please enter a valid email address.</span>
+              </div>
+            </div>
+
+            <!-- Message Area -->
+            <div class="form-field" id="fieldWrapMessage">
+              <label class="field-label" for="inputMessage">
+                <span>Message<span class="req">*</span></span>
+              </label>
+              <textarea id="inputMessage" class="input-area" placeholder="Write message or report bug or suggest new feature"></textarea>
+              <span class="error-hint">Please enter your message before submitting.</span>
+            </div>
+
+            <!-- Form Bottom -->
+            <div class="form-bottom">
+              <span style="font-size:12px; color:var(--ink-muted);">Directly routed to core developers</span>
+              <button type="submit" class="btn-submit" id="submitBtn">
+                <span class="spinner"></span>
+                <span class="btn-label">Submit Message →</span>
+              </button>
+            </div>
+
+          </form>
+        </div>
+
+        <!-- Success Confirmation -->
+        <div class="success-view" id="successView">
+          <div class="success-badge">✓</div>
+          <h2>Message Sent Successfully</h2>
+          <p>Thank you for reaching out. We have logged your submission and will get back to you shortly.</p>
+          <button type="button" class="btn-reset" id="btnReset">Send Another Message</button>
+        </div>
+      </section>
+
+      <!-- Channels & Info Column -->
+      <aside class="channels-col">
+
+        <div class="channel-box">
+          <div class="channel-box-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            <span>Response &amp; Channels</span>
+          </div>
+          <div class="channel-item">
+            <span class="channel-label">Email Support</span>
+            <span class="channel-val">support@mimar.ai</span>
+          </div>
+          <div class="channel-item">
+            <span class="channel-label">Response Time</span>
+            <span class="channel-val">&lt; 24 business hours</span>
+          </div>
+          <div class="channel-item">
+            <span class="channel-label">MCP Server Status</span>
+            <span class="channel-val online">● All Systems Operational</span>
+          </div>
+        </div>
+
+        <div class="channel-box">
+          <div class="channel-box-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+            <span>Community &amp; Code</span>
+          </div>
+          <p style="font-size:13px; color:var(--ink-secondary); line-height:1.55; margin:0 0 12px;">
+            For public discussions, architectural RFCs, and bug reports, you can also open an issue on our GitHub repository.
+          </p>
+          <span style="font-family:var(--font-mono); font-size:12px; color:var(--blueprint-cyan);">github.com/mimarai/studio</span>
+        </div>
+
+      </aside>
+
+    </div>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="landing-footer">
+    <div style="display:flex; align-items:center; gap:16px;">
+      <a href="index.html" title="MimarAi — The Blueprint Studio" style="display:inline-flex; align-items:center; text-decoration:none;">
+        <img src="assets/mimarai-logo-hero.png" alt="MimarAi Logo" style="height:46px; width:auto; object-fit:contain; border-radius:6px; display:block;">
+      </a>
+    </div>
+    <div style="font-family: var(--font-mono); font-size: 11px; color: var(--ink-secondary); letter-spacing: .06em;">
+      RENDER + VERCEL + SUPABASE · $0 INFRASTRUCTURE GOAL
+    </div>
+  </footer>
+
+  <!-- Toast Notification -->
+  <div class="toast" id="toast"></div>
+
+  <!-- Validation & Submission Script -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const form = document.getElementById('contactForm');
+      const nameInput = document.getElementById('inputName');
+      const emailInput = document.getElementById('inputEmail');
+      const msgInput = document.getElementById('inputMessage');
+      const submitBtn = document.getElementById('submitBtn');
+      const formSection = document.getElementById('formSection');
+      const successView = document.getElementById('successView');
+      const btnReset = document.getElementById('btnReset');
+      const toast = document.getElementById('toast');
+
+      const wrapName = document.getElementById('fieldWrapName');
+      const wrapEmail = document.getElementById('fieldWrapEmail');
+      const wrapMsg = document.getElementById('fieldWrapMessage');
+
+      let selectedTopic = 'General Inquiry';
+
+      // Topic pills toggle
+      document.querySelectorAll('.topic-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.topic-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          selectedTopic = btn.dataset.topic || 'General Inquiry';
+        });
+      });
+
+      function showToast(msg) {
+        if (!toast) return;
+        toast.textContent = msg;
+        toast.classList.add('show');
+        setTimeout(() => toast.classList.remove('show'), 3000);
+      }
+
+      function isValidEmail(val) {
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
+      }
+
+      function validateField(input, wrap, validator) {
+        const val = input.value.trim();
+        const isValid = validator ? validator(val) : val.length > 0;
+        if (!isValid) {
+          wrap.classList.add('has-error');
+          return false;
+        } else {
+          wrap.classList.remove('has-error');
+          return true;
+        }
+      }
+
+      // Realtime validation
+      nameInput.addEventListener('input', () => {
+        if (wrapName.classList.contains('has-error')) validateField(nameInput, wrapName);
+      });
+      emailInput.addEventListener('input', () => {
+        if (wrapEmail.classList.contains('has-error')) validateField(emailInput, wrapEmail, isValidEmail);
+      });
+      msgInput.addEventListener('input', () => {
+        if (wrapMsg.classList.contains('has-error')) validateField(msgInput, wrapMsg);
+      });
+
+      // Submit handler
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+
+        const nameOk = validateField(nameInput, wrapName);
+        const emailOk = validateField(emailInput, wrapEmail, isValidEmail);
+        const msgOk = validateField(msgInput, wrapMsg);
+
+        if (!nameOk || !emailOk || !msgOk) {
+          showToast("Please fill in all required fields.");
+          return;
+        }
+
+        submitBtn.classList.add('loading');
+        submitBtn.querySelector('.btn-label').textContent = 'Sending…';
+
+        setTimeout(() => {
+          submitBtn.classList.remove('loading');
+          submitBtn.querySelector('.btn-label').textContent = 'Submit Message →';
+
+          formSection.style.display = 'none';
+          successView.style.display = 'block';
+          showToast("Message sent successfully.");
+        }, 700);
+      });
+
+      // Send another message
+      if (btnReset) {
+        btnReset.addEventListener('click', () => {
+          form.reset();
+          wrapName.classList.remove('has-error');
+          wrapEmail.classList.remove('has-error');
+          wrapMsg.classList.remove('has-error');
+          successView.style.display = 'none';
+          formSection.style.display = 'block';
+        });
+      }
+    });
+  </script>
+
+</body>
+</html>

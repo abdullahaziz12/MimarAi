@@ -1,30 +1,26 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import { useMimarStore, sleep } from '../../store/mimarStore';
+import React, { useState, useEffect } from "react";
+import { useMimarStore, sleep } from "../../store/mimarStore";
+import { getConfiguredBackendUrl } from "../../lib/backendConfig";
 
 export default function McpScreen() {
-  const {
-    currentScreen,
-    mcpToken,
-    rejectedFeatures,
-    setMcpToken,
-    showToast
-  } = useMimarStore();
+  const { currentScreen, mcpToken, rejectedFeatures, setMcpToken, showToast } =
+    useMimarStore();
 
   const [copiedToken, setCopiedToken] = useState(false);
   const [copiedAgent, setCopiedAgent] = useState(null);
   const [driftRunning, setDriftRunning] = useState(false);
   const [driftReport, setDriftReport] = useState(null);
 
-  const isActive = currentScreen === 'mcp';
-  const isAuditRejected = !!rejectedFeatures['f3'];
+  const isActive = currentScreen === "mcp";
+  const isAuditRejected = !!rejectedFeatures["f3"];
 
   // Generate a fresh per-session token on first activation (never hardcoded in bundle)
   useEffect(() => {
     if (isActive && !mcpToken) {
       const sessionToken =
-        'mim_live_' +
+        "mim_live_" +
         Math.random().toString(36).substring(2, 10) +
         Math.random().toString(36).substring(2, 10);
       setMcpToken(sessionToken);
@@ -40,11 +36,11 @@ export default function McpScreen() {
 
   const handleRegenerateToken = () => {
     const confirmRegen = window.confirm(
-      "Regenerate MCP token? Any existing agent connections using the old token will stop working."
+      "Regenerate MCP token? Any existing agent connections using the old token will stop working.",
     );
     if (!confirmRegen) return;
     const newToken =
-      'mim_live_' +
+      "mim_live_" +
       Math.random().toString(36).substring(2, 10) +
       Math.random().toString(36).substring(2, 10);
     setMcpToken(newToken);
@@ -52,32 +48,46 @@ export default function McpScreen() {
   };
 
   const handleCopyAgentConfig = (agent) => {
-    let snippet = '';
-    if (agent === 'claude') {
-      snippet = `// CLAUDE.md\n{\n  "mcpServers": {\n    "mimarai": {\n      "url": "https://mimaraibackend-603zdm1j.b4a.run/mcp",\n      "headers": { "Authorization": "Bearer ${mcpToken}" }\n    }\n  }\n}`;
-    } else if (agent === 'cursor') {
-      snippet = `// .cursorrules / mcp.json\n{\n  "mcpServers": {\n    "mimarai": {\n      "url": "https://mimaraibackend-603zdm1j.b4a.run/mcp",\n      "token": "${mcpToken}"\n    }\n  }\n}`;
+    let snippet = "";
+    const baseMcpUrl = (() => {
+      try {
+        return `${new URL(process.env.NEXT_PUBLIC_BACKEND_URL || "").origin}/mcp`;
+      } catch {
+        return "NEXT_PUBLIC_BACKEND_URL is not configured";
+      }
+    })();
+
+    if (agent === "claude") {
+      snippet = `// CLAUDE.md\n{\n  "mcpServers": {\n    "mimarai": {\n      "url": "${baseMcpUrl}",\n      "headers": { "Authorization": "Bearer ${mcpToken}" }\n    }\n  }\n}`;
+    } else if (agent === "cursor") {
+      snippet = `// .cursorrules / mcp.json\n{\n  "mcpServers": {\n    "mimarai": {\n      "url": "${baseMcpUrl}",\n      "token": "${mcpToken}"\n    }\n  }\n}`;
     } else {
-      snippet = `// AGENTS.md\n{\n  "tools": ["get_implementation_plan", "check_drift"],\n  "server": "https://mimaraibackend-603zdm1j.b4a.run/mcp",\n  "auth_token": "${mcpToken}"\n}`;
+      snippet = `// AGENTS.md\n{\n  "tools": ["get_implementation_plan", "check_drift"],\n  "server": "${baseMcpUrl}",\n  "auth_token": "${mcpToken}"\n}`;
     }
     navigator.clipboard?.writeText(snippet).catch(() => {});
     setCopiedAgent(agent);
-    showToast(`Config snippet for ${agent.toUpperCase()} copied with project token.`);
+    showToast(
+      `Config snippet for ${agent.toUpperCase()} copied with project token.`,
+    );
     setTimeout(() => setCopiedAgent(null), 2200);
   };
 
   const handleDownloadPlan = () => {
-    showToast("Generating standalone machine-readable Implementation Plan JSON package…");
+    showToast(
+      "Generating standalone machine-readable Implementation Plan JSON package…",
+    );
     const structExport = {
       "src/routes/loan.py": ["Loan & Interest Management"],
       "src/models/loan.py": ["Loan & Interest Management"],
       "src/routes/auth.py": ["Role-Based Access Control"],
-      "src/models/refresh_token.py": ["Role-Based Access Control"]
+      "src/models/refresh_token.py": ["Role-Based Access Control"],
     };
     if (!isAuditRejected) {
       structExport["src/models/audit_log.py"] = ["Audit Logging"];
     }
-    const schemaTables = isAuditRejected ? ["users", "loans"] : ["users", "loans", "audit_logs"];
+    const schemaTables = isAuditRejected
+      ? ["users", "loans"]
+      : ["users", "loans", "audit_logs"];
 
     setTimeout(() => {
       const fakeBlob = new Blob(
@@ -90,19 +100,19 @@ export default function McpScreen() {
               structure: structExport,
               schema: {
                 tables: schemaTables,
-                services: ["API Gateway", "Auth Service", "Loan Service"]
-              }
+                services: ["API Gateway", "Auth Service", "Loan Service"],
+              },
             },
             null,
-            2
-          )
+            2,
+          ),
         ],
-        { type: 'application/json' }
+        { type: "application/json" },
       );
       const url = URL.createObjectURL(fakeBlob);
-      const a = document.createElement('a');
+      const a = document.createElement("a");
       a.href = url;
-      a.download = 'MimarAi_Implementation_Plan_Validated.json';
+      a.download = "MimarAi_Implementation_Plan_Validated.json";
       a.click();
       URL.revokeObjectURL(url);
       showToast("Implementation Plan downloaded successfully.");
@@ -111,21 +121,30 @@ export default function McpScreen() {
 
   const handleRunDrift = async () => {
     setDriftRunning(true);
-    showToast("Scanning codebase against structure map & schema JSON (Gemini + Groq cross-check)…");
+    showToast(
+      "Scanning codebase against structure map & schema JSON (Gemini + Groq cross-check)…",
+    );
     await sleep(1400);
     setDriftReport(true);
     setDriftRunning(false);
-    showToast("Drift Report generated: 2 Implemented, 1 Adjusted, 1 Not Started.");
+    showToast(
+      "Drift Report generated: 2 Implemented, 1 Adjusted, 1 Not Started.",
+    );
   };
 
   return (
-    <div className={`screen scrollable ${isActive ? 'active' : ''}`} id="screen-mcp">
+    <div
+      className={`screen scrollable ${isActive ? "active" : ""}`}
+      id="screen-mcp"
+    >
       <div className="doc-screen-inner">
         <div className="toolbar">
           <div className="toolbar-left">
             <div className="label">Step 07 · Live Agent Interface</div>
             <h2>Model Context Protocol (MCP) Server</h2>
-            <div className="sub">LIVE PASSIVE SERVER · HOSTED ON RENDER · PER-PROJECT SCOPED</div>
+            <div className="sub">
+              LIVE PASSIVE SERVER · HOSTED ON RENDER · PER-PROJECT SCOPED
+            </div>
           </div>
           <div className="toolbar-actions">
             <button
@@ -134,7 +153,14 @@ export default function McpScreen() {
               id="pdfDownloadBtn"
               onClick={handleDownloadPlan}
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                 <polyline points="7 10 12 15 17 10" />
                 <line x1="12" y1="15" x2="12" y2="3" />
@@ -153,22 +179,37 @@ export default function McpScreen() {
                 <span>MCP SERVER: ACTIVE &amp; READY</span>
               </div>
               <div className="mcp-status-url">
-                ENDPOINT: <code>https://mimaraibackend-603zdm1j.b4a.run/mcp</code>
+                ENDPOINT:{" "}
+                <code>
+                  {getConfiguredBackendUrl()
+                    ? `${getConfiguredBackendUrl().replace(/\/+$/, "")}/mcp`
+                    : "NEXT_PUBLIC_BACKEND_URL not configured"}
+                </code>
               </div>
             </div>
 
             {/* 1. Per-Project Authentication */}
             <div className="mcp-section">
               <div className="mcp-section-head">
-                <div className="mcp-section-title">1. Per-Project Authentication Token</div>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-muted)' }}>
+                <div className="mcp-section-title">
+                  1. Per-Project Authentication Token
+                </div>
+                <span
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 10,
+                    color: "var(--ink-muted)",
+                  }}
+                >
                   SCOPED TO PROJECT: LOAN-DESK-01
                 </span>
               </div>
               <div className="mcp-section-body">
                 <div className="token-row">
                   <span className="token-value" id="tokenValue">
-                    {copiedToken ? mcpToken : mcpToken.slice(0, 8) + '••••••••••••••••'}
+                    {copiedToken
+                      ? mcpToken
+                      : mcpToken.slice(0, 8) + "••••••••••••••••"}
                   </span>
                   <div className="token-actions">
                     <button
@@ -177,7 +218,7 @@ export default function McpScreen() {
                       id="copyTokenBtn"
                       onClick={handleCopyToken}
                     >
-                      {copiedToken ? '✓ COPIED' : 'Copy Token'}
+                      {copiedToken ? "✓ COPIED" : "Copy Token"}
                     </button>
                     <button
                       type="button"
@@ -190,20 +231,31 @@ export default function McpScreen() {
                   </div>
                 </div>
                 <div className="token-note">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
                     <circle cx="12" cy="12" r="10" />
                     <line x1="12" y1="16" x2="12" y2="12" />
                     <line x1="12" y1="8" x2="12.01" y2="8" />
                   </svg>
                   <span>
-                    Tokens are stored hashed in Supabase. Never shared across projects. Rate limit: 20–30 req/hour per token.
+                    Tokens are stored hashed in Supabase. Never shared across
+                    projects. Rate limit: 20–30 req/hour per token.
                   </span>
                 </div>
 
                 {/* Rate limit meter */}
                 <div className="rate-bar-wrap">
                   <div className="rate-bar">
-                    <div className="rate-bar-fill" style={{ width: '14%' }}></div>
+                    <div
+                      className="rate-bar-fill"
+                      style={{ width: "14%" }}
+                    ></div>
                   </div>
                   <span className="rate-label">4 / 30 req used this hour</span>
                 </div>
@@ -214,7 +266,13 @@ export default function McpScreen() {
             <div className="mcp-section">
               <div className="mcp-section-head">
                 <div className="mcp-section-title">2. Connect Your Agent</div>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-muted)' }}>
+                <span
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 10,
+                    color: "var(--ink-muted)",
+                  }}
+                >
                   AUTO-CONFIG SNIPPETS
                 </span>
               </div>
@@ -226,11 +284,11 @@ export default function McpScreen() {
                       <span className="agent-name">Claude Code</span>
                       <button
                         type="button"
-                        className={`agent-copy-btn ${copiedAgent === 'claude' ? 'copied' : ''}`}
+                        className={`agent-copy-btn ${copiedAgent === "claude" ? "copied" : ""}`}
                         data-agent="claude"
-                        onClick={() => handleCopyAgentConfig('claude')}
+                        onClick={() => handleCopyAgentConfig("claude")}
                       >
-                        {copiedAgent === 'claude' ? '✓ COPIED' : 'Copy Config'}
+                        {copiedAgent === "claude" ? "✓ COPIED" : "Copy Config"}
                       </button>
                     </div>
                     <div className="agent-code">
@@ -242,7 +300,11 @@ export default function McpScreen() {
                       {`: {\n      `}
                       <span className="code-key">"url"</span>
                       {`: `}
-                      <span className="code-val">"https://mimaraibackend-603zdm1j.b4a.run/mcp"</span>
+                      <span className="code-val">
+                        {getConfiguredBackendUrl()
+                          ? `"${getConfiguredBackendUrl().replace(/\/+$/, "")}/mcp"`
+                          : '"NEXT_PUBLIC_BACKEND_URL not configured"'}
+                      </span>
                       {`,\n      `}
                       <span className="code-key">"headers"</span>
                       {`: { `}
@@ -259,15 +321,17 @@ export default function McpScreen() {
                       <span className="agent-name">Cursor</span>
                       <button
                         type="button"
-                        className={`agent-copy-btn ${copiedAgent === 'cursor' ? 'copied' : ''}`}
+                        className={`agent-copy-btn ${copiedAgent === "cursor" ? "copied" : ""}`}
                         data-agent="cursor"
-                        onClick={() => handleCopyAgentConfig('cursor')}
+                        onClick={() => handleCopyAgentConfig("cursor")}
                       >
-                        {copiedAgent === 'cursor' ? '✓ COPIED' : 'Copy Config'}
+                        {copiedAgent === "cursor" ? "✓ COPIED" : "Copy Config"}
                       </button>
                     </div>
                     <div className="agent-code">
-                      <span className="code-comment">// .cursorrules / mcp.json</span>
+                      <span className="code-comment">
+                        // .cursorrules / mcp.json
+                      </span>
                       {`\n{\n  `}
                       <span className="code-key">"mcpServers"</span>
                       {`: {\n    `}
@@ -275,7 +339,11 @@ export default function McpScreen() {
                       {`: {\n      `}
                       <span className="code-key">"url"</span>
                       {`: `}
-                      <span className="code-val">"https://mimaraibackend-603zdm1j.b4a.run/mcp"</span>
+                      <span className="code-val">
+                        {getConfiguredBackendUrl()
+                          ? `"${getConfiguredBackendUrl().replace(/\/+$/, "")}/mcp"`
+                          : '"NEXT_PUBLIC_BACKEND_URL not configured"'}
+                      </span>
                       {`,\n      `}
                       <span className="code-key">"token"</span>
                       {`: `}
@@ -290,11 +358,13 @@ export default function McpScreen() {
                       <span className="agent-name">Antigravity</span>
                       <button
                         type="button"
-                        className={`agent-copy-btn ${copiedAgent === 'antigravity' ? 'copied' : ''}`}
+                        className={`agent-copy-btn ${copiedAgent === "antigravity" ? "copied" : ""}`}
                         data-agent="antigravity"
-                        onClick={() => handleCopyAgentConfig('antigravity')}
+                        onClick={() => handleCopyAgentConfig("antigravity")}
                       >
-                        {copiedAgent === 'antigravity' ? '✓ COPIED' : 'Copy Config'}
+                        {copiedAgent === "antigravity"
+                          ? "✓ COPIED"
+                          : "Copy Config"}
                       </button>
                     </div>
                     <div className="agent-code">
@@ -308,7 +378,11 @@ export default function McpScreen() {
                       {`],\n  `}
                       <span className="code-key">"server"</span>
                       {`: `}
-                      <span className="code-val">"https://mimaraibackend-603zdm1j.b4a.run/mcp"</span>
+                      <span className="code-val">
+                        {getConfiguredBackendUrl()
+                          ? `"${getConfiguredBackendUrl().replace(/\/+$/, "")}/mcp"`
+                          : '"NEXT_PUBLIC_BACKEND_URL not configured"'}
+                      </span>
                       {`,\n  `}
                       <span className="code-key">"auth_token"</span>
                       {`: `}
@@ -324,7 +398,13 @@ export default function McpScreen() {
             <div className="mcp-section">
               <div className="mcp-section-head">
                 <div className="mcp-section-title">3. Exposed MCP Tools</div>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-muted)' }}>
+                <span
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 10,
+                    color: "var(--ink-muted)",
+                  }}
+                >
                   PASSIVE TOOL INTERFACES
                 </span>
               </div>
@@ -335,10 +415,13 @@ export default function McpScreen() {
                     <span className="fn-param">project_id</span>: string)
                   </div>
                   <div className="tool-desc">
-                    Returns the accepted, locked implementation plan containing verified features, constraints, structure JSON map, and schema/microservices architecture.
+                    Returns the accepted, locked implementation plan containing
+                    verified features, constraints, structure JSON map, and
+                    schema/microservices architecture.
                   </div>
                   <div className="tool-returns">
-                    <span className="tool-returns-label">RETURNS:</span> JSON (features[], structure{}, schema{}, services[])
+                    <span className="tool-returns-label">RETURNS:</span> JSON
+                    (features[], structure{}, schema{}, services[])
                   </div>
                 </div>
 
@@ -348,10 +431,14 @@ export default function McpScreen() {
                     <span className="fn-param">project_id</span>: string)
                   </div>
                   <div className="tool-desc">
-                    Executes the dual-model drift verification against your codebase, comparing actual files, functions, and DB schemas against the accepted blueprint.
+                    Executes the dual-model drift verification against your
+                    codebase, comparing actual files, functions, and DB schemas
+                    against the accepted blueprint.
                   </div>
                   <div className="tool-returns">
-                    <span className="tool-returns-label">RETURNS:</span> DriftReport &#123; status: Implemented | Adjusted | Missing | Not Started &#125;
+                    <span className="tool-returns-label">RETURNS:</span>{" "}
+                    DriftReport &#123; status: Implemented | Adjusted | Missing
+                    | Not Started &#125;
                   </div>
                 </div>
               </div>
@@ -360,55 +447,99 @@ export default function McpScreen() {
             {/* 4. Post-Implementation Drift Check */}
             <div className="mcp-section">
               <div className="mcp-section-head">
-                <div className="mcp-section-title">4. Post-Implementation Drift-Check</div>
+                <div className="mcp-section-title">
+                  4. Post-Implementation Drift-Check
+                </div>
                 <button
                   type="button"
                   className="btn btn-primary"
                   id="runDriftBtn"
-                  style={{ fontSize: '10.5px', padding: '6px 12px' }}
+                  style={{ fontSize: "10.5px", padding: "6px 12px" }}
                   disabled={driftRunning}
                   onClick={handleRunDrift}
                 >
-                  {driftRunning ? 'Running Dual-Model Drift Check…' : driftReport ? 'Re-Run Drift Check' : 'Run Drift Check Now'}
+                  {driftRunning
+                    ? "Running Dual-Model Drift Check…"
+                    : driftReport
+                      ? "Re-Run Drift Check"
+                      : "Run Drift Check Now"}
                 </button>
               </div>
               <div className="mcp-section-body">
-                <p style={{ margin: '0 0 12px', fontSize: '12.5px', color: 'var(--ink-secondary)', lineHeight: 1.5 }}>
-                  Verify that your coding agent implemented the plan accurately without hallucinating diverging architecture or skipping constraints. Uses dual-model Gemini + Groq cross-check.
+                <p
+                  style={{
+                    margin: "0 0 12px",
+                    fontSize: "12.5px",
+                    color: "var(--ink-secondary)",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  Verify that your coding agent implemented the plan accurately
+                  without hallucinating diverging architecture or skipping
+                  constraints. Uses dual-model Gemini + Groq cross-check.
                 </p>
                 <div className="drift-report" id="driftReport">
                   {!driftReport ? (
-                    <div className="empty-state" style={{ padding: '18px 0' }}>
-                      No drift check executed for this session yet. Click 'Run Drift Check Now' to scan codebase.
+                    <div className="empty-state" style={{ padding: "18px 0" }}>
+                      No drift check executed for this session yet. Click 'Run
+                      Drift Check Now' to scan codebase.
                     </div>
                   ) : (
                     <>
                       <div className="drift-item">
-                        <span className="drift-badge implemented">✅ Implemented</span>
+                        <span className="drift-badge implemented">
+                          ✅ Implemented
+                        </span>
                         <div className="drift-main">
-                          <div className="drift-name">Role-Based Access Control</div>
-                          <div className="drift-desc">src/routes/auth.py &amp; models/refresh_token.py verified. JWT scoping enforced.</div>
+                          <div className="drift-name">
+                            Role-Based Access Control
+                          </div>
+                          <div className="drift-desc">
+                            src/routes/auth.py &amp; models/refresh_token.py
+                            verified. JWT scoping enforced.
+                          </div>
                         </div>
                       </div>
                       <div className="drift-item">
-                        <span className="drift-badge implemented">✅ Implemented</span>
+                        <span className="drift-badge implemented">
+                          ✅ Implemented
+                        </span>
                         <div className="drift-main">
-                          <div className="drift-name">Database Schema Conformance</div>
-                          <div className="drift-desc">3 tables (users, loans, audit_logs) match accepted column types and PK/FK constraints.</div>
+                          <div className="drift-name">
+                            Database Schema Conformance
+                          </div>
+                          <div className="drift-desc">
+                            3 tables (users, loans, audit_logs) match accepted
+                            column types and PK/FK constraints.
+                          </div>
                         </div>
                       </div>
                       <div className="drift-item">
-                        <span className="drift-badge adjusted">⚠ Adjusted — Please Review</span>
+                        <span className="drift-badge adjusted">
+                          ⚠ Adjusted — Please Review
+                        </span>
                         <div className="drift-main">
-                          <div className="drift-name">Loan &amp; Interest Management</div>
-                          <div className="drift-desc">Interest calculation interval set to hourly instead of nightly cron. Requires approval.</div>
+                          <div className="drift-name">
+                            Loan &amp; Interest Management
+                          </div>
+                          <div className="drift-desc">
+                            Interest calculation interval set to hourly instead
+                            of nightly cron. Requires approval.
+                          </div>
                         </div>
                       </div>
                       <div className="drift-item">
-                        <span className="drift-badge not-started">⚪ Not Started</span>
+                        <span className="drift-badge not-started">
+                          ⚪ Not Started
+                        </span>
                         <div className="drift-main">
-                          <div className="drift-name">Automated Audit Log Rotation</div>
-                          <div className="drift-desc">No code found in codebase yet — scheduled for subsequent agent sprint.</div>
+                          <div className="drift-name">
+                            Automated Audit Log Rotation
+                          </div>
+                          <div className="drift-desc">
+                            No code found in codebase yet — scheduled for
+                            subsequent agent sprint.
+                          </div>
                         </div>
                       </div>
                     </>

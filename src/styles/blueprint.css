@@ -1,0 +1,317 @@
+/* ==========================================================================
+   MIMAR AI — THE BLUEPRINT STUDIO DESIGN SYSTEM CSS
+   Precise Engineering & Technical Drafting Aesthetics
+   ========================================================================== */
+
+/* Font definitions & base variables */
+:root {
+  --font-head: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-body: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+
+  /* Theme Defaults (Blueprint Navy Mode) */
+  --bg-surface: #0F1B2D;
+  --bg-surface-elevated: #15243B;
+  --bg-surface-subtle: #0B1422;
+  --bg-grid-line: rgba(92, 138, 166, 0.12);
+  --bg-grid-line-major: rgba(92, 138, 166, 0.25);
+
+  --ink-primary: #EDEAE0;
+  --ink-secondary: #9CB2C0;
+  --ink-muted: #5C7485;
+
+  --accent-orange: #E8592E;        /* Safety Orange / Red Pen */
+  --accent-orange-bg: rgba(232, 89, 46, 0.12);
+  --accent-orange-border: rgba(232, 89, 46, 0.4);
+
+  --line-cyan: #5C8AA6;            /* Structural line color */
+  --line-cyan-subtle: rgba(92, 138, 166, 0.3);
+
+  --slate-green: #5B7B6B;          /* Validated state */
+  --slate-green-bg: rgba(91, 123, 107, 0.15);
+  --slate-green-border: rgba(91, 123, 107, 0.4);
+
+  --border-light: rgba(92, 138, 166, 0.25);
+  --border-strong: rgba(92, 138, 166, 0.5);
+
+  --radius-sm: 2px;
+  --radius-md: 4px;
+}
+
+/* Light Mode: Drafting Paper Tone */
+[data-theme="paper"] {
+  --bg-surface: #F6F3EC;
+  --bg-surface-elevated: #ECE8DE;
+  --bg-surface-subtle: #E4DFC6;
+  --bg-grid-line: rgba(16, 24, 32, 0.06);
+  --bg-grid-line-major: rgba(16, 24, 32, 0.14);
+
+  --ink-primary: #101820;
+  --ink-secondary: #4A5865;
+  --ink-muted: #7A8998;
+
+  --accent-orange: #D44419;
+  --accent-orange-bg: rgba(212, 68, 25, 0.1);
+  --accent-orange-border: rgba(212, 68, 25, 0.35);
+
+  --line-cyan: #3B6B88;
+  --line-cyan-subtle: rgba(59, 107, 136, 0.25);
+
+  --slate-green: #456353;
+  --slate-green-bg: rgba(69, 99, 83, 0.12);
+  --slate-green-border: rgba(69, 99, 83, 0.35);
+
+  --border-light: rgba(16, 24, 32, 0.15);
+  --border-strong: rgba(16, 24, 32, 0.35);
+}
+
+/* Base Reset & Styling */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background-color: var(--bg-surface);
+  color: var(--ink-primary);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-x: hidden;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Focus styles for keyboard accessibility */
+:focus-visible {
+  outline: 2px solid var(--accent-orange);
+  outline-offset: 2px;
+}
+
+/* Technical Drafting Grid Background */
+.blueprint-grid-bg {
+  background-color: var(--bg-surface);
+  background-image: 
+    linear-gradient(var(--bg-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--bg-grid-line) 1px, transparent 1px),
+    linear-gradient(var(--bg-grid-line-major) 1px, transparent 1px),
+    linear-gradient(90deg, var(--bg-grid-line-major) 1px, transparent 1px);
+  background-size: 20px 20px, 20px 20px, 100px 100px, 100px 100px;
+  background-position: -1px -1px;
+}
+
+/* CAD Technical Corner Ticks */
+.cad-box {
+  position: relative;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+}
+
+.cad-box-ticks::before,
+.cad-box-ticks::after {
+  content: '';
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-color: var(--line-cyan);
+  pointer-events: none;
+}
+
+.cad-box-ticks::before {
+  top: -1px;
+  left: -1px;
+  border-top: 1.5px solid var(--line-cyan);
+  border-left: 1.5px solid var(--line-cyan);
+}
+
+.cad-box-ticks::after {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 1.5px solid var(--line-cyan);
+  border-right: 1.5px solid var(--line-cyan);
+}
+
+/* Technical Typography */
+.font-head {
+  font-family: var(--font-head);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* Coordinate style metadata badge */
+.coord-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  border: 1px solid var(--border-light);
+  background: var(--bg-surface-subtle);
+  color: var(--line-cyan);
+  border-radius: var(--radius-sm);
+}
+
+.coord-tag.orange {
+  border-color: var(--accent-orange-border);
+  color: var(--accent-orange);
+  background: var(--accent-orange-bg);
+}
+
+.coord-tag.green {
+  border-color: var(--slate-green-border);
+  color: var(--slate-green);
+  background: var(--slate-green-bg);
+}
+
+/* Engineering Buttons */
+.btn-cad {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface-elevated);
+  color: var(--ink-primary);
+  text-decoration: none;
+}
+
+.btn-cad:hover {
+  border-color: var(--line-cyan);
+  background: rgba(92, 138, 166, 0.15);
+  color: var(--ink-primary);
+}
+
+.btn-cad-primary {
+  background: var(--accent-orange);
+  border-color: var(--accent-orange);
+  color: #FFFFFF !important;
+}
+
+.btn-cad-primary:hover {
+  background: #d44a20;
+  border-color: #d44a20;
+  box-shadow: 0 0 10px rgba(232, 89, 46, 0.3);
+}
+
+.btn-cad-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-secondary);
+}
+
+.btn-cad-ghost:hover {
+  background: var(--bg-surface-subtle);
+  border-color: var(--border-light);
+  color: var(--ink-primary);
+}
+
+/* Proofreader Markup (Red Pen Conflict Callout) */
+.proofreader-box {
+  background: var(--accent-orange-bg);
+  border: 1px solid var(--accent-orange-border);
+  border-left: 3px solid var(--accent-orange);
+  padding: 16px;
+  border-radius: var(--radius-sm);
+  position: relative;
+}
+
+.proofreader-strike {
+  text-decoration: line-through;
+  text-decoration-color: var(--accent-orange);
+  text-decoration-thickness: 2px;
+  color: var(--ink-muted);
+}
+
+.proofreader-annotation {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-orange);
+  background: var(--bg-surface-subtle);
+  padding: 2px 6px;
+  border: 1px solid var(--accent-orange-border);
+  display: inline-block;
+  margin-top: 4px;
+}
+
+/* Structural Dimension Line */
+.dimension-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--line-cyan);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  user-select: none;
+}
+
+.dimension-line::before,
+.dimension-line::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line-cyan-subtle);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-surface-subtle);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--line-cyan);
+}
+
+/* Technical Animations */
+@keyframes lineDraw {
+  from { stroke-dashoffset: 1000; }
+  to { stroke-dashoffset: 0; }
+}
+
+.animate-line-draw {
+  stroke-dasharray: 1000;
+  animation: lineDraw 1.2s ease-out forwards;
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.animate-pulse-subtle {
+  animation: pulseGlow 2s infinite ease-in-out;
+}

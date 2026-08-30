@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MimarAi — Blueprint Wizard (Architect Before Coding)</title>
+  <link rel="icon" type="image/png" href="assets/mimarai-favicon.png">
+  <link rel="stylesheet" href="app.css">
+  <script>
+    (function() {
+      try {
+        var raw = sessionStorage.getItem('mimarai_saved_state');
+        if (raw) {
+          var data = JSON.parse(raw);
+          var scr = data && data.currentScreen;
+          if (data && data.wasGenerating && !data.planGenerated) {
+            scr = 'plan';
+          }
+          if (scr && scr !== 'interview') {
+            document.documentElement.setAttribute('data-initial-screen', scr);
+          }
+        }
+      } catch(e) {}
+    })();
+  </script>
+</head>
+<body>
+
+<div class="app-shell" id="appShell">
+
+  <!-- ============================================================
+       GLOBAL APP HEADER
+       ============================================================ -->
+  <header class="app-header">
+    <div class="header-left">
+      <a href="index.html" class="brand-logo" title="MimarAi — Return to Overview">
+        <img src="assets/mimarai-mark-ultra.png" alt="MimarAi Emblem" class="brand-mark-img">
+      </a>
+    </div>
+
+    <div class="header-center">
+      <span class="header-badge">MIMAR ARCHITECT</span>
+      <span class="header-step" id="headerTitleStep">STEP 01 · <b>IDEA INTERVIEW</b></span>
+    </div>
+
+    <div class="global-stage-rail" id="globalStageRail">
+      <span class="gstage" data-stage="features"><span class="gstage-dot"></span>Features</span>
+      <span class="gstage-sep"></span>
+      <span class="gstage" data-stage="structure"><span class="gstage-dot"></span>Structure</span>
+      <span class="gstage-sep"></span>
+      <span class="gstage" data-stage="diagram"><span class="gstage-dot"></span>Diagrams</span>
+      <span class="gstage-sep"></span>
+      <span class="gstage" data-stage="final"><span class="gstage-dot"></span>Final Spec</span>
+    </div>
+
+    <div class="header-right">
+      <a href="index.html" class="btn btn-primary" id="headerLandingBtn" title="Stop generation and return to landing page">Stop Generation</a>
+    </div>
+  </header>
+
+  <!-- ============================================================
+       OPERATION LOCK / PROCESSING STATUS BAR
+       ============================================================ -->
+  <div class="op-lock-bar" id="opLockBar">
+    <div class="op-spin"></div>
+    <span id="opLockText">Processing…</span>
+    <span style="margin-left:auto; opacity:.8;">Single active pipeline enforced · Project state preserved</span>
+  </div>
+
+  <!-- ============================================================
+       APP BODY (Left Icon Nav + Main Screens)
+       ============================================================ -->
+  <div class="app-body">
+
+    <!-- LEFT NAVBAR SHORTCUTS (State-Aware) -->
+    <nav class="app-nav" id="appNav">
+      <div class="nav-item current" data-screen="interview" data-tooltip="01 · Interview">
+        <span class="nav-item-num">01</span>
+        <span class="nav-item-dot"></span>
+      </div>
+
+      <div class="nav-sep"></div>
+
+      <div class="nav-item locked" data-screen="plan" data-tooltip="02 · Implementation Plan">
+        <span class="nav-item-num">02</span>
+        <span class="nav-item-dot"></span>
+      </div>
+
+      <div class="nav-item locked" data-screen="structure" data-tooltip="03 · Project Structure">
+        <span class="nav-item-num">03</span>
+        <span class="nav-item-dot"></span>
+      </div>
+
+      <div class="nav-item locked" data-screen="diagram" data-tooltip="04 · Schema JSON">
+        <span class="nav-item-num">04</span>
+        <span class="nav-item-dot"></span>
+      </div>
+
+      <div class="nav-item locked" data-screen="render" data-tooltip="05 · Rendered Diagrams">
+        <span class="nav-item-num">05</span>
+        <span class="nav-item-dot"></span>
+      </div>
+
+      <div class="nav-item locked" data-screen="final" data-tooltip="06 · Consolidated Plan">
+        <span class="nav-item-num">06</span>
+        <span class="nav-item-dot"></span>
+      </div>
+
+      <div class="nav-item locked mcp-item" data-screen="mcp" data-tooltip="07 · MCP Server Hub">
+        <span class="nav-item-num">MCP</span>
+        <span class="nav-item-dot"></span>
+      </div>
+    </nav>
+
+    <!-- MAIN VIEWPORT -->
+    <main class="app-main" id="appMain">
+
+      <!-- ============================================================
+           SCREEN 01: INTERVIEW
+           ============================================================ -->
+      <div class="screen active" id="screen-interview">
+        <div class="interview-screen-inner">
+
+          <!-- REVISION CONTEXT BANNER (Shown only during revision flow) -->
+          <div class="context-banner revision-banner" id="revisionBanner" style="display:none;">
+            <span class="cb-icon">⚡</span>
+            <div class="cb-main">
+              <div class="cb-label">REVISION WORKSPACE ACTIVE</div>
+              <div class="cb-desc">Revising <b id="revBannerStage">PLAN</b> based on <b id="revBannerCount">1</b> pending comment(s). Locked upstream stages remain immutable.</div>
+            </div>
+            <div class="cb-locked">
+              <span class="cb-lock-chip">✓ SPEC LOCKED</span>
+            </div>
+          </div>
+
+          <!-- READ-ONLY BANNER (Shown when visiting interview on progressed project) -->
+          <div class="context-banner readonly-banner" id="readonlyBanner" style="display:none;">
+            <span class="cb-icon">🔒</span>
+            <div class="cb-main">
+              <div class="cb-label">INTERVIEW ARCHIVE (READ-ONLY)</div>
+              <div class="cb-desc">This project has progressed to downstream review stages. To request modifications, use the comment system on the respective review screen.</div>
+            </div>
+          </div>
+
+          <div class="interview-shell">
+            <!-- CHAT COLUMN -->
+            <div class="chat-engine">
+              <div class="chat-eng-head">
+                <div class="chat-eng-label">
+                  <div class="hud-dot-live" id="hudDotLive"></div>
+                  MIMAR ARCHITECT LINTER ENGINE
+                </div>
+                <span class="chat-session-tag" id="chatSessionTag">Session: Active</span>
+              </div>
+
+              <div class="messages" id="messages">
+                <div class="row ai">
+                  <div>
+                    <div class="eyebrow">MimarAi</div>
+                    <div class="bubble ai">
+                      What are you building? Tell me your idea, and any features or constraints you already know you want (tech stack, database, deployment target).
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- CHAT COMPOSER -->
+              <div class="inputbar" id="interviewInputBar">
+                <div class="input-shell" id="inputShell">
+                  <textarea id="composer" rows="1" placeholder="e.g. A loan management desk for auditors and loan officers with role-based access…"></textarea>
+                  <button class="send-btn" id="sendBtn" aria-label="Send">
+                    <svg class="icon-arrow" id="btnIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M12 19V5"/><path d="M5 12l7-7 7 7"/>
+                    </svg>
+                  </button>
+                </div>
+                <div class="input-hint">MIMAR DRAFTS WITH TWO MODELS (GEMINI + GROQ) IN PARALLEL BEFORE SHOWING YOU ANYTHING</div>
+              </div>
+
+              <!-- READ-ONLY NOTICE INSTEAD OF COMPOSER WHEN VIEWING HISTORY -->
+              <div class="composer-readonly-msg" id="composerReadonlyMsg">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <span>Interview input locked to protect project state integrity. Navigate using the sidebar shortcuts to review or comment.</span>
+              </div>
+            </div>
+
+            <!-- RIGHT SIDE PIPELINE PANEL -->
+            <div class="side-panel">
+              <div class="panel-label">Validation Pipeline</div>
+              <div class="pipe-item">
+                <div class="pipe-num">01</div>
+                <div>
+                  <div class="pipe-title">Dual-model draft</div>
+                  <div class="pipe-desc">Gemini Flash &amp; Groq independently draft a feature plan from your inputs.</div>
+                </div>
+              </div>
+              <div class="pipe-item">
+                <div class="pipe-num">02</div>
+                <div>
+                  <div class="pipe-title">Cross-check &amp; diff</div>
+                  <div class="pipe-desc">Outputs are diffed to catch omissions, contradictions, and missing security requirements.</div>
+                </div>
+              </div>
+              <div class="pipe-item">
+                <div class="pipe-num">03</div>
+                <div>
+                  <div class="pipe-title">Structure map</div>
+                  <div class="pipe-desc">The accepted plan maps into a strict file &amp; folder JSON tree.</div>
+                </div>
+              </div>
+              <div class="pipe-item">
+                <div class="pipe-num">04</div>
+                <div>
+                  <div class="pipe-title">Schema &amp; Architecture</div>
+                  <div class="pipe-desc">Database tables and microservices are formulated as reviewable JSON schemas.</div>
+                </div>
+              </div>
+              <div class="pipe-item">
+                <div class="pipe-num">05</div>
+                <div>
+                  <div class="pipe-title">Deterministic render</div>
+                  <div class="pipe-desc">A CAD-style blueprint renderer draws the final ERD &amp; Architecture diagrams without LLM hallucination.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           SCREEN 02: IMPLEMENTATION PLAN REVIEW
+           ============================================================ -->
+      <div class="screen scrollable" id="screen-plan">
+        <div class="doc-screen-inner">
+          <div class="toolbar">
+            <div class="toolbar-left">
+              <div class="label">Step 02 · Feature Review</div>
+              <h2>Implementation Plan</h2>
+              <div class="sub">
+                <span>GENERATED VIA DUAL-MODEL PIPELINE</span>
+                <span class="accepted-badge" id="planAcceptedBadge" style="display:none;"><span class="ab-dot"></span>ACCEPTED &amp; LOCKED</span>
+              </div>
+            </div>
+            <div class="toolbar-actions">
+              <button class="btn btn-secondary" id="reviewBtnPlan">
+                <span>Review Comments</span>
+                <span class="badge-ct" id="reviewBadgePlan" style="display:none;">0</span>
+              </button>
+              <button class="btn btn-primary" id="acceptBtnPlan">Accept Plan →</button>
+            </div>
+          </div>
+
+          <div class="doc-scroll-area">
+            <div class="screen-body" id="docContentPlan">
+              <div class="doc-title">MimarAi — "Loan Desk Studio"</div>
+              <div class="doc-sub">Dual-model cross-checked feature plan. Click any section to comment, or click Accept Plan to lock and progress.</div>
+
+              <div class="section-label">Idea &amp; Objective</div>
+              <div class="block" data-id="idea">
+                A precision-engineering web app that acts as an AI architect for developers and students — it removes "vibe-coding blind" by running an idea through a dual-model pipeline before a single line of code is written.
+                <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+              </div>
+
+              <div class="section-label">Fixed Inputs</div>
+              <div class="block" data-id="stack">
+                <span class="kv">Tech stack — <b>Next.js (App Router) + FastAPI + SQLAlchemy</b></span>
+                <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+              </div>
+              <div class="block" data-id="db">
+                <span class="kv">Database — <b>Supabase (PostgreSQL with RLS)</b></span>
+                <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+              </div>
+              <div class="block" data-id="deploy">
+                <span class="kv">Deployment — <b>Vercel (Frontend) + Render (FastAPI / MCP Server)</b></span>
+                <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+              </div>
+
+              <div class="section-label">Features</div>
+              <div class="block" data-id="f1">
+                <div class="feature-row"><span class="feature-name">Role-Based Access Control</span></div>
+                <span class="kv">Admins, loan officers, and auditors each get strictly scoped JWT permissions.</span>
+                <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+              </div>
+              <div class="block" data-id="f2">
+                <div class="feature-row"><span class="feature-name">Loan &amp; Interest Management</span></div>
+                <span class="kv">Create, approve, and track loans with configurable interest rules and principal ranges.</span>
+                <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+              </div>
+              <div class="block" data-id="f3">
+                <div class="feature-row">
+                  <span class="feature-name">Audit Logging</span>
+                  <span class="ai-tag">AI-added</span>
+                  <div class="feature-actions">
+                    <button type="button" class="feature-action-btn reject-btn" data-reject="f3" aria-label="Reject AI-added feature" title="Reject this AI-added feature">Reject</button>
+                  </div>
+                </div>
+                <span class="kv">Every approval and rate change is recorded asynchronously with actor and timestamp.</span>
+                <div class="rejected-msg" style="display:none;">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                  <span>This feature was rejected and will be excluded from the accepted plan.</span>
+                </div>
+                <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+              </div>
+              <div class="block" data-id="f4">
+                <div class="feature-row">
+                  <span class="feature-name">Automated Interest Recalculation</span>
+                  <span class="ai-tag">AI-added</span>
+                  <div class="feature-actions">
+                    <button type="button" class="feature-action-btn reject-btn" data-reject="f4" aria-label="Reject AI-added feature" title="Reject this AI-added feature">Reject</button>
+                  </div>
+                </div>
+                <span class="kv">Recalculates outstanding balances nightly against the rate table via background cron.</span>
+                <div class="rejected-msg" style="display:none;">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                  <span>This feature was rejected and will be excluded from the accepted plan.</span>
+                </div>
+                <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+              </div>
+
+              <div class="callout">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+                <p>Accepting this plan locks the feature scope. Next, MimarAi will generate the deterministic file &amp; folder layout conforming to FastAPI standard conventions.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- REVIEW SHEET -->
+          <div class="sheet-backdrop" id="sheetBackdropPlan"></div>
+          <div class="sheet" id="reviewSheetPlan">
+            <div class="sheet-head">
+              <div class="title">Review Comments</div>
+              <div class="sub" id="sheetSubPlan">0 COMMENTS PENDING</div>
+            </div>
+            <div class="sheet-msg"><textarea placeholder="Add an optional overarching instruction…"></textarea></div>
+            <div class="sheet-list" id="sheetListPlan"></div>
+            <div class="sheet-footer">
+              <button class="cancel" id="sheetCancelPlan">Cancel</button>
+              <button class="submit" id="sheetSubmitPlan" disabled>Submit comments</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           SCREEN 03: PROJECT STRUCTURE REVIEW
+           ============================================================ -->
+      <div class="screen scrollable" id="screen-structure">
+        <div class="doc-screen-inner">
+          <div class="toolbar">
+            <div class="toolbar-left">
+              <div class="label">Step 03 · File Layout Review</div>
+              <h2>Project Structure</h2>
+              <div class="sub">
+                <span id="structMeta">4 FILES · 3 FEATURES MAPPED</span>
+                <span class="accepted-badge" id="structAcceptedBadge" style="display:none;"><span class="ab-dot"></span>ACCEPTED &amp; LOCKED</span>
+              </div>
+            </div>
+            <div class="toolbar-actions">
+              <button class="btn btn-secondary" id="reviewBtnStruct">
+                <span>Review Comments</span>
+                <span class="badge-ct" id="reviewBadgeStruct" style="display:none;">0</span>
+              </button>
+              <button class="btn btn-primary" id="acceptBtnStruct">Accept Structure →</button>
+            </div>
+          </div>
+
+          <div class="doc-scroll-area">
+            <div class="screen-body" id="docStruct">
+              <div class="doc-title">File &amp; Folder Map</div>
+              <div class="doc-sub">Generated from your accepted feature list following standard FastAPI patterns. Click any file to comment.</div>
+
+              <div class="section-label">src/</div>
+              <div class="tree" id="tree">
+                <!-- Routes Folder -->
+                <div class="folder-row open" data-target="g-routes">
+                  <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18l6-6-6-6"/></svg>
+                  <svg class="folder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+                  <span class="fname">routes/</span><span class="fcount" id="routesCount">2 files</span>
+                </div>
+                <div class="file-group open" id="g-routes">
+                  <div class="file-row" data-id="f-loan-route" data-path="src/routes/loan.py">
+                    <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+                    <div class="file-main">
+                      <div class="file-path">loan<span class="dim">.py</span></div>
+                      <div class="file-tags"><span class="feature-tag">Loan &amp; Interest Management</span></div>
+                    </div>
+                    <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+                  </div>
+
+                  <div class="file-row" data-id="f-auth-route" data-path="src/routes/auth.py">
+                    <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+                    <div class="file-main">
+                      <div class="file-path">auth<span class="dim">.py</span></div>
+                      <div class="file-tags" id="authTags">
+                        <span class="feature-tag">Role-Based Access Control</span>
+                        <span class="flag-tag" id="authFlag">Adjusted — Please Review</span>
+                      </div>
+                    </div>
+                    <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+                  </div>
+                </div>
+
+                <!-- Models Folder -->
+                <div class="folder-row open" data-target="g-models">
+                  <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18l6-6-6-6"/></svg>
+                  <svg class="folder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+                  <span class="fname">models/</span><span class="fcount" id="modelsCount">2 files</span>
+                </div>
+                <div class="file-group open" id="g-models">
+                  <div class="file-row" data-id="f-loan-model" data-path="src/models/loan.py">
+                    <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+                    <div class="file-main">
+                      <div class="file-path">loan<span class="dim">.py</span></div>
+                      <div class="file-tags"><span class="feature-tag">Loan &amp; Interest Management</span></div>
+                    </div>
+                    <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+                  </div>
+
+                  <div class="file-row" data-id="f-audit-model" data-path="src/models/audit_log.py">
+                    <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+                    <div class="file-main">
+                      <div class="file-path">audit_log<span class="dim">.py</span></div>
+                      <div class="file-tags"><span class="feature-tag">Audit Logging</span><span class="ai-tag">AI-added</span></div>
+                    </div>
+                    <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="callout">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+                <p>This structure forms the machine-readable <code>structure</code> JSON map that the <b>Drift-Checker</b> parses after implementation to verify that all features are implemented in their expected file locations.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- REVIEW SHEET -->
+          <div class="sheet-backdrop" id="sheetBackdropStruct"></div>
+          <div class="sheet" id="reviewSheetStruct">
+            <div class="sheet-head">
+              <div class="title">Review Comments</div>
+              <div class="sub" id="sheetSubStruct">0 COMMENTS PENDING</div>
+            </div>
+            <div class="sheet-msg"><textarea placeholder="Add an optional instruction for the structure revision…"></textarea></div>
+            <div class="sheet-list" id="sheetListStruct"></div>
+            <div class="sheet-footer">
+              <button class="cancel" id="sheetCancelStruct">Cancel</button>
+              <button class="submit" id="sheetSubmitStruct" disabled>Submit comments</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           SCREEN 04: SCHEMA & ARCHITECTURE JSON REVIEW
+           (NO ASK AI ON THIS SCREEN — PER EXPLICIT SPEC)
+           ============================================================ -->
+      <div class="screen scrollable" id="screen-diagram">
+        <div class="doc-screen-inner">
+          <div class="toolbar">
+            <div class="toolbar-left">
+              <div class="label">Step 04 · Schema JSON Review</div>
+              <h2>Schema &amp; Architecture JSON</h2>
+              <div class="sub">
+                <span>3 TABLES · 3 SERVICES</span>
+                <span class="accepted-badge" id="diagramJsonAcceptedBadge" style="display:none;"><span class="ab-dot"></span>ACCEPTED &amp; LOCKED</span>
+              </div>
+            </div>
+            <div class="toolbar-actions">
+              <button class="btn btn-secondary" id="reviewBtnDiagram">
+                <span>Review Comments</span>
+                <span class="badge-ct" id="reviewBadgeDiagram" style="display:none;">0</span>
+              </button>
+              <button class="btn btn-primary" id="acceptBtnDiagram">Accept &amp; Render →</button>
+            </div>
+          </div>
+
+          <div class="doc-scroll-area">
+            <div class="screen-body diagram-screen-body" id="docDiagram">
+              <div class="doc-title">Database Schema &amp; Microservices JSON</div>
+              <div class="doc-sub">Drafted from locked features and project inputs. This is the structured JSON before rendering. Comment on any entity before CAD drawings are drafted.</div>
+
+              <div class="section-label">Database Schema</div>
+
+              <div class="table-card" data-id="t-users">
+                <div class="table-head">
+                  <svg class="tbl-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>
+                  <span class="table-name">users</span>
+                  <span class="table-rowcount">4 cols</span>
+                </div>
+                <div class="col-list">
+                  <div class="col-row"><span class="col-name">id</span><span class="col-type">uuid</span><span class="col-flag pk">PK</span></div>
+                  <div class="col-row"><span class="col-name">email</span><span class="col-type">text, unique</span></div>
+                  <div class="col-row"><span class="col-name">role</span><span class="col-type">enum(admin, officer, auditor)</span></div>
+                  <div class="col-row"><span class="col-name">created_at</span><span class="col-type">timestamptz</span></div>
+                </div>
+                <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+              </div>
+
+              <div class="table-card" data-id="t-loans">
+                <div class="table-head">
+                  <svg class="tbl-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>
+                  <span class="table-name">loans</span>
+                  <span class="table-rowcount">5 cols</span>
+                </div>
+                <div class="col-list">
+                  <div class="col-row"><span class="col-name">id</span><span class="col-type">uuid</span><span class="col-flag pk">PK</span></div>
+                  <div class="col-row"><span class="col-name">borrower_id</span><span class="col-type">uuid → users.id</span><span class="col-flag fk">FK</span></div>
+                  <div class="col-row"><span class="col-name">principal</span><span class="col-type">numeric(12,2)</span></div>
+                  <div class="col-row"><span class="col-name">interest_rate</span><span class="col-type">numeric(5,2)</span></div>
+                  <div class="col-row"><span class="col-name">status</span><span class="col-type">enum(pending, approved, closed)</span></div>
+                </div>
+                <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+              </div>
+
+              <div class="table-card" data-id="t-audit">
+                <div class="table-head">
+                  <svg class="tbl-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>
+                  <span class="table-name">audit_logs</span>
+                  <span class="table-rowcount">4 cols</span>
+                </div>
+                <div class="col-list">
+                  <div class="col-row"><span class="col-name">id</span><span class="col-type">uuid</span><span class="col-flag pk">PK</span></div>
+                  <div class="col-row"><span class="col-name">actor_id</span><span class="col-type">uuid → users.id</span><span class="col-flag fk">FK</span></div>
+                  <div class="col-row"><span class="col-name">action</span><span class="col-type">text</span></div>
+                  <div class="col-row"><span class="col-name">occurred_at</span><span class="col-type">timestamptz</span></div>
+                </div>
+                <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+              </div>
+
+              <div class="section-label">System Architecture Services</div>
+
+              <div class="service-grid">
+                <div class="service-card" data-id="s-gateway">
+                  <svg class="svc-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg>
+                  <div class="svc-name">API Gateway</div>
+                  <div class="svc-desc">Routes incoming client requests to Auth and Loan services; handles rate limiting &amp; edge auth.</div>
+                  <div class="svc-tags"><span class="proto-tag">HTTPS</span><span class="proto-tag">Next.js Edge</span></div>
+                  <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+                </div>
+
+                <div class="service-card" data-id="s-auth">
+                  <svg class="svc-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+                  <div class="svc-name">Auth Service</div>
+                  <div class="svc-desc">Issues and validates session tokens; enforces role-based access control per scope.</div>
+                  <div class="svc-tags"><span class="proto-tag">HTTPS</span><span class="proto-tag">FastAPI · JWT</span></div>
+                  <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+                </div>
+
+                <div class="service-card" data-id="s-loan">
+                  <svg class="svc-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg>
+                  <div class="svc-name">Loan Service</div>
+                  <div class="svc-desc">Handles loan approval flow, state transitions, and background nightly interest calculations.</div>
+                  <div class="svc-tags"><span class="proto-tag">HTTPS</span><span class="proto-tag">FastAPI · Cron</span></div>
+                  <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+                </div>
+              </div>
+
+              <div class="callout">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+                <p>Accepting this JSON hands the definitions to our deterministic CAD blueprint engine to produce the visual System Architecture and Database ERD diagrams. <b>The AI never draws the diagrams directly.</b></p>
+              </div>
+            </div>
+          </div>
+
+          <!-- REVIEW SHEET -->
+          <div class="sheet-backdrop" id="sheetBackdropDiagram"></div>
+          <div class="sheet" id="reviewSheetDiagram">
+            <div class="sheet-head">
+              <div class="title">Review Comments</div>
+              <div class="sub" id="sheetSubDiagram">0 COMMENTS PENDING</div>
+            </div>
+            <div class="sheet-msg"><textarea placeholder="Add an optional instruction for the schema revision…"></textarea></div>
+            <div class="sheet-list" id="sheetListDiagram"></div>
+            <div class="sheet-footer">
+              <button class="cancel" id="sheetCancelDiagram">Cancel</button>
+              <button class="submit" id="sheetSubmitDiagram" disabled>Submit comments</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           SCREEN 05: RENDERED DIAGRAMS
+           (ASK AI EXISTS ONLY HERE — PER EXPLICIT SPEC)
+           ============================================================ -->
+      <div class="screen scrollable" id="screen-render">
+        <div class="diagram-screen-inner">
+          <div class="diagram-toolbar">
+            <div class="diagram-toolbar-left">
+              <div class="label">Step 05 · Deterministic Renderer</div>
+              <div class="title">Visual Architecture &amp; ERD Blueprints</div>
+            </div>
+
+            <div style="display:flex; gap:16px; align-items:center;">
+              <div class="toggle-row">
+                <button class="toggle-btn active" id="btnArch">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="8" y="14" width="7" height="7" rx="1"/><path d="M6.5 10v3a1 1 0 0 0 1 1H10M17.5 10v3a1 1 0 0 0-1 1h-2.5"/></svg>
+                  System Diagram
+                </button>
+                <button class="toggle-btn" id="btnErd">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>
+                  Database ERD
+                </button>
+              </div>
+
+              <span class="accepted-badge" id="renderAcceptedBadge" style="display:none;"><span class="ab-dot"></span>DIAGRAM ACCEPTED</span>
+            </div>
+          </div>
+
+          <div class="diagram-canvas-wrap">
+            <div class="canvas-label">
+              <span class="title" id="canvasTitle">System Architecture Blueprint</span>
+              <span class="sub" id="canvasSub">3 SERVICES · FASTAPI / NEXT.JS / POSTGRES</span>
+            </div>
+
+            <div class="canvas-box" id="canvasBox">
+              <div class="diagram-pane active" id="paneArch"></div>
+              <div class="diagram-pane" id="paneErd"></div>
+            </div>
+
+            <div class="canvas-footer">
+              <span>Rendered by CAD-style SVG engine · strictly deterministic</span>
+              <span class="amended-note" id="amendedNote" style="display:none;"><span class="amended-dot"></span>Manually Amended (Propagated Upstream)</span>
+            </div>
+          </div>
+
+          <!-- Ask AI Floating Trigger (Only here) -->
+          <button class="ask-ai-btn" id="askAiBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3a5 5 0 0 0-5 5v3.2c0 .5-.16 1-.46 1.4L5 15v1h14v-1l-1.54-2.4a2.3 2.3 0 0 1-.46-1.4V8a5 5 0 0 0-5-5z"/><path d="M9.5 19a2.5 2.5 0 0 0 5 0"/>
+            </svg>
+            Ask AI
+          </button>
+
+          <div class="diagram-actions">
+            <button class="btn btn-primary" id="acceptBtnRender" style="min-width:280px; justify-content:center; padding:12px 20px;">Accept the Diagram →</button>
+          </div>
+
+          <!-- Ask AI Drawer Panel -->
+          <div class="sheet-backdrop" id="sheetBackdropAsk"></div>
+          <div class="ask-sheet" id="askSheet">
+            <div class="ask-head">
+              <div>
+                <div class="title">Ask AI (Diagram Assistant)</div>
+                <div class="sub">Editing: <span id="askTarget">System Architecture</span></div>
+              </div>
+              <svg class="ask-close" id="askClose" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </div>
+            <div class="ask-messages" id="askMessages">
+              <div class="arow ai">
+                <div>
+                  <div class="eyebrow">MimarAi</div>
+                  <div class="abubble ai">Describe a requested diagram adjustment in plain language. Requests are automatically classified as cosmetic or structural-conflict before applying.</div>
+                </div>
+              </div>
+            </div>
+            <div class="ask-inputbar">
+              <div class="ask-input-shell">
+                <textarea id="askComposer" rows="1" placeholder="e.g. rename the users table to accounts"></textarea>
+                <button class="ask-send" id="askSend" aria-label="Send">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           SCREEN 06: FINAL IMPLEMENTATION PLAN REVIEW
+           ============================================================ -->
+      <div class="screen scrollable" id="screen-final">
+        <div class="doc-screen-inner">
+          <div class="toolbar">
+            <div class="toolbar-left">
+              <div class="label">Step 06 · Consolidated Plan Review</div>
+              <h2>Final Implementation Plan</h2>
+              <div class="sub">
+                <span>FEATURES · STRUCTURE · DIAGRAM — MERGED &amp; VERIFIED</span>
+                <span class="accepted-badge" id="finalAcceptedBadge" style="display:none;"><span class="ab-dot"></span>LOCKED SPEC</span>
+              </div>
+            </div>
+            <div class="toolbar-actions">
+              <button class="btn btn-secondary" id="reviewBtnFinal">
+                <span>Review Comments</span>
+                <span class="badge-ct" id="reviewBadgeFinal" style="display:none;">0</span>
+              </button>
+              <button class="btn btn-primary" id="acceptBtnFinal">Send to Agent →</button>
+            </div>
+          </div>
+
+          <div class="doc-scroll-area">
+            <div class="screen-body" id="docFinal">
+              <div class="doc-title">Consolidated Blueprint Specification</div>
+              <div class="doc-sub">The complete, verified plan handed to your coding agent via live MCP Server or standalone PDF package. Click any line to comment before final dispatch.</div>
+
+              <div class="section-label">Section 1: Accepted Features &amp; Constraints</div>
+              <div class="block" data-id="ff1">
+                <div class="feature-row"><span class="feature-name">Role-Based Access Control</span></div>
+                <span class="kv">Admins, loan officers, and auditors each get scoped JWT permissions.</span>
+                <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+              </div>
+              <div class="block" data-id="ff2">
+                <div class="feature-row"><span class="feature-name">Loan &amp; Interest Management</span></div>
+                <span class="kv">Create, approve, and track loans with configurable interest rules and validation.</span>
+                <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+              </div>
+              <div class="block" data-id="ff3">
+                <div class="feature-row"><span class="feature-name">Audit Logging</span><span class="ai-tag">AI-added</span></div>
+                <span class="kv">Every approval and rate change is recorded asynchronously with actor and timestamp.</span>
+                <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+              </div>
+              <div class="block" data-id="ff4">
+                <div class="feature-row"><span class="feature-name">Automated Interest Recalculation</span><span class="ai-tag">AI-added</span></div>
+                <span class="kv">Recalculates outstanding balances nightly against the rate table via background cron.</span>
+                <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+              </div>
+
+              <div class="section-label">Section 2: Accepted Structure JSON Tree</div>
+              <div class="block" data-id="ffs1">
+                <span class="kv">Deterministic file-to-feature mapping parsed directly by the Drift-Checker:</span>
+                <div class="json-summary">{<br>&nbsp;&nbsp;<span class="jk">"src/routes/loan.py"</span>: ["Loan &amp; Interest Management"],<br>&nbsp;&nbsp;<span class="jk">"src/models/loan.py"</span>: ["Loan &amp; Interest Management"],<br>&nbsp;&nbsp;<span class="jk">"src/routes/auth.py"</span>: ["Role-Based Access Control"],<br>&nbsp;&nbsp;<span class="jk">"src/models/refresh_token.py"</span>: ["Role-Based Access Control"],<br>&nbsp;&nbsp;<span class="jk">"src/models/audit_log.py"</span>: ["Audit Logging"]<br>}</div>
+                <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+              </div>
+
+              <div class="section-label">Section 3: Accepted Schema &amp; Microservices</div>
+              <div class="block" data-id="ffd1">
+                <span class="kv"><b>3 database tables</b> (<code>users</code>, <code>loans</code>, <code>audit_logs</code>) &amp; <b>3 microservices</b> (<code>API Gateway</code>, <code>Auth Service</code>, <code>Loan Service</code>). Committed on diagram acceptance.</span>
+                <div class="comment-trigger" data-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+              </div>
+
+              <div class="callout">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+                <p>Click <b>Send to Agent</b> to dispatch this validated spec to your live MCP server hub, or download the machine-readable plan package.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- REVIEW SHEET -->
+          <div class="sheet-backdrop" id="sheetBackdropFinal"></div>
+          <div class="sheet" id="reviewSheetFinal">
+            <div class="sheet-head">
+              <div class="title">Review Comments</div>
+              <div class="sub" id="sheetSubFinal">0 COMMENTS PENDING</div>
+            </div>
+            <div class="sheet-msg"><textarea placeholder="Add an optional comment message…"></textarea></div>
+            <div class="sheet-list" id="sheetListFinal"></div>
+            <div class="sheet-footer">
+              <button class="cancel" id="sheetCancelFinal">Cancel</button>
+              <button class="submit" id="sheetSubmitFinal" disabled>Submit comments</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           SCREEN 07: MCP SERVER CONNECTION HUB
+           (Full PDF Spec implementation: Per-project tokens, tools, drift)
+           ============================================================ -->
+      <div class="screen scrollable" id="screen-mcp">
+        <div class="doc-screen-inner">
+          <div class="toolbar">
+            <div class="toolbar-left">
+              <div class="label">Step 07 · Live Agent Interface</div>
+              <h2>Model Context Protocol (MCP) Server</h2>
+              <div class="sub">LIVE PASSIVE SERVER · HOSTED ON RENDER · PER-PROJECT SCOPED</div>
+            </div>
+            <div class="toolbar-actions">
+              <button class="btn btn-outline" id="pdfDownloadBtn">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Download Plan (JSON/PDF)
+              </button>
+            </div>
+          </div>
+
+          <div class="doc-scroll-area">
+            <div class="mcp-body">
+
+              <!-- Live Status -->
+              <div class="mcp-status-bar">
+                <div class="mcp-status-indicator">
+                  <div class="mcp-dot connected"></div>
+                  <span>MCP SERVER: ACTIVE &amp; READY</span>
+                </div>
+                <div class="mcp-status-url">ENDPOINT: <code>https://mimarai-backend.onrender.com/mcp</code></div>
+              </div>
+
+              <!-- 1. Per-Project Authentication -->
+              <div class="mcp-section">
+                <div class="mcp-section-head">
+                  <div class="mcp-section-title">1. Per-Project Authentication Token</div>
+                  <span style="font-family:var(--font-mono); font-size:10px; color:var(--ink-muted);">SCOPED TO PROJECT: LOAN-DESK-01</span>
+                </div>
+                <div class="mcp-section-body">
+                  <div class="token-row">
+                    <span class="token-value" id="tokenValue">mim_live_9f82d1c07a4b89e3••••••••</span>
+                    <div class="token-actions">
+                      <button class="token-btn copy-btn" id="copyTokenBtn">Copy Token</button>
+                      <button class="token-btn regen-btn" id="regenTokenBtn">↻ Regenerate</button>
+                    </div>
+                  </div>
+                  <div class="token-note">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                    <span>Tokens are stored hashed in Supabase. Never shared across projects. Rate limit: 20–30 req/hour per token.</span>
+                  </div>
+
+                  <!-- Rate limit meter -->
+                  <div class="rate-bar-wrap">
+                    <div class="rate-bar"><div class="rate-bar-fill" style="width: 14%;"></div></div>
+                    <span class="rate-label">4 / 30 req used this hour</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 2. Connect Your Coding Agent -->
+              <div class="mcp-section">
+                <div class="mcp-section-head">
+                  <div class="mcp-section-title">2. Connect Your Agent</div>
+                  <span style="font-family:var(--font-mono); font-size:10px; color:var(--ink-muted);">AUTO-CONFIG SNIPPETS</span>
+                </div>
+                <div class="mcp-section-body">
+                  <div class="agent-grid">
+                    <!-- Claude Code -->
+                    <div class="agent-card">
+                      <div class="agent-card-head">
+                        <span class="agent-name">Claude Code</span>
+                        <button class="agent-copy-btn" data-agent="claude">Copy Config</button>
+                      </div>
+                      <div class="agent-code"><span class="code-comment">// CLAUDE.md</span>
+{
+  <span class="code-key">"mcpServers"</span>: {
+    <span class="code-key">"mimarai"</span>: {
+      <span class="code-key">"url"</span>: <span class="code-val">"https://mimarai-backend.onrender.com/mcp"</span>,
+      <span class="code-key">"headers"</span>: { <span class="code-key">"Authorization"</span>: <span class="code-val">"Bearer mim_live_..."</span> }
+    }
+  }
+}</div>
+                    </div>
+
+                    <!-- Cursor -->
+                    <div class="agent-card">
+                      <div class="agent-card-head">
+                        <span class="agent-name">Cursor</span>
+                        <button class="agent-copy-btn" data-agent="cursor">Copy Config</button>
+                      </div>
+                      <div class="agent-code"><span class="code-comment">// .cursorrules / mcp.json</span>
+{
+  <span class="code-key">"mcpServers"</span>: {
+    <span class="code-key">"mimarai"</span>: {
+      <span class="code-key">"url"</span>: <span class="code-val">"https://mimarai-backend.onrender.com/mcp"</span>,
+      <span class="code-key">"token"</span>: <span class="code-val">"mim_live_..."</span>
+    }
+  }
+}</div>
+                    </div>
+
+                    <!-- Antigravity -->
+                    <div class="agent-card">
+                      <div class="agent-card-head">
+                        <span class="agent-name">Antigravity</span>
+                        <button class="agent-copy-btn" data-agent="antigravity">Copy Config</button>
+                      </div>
+                      <div class="agent-code"><span class="code-comment">// AGENTS.md</span>
+{
+  <span class="code-key">"tools"</span>: [<span class="code-val">"get_plan"</span>, <span class="code-val">"drift"</span>],
+  <span class="code-key">"server"</span>: <span class="code-val">"https://mimarai.../mcp"</span>,
+  <span class="code-key">"auth_token"</span>: <span class="code-val">"mim_live_..."</span>
+}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 3. Exposed MCP Tools -->
+              <div class="mcp-section">
+                <div class="mcp-section-head">
+                  <div class="mcp-section-title">3. Exposed MCP Tools</div>
+                  <span style="font-family:var(--font-mono); font-size:10px; color:var(--ink-muted);">PASSIVE TOOL INTERFACES</span>
+                </div>
+                <div class="mcp-section-body">
+                  <div class="tool-block">
+                    <div class="tool-sig"><span class="fn-name">get_implementation_plan</span>(<span class="fn-param">project_id</span>: string)</div>
+                    <div class="tool-desc">Returns the accepted, locked implementation plan containing verified features, constraints, structure JSON map, and schema/microservices architecture.</div>
+                    <div class="tool-returns"><span class="tool-returns-label">RETURNS:</span> JSON (features[], structure{}, schema{}, services[])</div>
+                  </div>
+
+                  <div class="tool-block">
+                    <div class="tool-sig"><span class="fn-name">check_drift</span>(<span class="fn-param">project_id</span>: string)</div>
+                    <div class="tool-desc">Executes the dual-model drift verification against your codebase, comparing actual files, functions, and DB schemas against the accepted blueprint.</div>
+                    <div class="tool-returns"><span class="tool-returns-label">RETURNS:</span> DriftReport { status: Implemented | Adjusted | Missing | Not Started }</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 4. Post-Implementation Drift Check -->
+              <div class="mcp-section">
+                <div class="mcp-section-head">
+                  <div class="mcp-section-title">4. Post-Implementation Drift-Check</div>
+                  <button class="btn btn-primary" id="runDriftBtn" style="font-size:10.5px; padding:6px 12px;">Run Drift Check Now</button>
+                </div>
+                <div class="mcp-section-body">
+                  <p style="margin:0 0 12px; font-size:12.5px; color:var(--ink-secondary); line-height:1.5;">
+                    Verify that your coding agent implemented the plan accurately without hallucinating diverging architecture or skipping constraints. Uses dual-model Gemini + Groq cross-check.
+                  </p>
+                  <div class="drift-report" id="driftReport">
+                    <div class="empty-state" style="padding:18px 0;">No drift check executed for this session yet. Click 'Run Drift Check Now' to scan codebase.</div>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ============================================================
+       APP FOOTER
+       ============================================================ -->
+  <footer class="app-footer">
+    <div class="hud-item">
+      <div class="hud-dot" id="hudDot"></div>
+      <span id="hudStatus">STATUS: DRAFTING IN PROGRESS</span>
+    </div>
+    <div class="hud-item">
+      <span>GRID: 24px LOCK</span>
+      <span>SCALE: 1:1</span>
+      <span style="color:var(--blueprint-cyan);">DWG: MIMAR-2026-PRODUCTION</span>
+    </div>
+  </footer>
+
+</div>
+
+<!-- TOAST NOTIFICATION -->
+<div class="toast" id="toast"></div>
+
+<!-- JS -->
+<script src="app.js"></script>
+
+</body>
+</html>
