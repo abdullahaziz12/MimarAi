@@ -707,7 +707,13 @@ class CommentCreateRequest(BaseModel):
 class CommentUpdateRequest(BaseModel):
     text: str
 
-async def call_gemini_api(system_prompt: str, user_prompt: str, timeout: float = 12.0) -> Dict[str, Any]:
+async def call_gemini_api(
+    system_prompt: str,
+    user_prompt: str,
+    timeout: float = 12.0,
+    retry_user_prompt: Optional[str] = None,
+    retry: bool = True,
+) -> Dict[str, Any]:
     gemini_key = os.getenv("GEMINI_API_KEY")
     if not gemini_key:
         raise HTTPException(status_code=500, detail="Gemini API unconfigured (GEMINI_API_KEY missing).")
@@ -723,10 +729,15 @@ async def call_gemini_api(system_prompt: str, user_prompt: str, timeout: float =
         }
     }
     
-    for attempt in range(2):
+    for attempt in range(2 if retry else 1):
         try:
             async with httpx.AsyncClient(timeout=timeout) as http_client:
-                resp = await http_client.post(url, json=payload)
+                request_payload = dict(payload)
+                if attempt and retry_user_prompt:
+                    request_payload["contents"] = [
+                        {"role": "user", "parts": [{"text": f"{system_prompt}\n\n{retry_user_prompt}"}]}
+                    ]
+                resp = await http_client.post(url, json=request_payload)
                 if resp.status_code == 200:
                     data = resp.json()
                     raw = data["candidates"][0]["content"]["parts"][0]["text"]
@@ -734,12 +745,18 @@ async def call_gemini_api(system_prompt: str, user_prompt: str, timeout: float =
                 print(f"[Gemini API Error Attempt {attempt+1}] Status {resp.status_code}: {resp.text}")
         except Exception as e:
             print(f"[Gemini Call Exception Attempt {attempt+1}] {e}")
-            if attempt == 1:
+            if attempt == (1 if retry else 0):
                 raise
     raise HTTPException(status_code=502, detail="Gemini API request failed after retry.")
 
 
-async def call_groq_json(system_prompt: str, user_prompt: str, timeout: float = 10.0) -> Dict[str, Any]:
+async def call_groq_json(
+    system_prompt: str,
+    user_prompt: str,
+    timeout: float = 10.0,
+    retry_user_prompt: Optional[str] = None,
+    retry: bool = True,
+) -> Dict[str, Any]:
     groq_key = os.getenv("GROQ_API_KEY")
     if not groq_key:
         raise HTTPException(status_code=500, detail="Groq API unconfigured (GROQ_API_KEY missing).")
@@ -756,10 +773,16 @@ async def call_groq_json(system_prompt: str, user_prompt: str, timeout: float = 
         "response_format": {"type": "json_object"}
     }
     
-    for attempt in range(2):
+    for attempt in range(2 if retry else 1):
         try:
             async with httpx.AsyncClient(timeout=timeout) as http_client:
-                resp = await http_client.post(url, headers=headers, json=payload)
+                request_payload = dict(payload)
+                if attempt and retry_user_prompt:
+                    request_payload["messages"] = [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": retry_user_prompt},
+                    ]
+                resp = await http_client.post(url, headers=headers, json=request_payload)
                 if resp.status_code == 200:
                     data = resp.json()
                     raw = data["choices"][0]["message"]["content"]
@@ -767,7 +790,7 @@ async def call_groq_json(system_prompt: str, user_prompt: str, timeout: float = 
                 print(f"[Groq API Error Attempt {attempt+1}] Status {resp.status_code}: {resp.text}")
         except Exception as e:
             print(f"[Groq Call Exception Attempt {attempt+1}] {e}")
-            if attempt == 1:
+            if attempt == (1 if retry else 0):
                 raise
     raise HTTPException(status_code=502, detail="Groq API request failed after retry.")
 
@@ -875,17 +898,8 @@ Output strictly valid JSON with no markdown formatting:
             groq_task = call_groq_json(system_prompt_draft, context_str)
             gemini_draft, groq_draft = await asyncio.gather(gemini_task, groq_task)
         except Exception as e:
-            print(f"[Step 1 Parallel Drafting Warning] {e}")
-            # Fallback if API keys missing/error
-            gemini_draft = {
-                "idea_objective": f"A comprehensive solution for {idea_text}.",
-                "features": [
-                    {"id": "feat-1", "name": "Core System Architecture", "description": f"Main workflow engine for {idea_text}.", "source": "user_originated"},
-                    {"id": "feat-2", "name": "User Authentication & Authorization", "description": "Secure role-based access control and session management.", "source": "user_originated"},
-                    {"id": "feat-3", "name": "Real-time Auditing & Logging", "description": "Asynchronous audit trail for system activities.", "source": "ai_added"}
-                ]
-            }
-            groq_draft = gemini_draft
+            print(f"[Step 1 Parallel Drafting Error] {e}")
+            raise HTTPException(status_code=502, detail="Generation failed, please try again.") from e
 
         # Step 2: Diff & Merge
         gemini_feats = gemini_draft.get("features", [])
@@ -900,17 +914,33 @@ Output strictly valid JSON with no markdown formatting:
                 gf["id"] = f"feat-{len(merged_features) + 1}"
                 merged_features.append(gf)
 
-        adjusted_flag = False
-        final_features = merged_features
-
-        # Validation attempt
+        system_prompt_val = """You are an architectural validator. Check constraint violations against fixed inputs, scope relevance, and completeness. Output only valid JSON: {\"is_valid\": true, \"flags\": [\"specific reason\"]}."""
+        validation_prompt = f"Context:\n{context_str}\n\nFeatures:\n{json.dumps(merged_features)}"
+        repair_prompt = f"Your previous validation response was malformed or unparseable. Re-check this plan and return only the required JSON object with is_valid and a flags array.\n\n{validation_prompt}"
         try:
-            system_prompt_val = """You are an architectural validator. Output valid JSON: {"is_valid": true, "flags": []}"""
-            val1 = await call_groq_json(system_prompt_val, f"Context:\n{context_str}\n\nFeatures:\n{json.dumps(merged_features)}")
-            if not val1.get("is_valid", True) and val1.get("flags"):
-                adjusted_flag = True
-        except Exception:
-            pass
+            val1 = await call_groq_json(system_prompt_val, validation_prompt, retry_user_prompt=repair_prompt)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail="Generation failed, please try again.") from e
+
+        adjusted_flag = bool(not val1.get("is_valid", True) and val1.get("flags"))
+        final_features = merged_features
+        if adjusted_flag:
+            fix_prompt = f"Context:\n{context_str}\n\nCurrent Features:\n{json.dumps(merged_features)}\n\nGroq validation flags:\n{json.dumps(val1.get('flags'))}\n\nFix only the issues identified by those flags and return the complete corrected feature list in the required JSON shape."
+            try:
+                fix_res = await call_gemini_api(system_prompt_draft, fix_prompt, retry=False)
+                final_features = fix_res["features"]
+            except Exception as e:
+                print(f"[Step 4 Gemini Fix Error] {e}")
+                final_features = merged_features
+
+        final_validation_prompt = f"Context:\n{context_str}\n\nFeatures after the single fix pass:\n{json.dumps(final_features)}"
+        final_repair_prompt = f"Your previous final validation response was malformed or unparseable. Return only valid JSON with is_valid and flags.\n\n{final_validation_prompt}"
+        try:
+            val2 = await call_groq_json(system_prompt_val, final_validation_prompt, retry_user_prompt=final_repair_prompt)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail="Generation failed, please try again.") from e
+        if not val2.get("is_valid", True) and val2.get("flags"):
+            adjusted_flag = True
 
         generation_payload = {
             "idea_objective": gemini_draft.get("idea_objective") or idea_text,
@@ -957,6 +987,7 @@ async def process_comment_batch(
     
     submitted_comments = req.comments or []
     current_features = req.current_features or []
+    original_state = None
 
     if client and not project_id.startswith("local-draft-"):
         proj_res = client.table("projects").select("*").eq("id", project_id).eq("owner_id", user_id).execute()
@@ -966,7 +997,10 @@ async def process_comment_batch(
                 raise HTTPException(status_code=429, detail="A generation or comment batch is already in progress.")
             if not current_features:
                 current_state = project.get("generation_state") or {}
+                original_state = current_state
                 current_features = current_state.get("features", [])
+            else:
+                original_state = project.get("generation_state") or {}
         
         check_generation_rate_limit(client, user_id, "batch")
         client.table("projects").update({"status": "locked_generating"}).eq("id", project_id).execute()
@@ -979,6 +1013,11 @@ async def process_comment_batch(
     try:
         if not submitted_comments:
             return {"status": "ok", "message": "No pending comments to process."}
+
+        if client and not project_id.startswith("local-draft-"):
+            comment_ids = [c.get("id") for c in submitted_comments if c.get("id")]
+            if comment_ids:
+                client.table("comments").update({"status": "submitted"}).in_("id", comment_ids).eq("status", "pending").execute()
 
         # Gemini Batch Fix Pass
         system_prompt = """You are an AI software architect updating a project feature list based on user review comments.
@@ -999,10 +1038,10 @@ Output strictly valid JSON with no markdown formatting:
         
         try:
             fix_res = await call_gemini_api(system_prompt, f"Current Features:\n{json.dumps(current_features)}\n\nUser Comments:\n{comments_text}")
-            updated_features = fix_res.get("features") or current_features
+            updated_features = fix_res["features"]
         except Exception as e:
-            print(f"[Batch Fix Gemini Warning] {e}")
-            updated_features = current_features
+            print(f"[Batch Fix Gemini Error] {e}")
+            raise HTTPException(status_code=502, detail="Failed to process your comments, please try again.") from e
 
         generation_payload = {
             "features": updated_features,
@@ -1017,7 +1056,14 @@ Output strictly valid JSON with no markdown formatting:
                 generation_payload = curr_state
                 client.table("projects").update({"generation_state": curr_state, "status": "reviewing"}).eq("id", project_id).execute()
 
-            client.table("comments").update({"status": "resolved"}).eq("project_id", project_id).eq("status", "pending").execute()
+            comment_ids = [c.get("id") for c in submitted_comments if c.get("id")]
+            if comment_ids:
+                try:
+                    client.table("comments").update({"status": "resolved"}).in_("id", comment_ids).eq("status", "submitted").execute()
+                except Exception:
+                    if original_state is not None:
+                        client.table("projects").update({"generation_state": original_state}).eq("id", project_id).execute()
+                    raise HTTPException(status_code=502, detail="Failed to process your comments, please try again.")
 
         return {"status": "ok", "generation_state": generation_payload}
     finally:

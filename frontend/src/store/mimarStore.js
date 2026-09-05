@@ -673,71 +673,19 @@ export const useMimarStore = create((set, get) => ({
       } else {
         console.warn("Pipeline error:", err);
 
-        // Gated dev/demo fallback flag
-        const ALLOW_LOCAL_FALLBACK_DEMO = false;
-
-        if (ALLOW_LOCAL_FALLBACK_DEMO) {
-          const fallbackGenState = {
-            idea_objective: `A custom precision-engineered solution for ${userText || s.ideaText || "your application"}.`,
-            fixed_inputs: s.fixedInputs || {},
-            features: [
+        get().showToast("Feature generation failed.");
+        set((state) => ({
+          messages: state.messages
+            .filter((m) => m.id !== statusMsgId)
+            .concat([
               {
-                id: "feat-1",
-                name: `${userText || s.ideaText || "Core Application"} Execution Engine`,
-                description: `Primary operational pipeline and core business logic for ${userText || s.ideaText || "the application"}.`,
-                source: "user_originated",
+                id: "ai-gen-err-" + Date.now(),
+                role: "ai",
+                text: `Having trouble generating features: ${err.message || "Generation pipeline run failed"}. Please check your connection or try again.`,
               },
-              {
-                id: "feat-2",
-                name: "User Authentication & Security",
-                description:
-                  "Secure user login, JWT tokens, and role-based access control.",
-                source: "user_originated",
-              },
-              {
-                id: "feat-3",
-                name: "Data Management & API Services",
-                description:
-                  "Database schema, API endpoints, and transactional data handling.",
-                source: "user_originated",
-              },
-              {
-                id: "feat-4",
-                name: "Audit Logging & System Monitoring",
-                description:
-                  "Asynchronous audit trail, error tracking, and event logs.",
-                source: "ai_added",
-              },
-            ],
-            rejected_feature_ids: [],
-            dependency_order: ["feat-1", "feat-2", "feat-3", "feat-4"],
-            adjusted_flag: false,
-          };
-          get().showToast(
-            "Generated plan loaded successfully (demo fallback).",
-          );
-          set((state) => ({
-            generationState: fallbackGenState,
-            messages: state.messages.filter((m) => m.id !== statusMsgId),
-            interviewDone: true,
-            planGenerated: true,
-          }));
-          get().showScreen("plan");
-        } else {
-          get().showToast("Feature generation failed.");
-          set((state) => ({
-            messages: state.messages
-              .filter((m) => m.id !== statusMsgId)
-              .concat([
-                {
-                  id: "ai-gen-err-" + Date.now(),
-                  role: "ai",
-                  text: `Having trouble generating features: ${err.message || "Generation pipeline run failed"}. Please check your connection or try again.`,
-                },
-              ]),
-            retryGenerationText: userText || s.ideaText,
-          }));
-        }
+            ]),
+          retryGenerationText: userText || s.ideaText,
+        }));
       }
     } finally {
       get().setOperationRunning(false);
