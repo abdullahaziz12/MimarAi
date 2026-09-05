@@ -391,7 +391,7 @@ export const useMimarStore = create((set, get) => ({
     let currentProjectId = s.projectId;
     let backendUrl = "";
     try {
-      backendUrl = getBackendApiUrl("");
+      backendUrl = getBackendApiUrl("").replace(/\/$/, "");
     } catch (err) {
       s.showToast(
         "Backend not configured. Set NEXT_PUBLIC_BACKEND_URL before continuing.",
@@ -555,7 +555,7 @@ export const useMimarStore = create((set, get) => ({
   dependencyOrder: [],
 
   // Pipeline runner: runIdeaPipeline
-  runIdeaPipeline: async (userText) => {
+  runIdeaPipeline: async (userText, sessionToken = null) => {
     const s = get();
     s.setOperationRunning(true, "GENERATING INITIAL PLAN (DUAL-MODEL)");
     const controller = new AbortController();
@@ -571,7 +571,7 @@ export const useMimarStore = create((set, get) => ({
 
     let backendUrl = "";
     try {
-      backendUrl = getBackendApiUrl("");
+      backendUrl = getBackendApiUrl("").replace(/\/$/, "");
     } catch (err) {
       s.showToast(
         "Backend not configured. Set NEXT_PUBLIC_BACKEND_URL before continuing.",
@@ -597,9 +597,7 @@ export const useMimarStore = create((set, get) => ({
 
       const authHeaders = {
         "Content-Type": "application/json",
-        ...(s.sessionToken
-          ? { Authorization: `Bearer ${s.sessionToken}` }
-          : {}),
+        ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
       };
 
       const res = await fetch(
@@ -737,7 +735,7 @@ export const useMimarStore = create((set, get) => ({
 
     let backendUrl = "";
     try {
-      backendUrl = getBackendApiUrl("");
+      backendUrl = getBackendApiUrl("").replace(/\/$/, "");
     } catch (err) {
       s.showToast(
         "Backend not configured. Set NEXT_PUBLIC_BACKEND_URL before continuing.",
@@ -869,7 +867,7 @@ export const useMimarStore = create((set, get) => ({
 
     let backendUrl = "";
     try {
-      backendUrl = getBackendApiUrl("");
+      backendUrl = getBackendApiUrl("").replace(/\/$/, "");
     } catch (err) {
       s.showToast(
         "Backend not configured. Set NEXT_PUBLIC_BACKEND_URL before continuing.",

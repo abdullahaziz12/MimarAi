@@ -2,11 +2,14 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { useMimarStore } from "../../store/mimarStore";
+import { useAuth } from "../../context/AuthContext";
+import { getBackendApiUrl, getBackendUrlStatus } from "../../lib/backendConfig";
 import ExamplePromptFallback from "../ExamplePromptFallback";
 import FixedInputsCollection from "../FixedInputsCollection";
 import StartTriggerGate from "../StartTriggerGate";
 
 export default function InterviewScreen() {
+  const { session } = useAuth();
   const {
     currentScreen,
     interviewMode,
@@ -71,7 +74,7 @@ export default function InterviewScreen() {
 
   const executeClassification = async (text) => {
     setRetryPrompt(null);
-    const result = await classifyIdeaStep0(text);
+    const result = await classifyIdeaStep0(text, session?.access_token || null);
 
     if (!result) return;
 
@@ -237,14 +240,19 @@ export default function InterviewScreen() {
     if (projectId && backendStatus.configured) {
       fetch(getBackendApiUrl(`/api/projects/${projectId}/status`), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {}),
+        },
         body: JSON.stringify({
           status: "generating",
           fixed_inputs: fixedInputs,
         }),
       }).catch((err) => console.warn("Status update warning:", err));
     }
-    runIdeaPipeline(ideaText);
+    runIdeaPipeline(ideaText, session?.access_token || null);
   };
 
   const handleKeyDown = (e) => {
@@ -383,7 +391,12 @@ export default function InterviewScreen() {
                 <div className="row ai" style={{ marginTop: 8 }}>
                   <button
                     type="button"
-                    onClick={() => runIdeaPipeline(retryGenerationText)}
+                    onClick={() =>
+                      runIdeaPipeline(
+                        retryGenerationText,
+                        session?.access_token || null,
+                      )
+                    }
                     style={{
                       background: "#1E293B",
                       border: "1px solid #EF4444",
