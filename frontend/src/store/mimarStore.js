@@ -457,9 +457,7 @@ export const useMimarStore = create((set, get) => ({
             detail: "Hourly limit exceeded for idea submissions.",
           };
         }
-        throw new Error(
-          `HTTP ${res.status}: Backend route pending deployment on Back4App`,
-        );
+        throw new Error(`HTTP ${res.status}: Classification request failed`);
       }
 
       const result = await res.json();

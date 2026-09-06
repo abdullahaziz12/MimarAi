@@ -444,11 +444,12 @@ async def create_draft_project(
     token = user.get("token")
     client = get_supabase(token)
     if not client or not user_id:
-        return {"id": "local-draft-" + str(int(datetime.now().timestamp())), "status": "draft", "idea_text": req.idea_text}
+        raise HTTPException(status_code=503, detail="Project storage is unavailable.")
 
     try:
         res = client.table("projects").insert({
             "owner_id": user_id,
+            "name": (req.idea_text or "Untitled Project").strip()[:120] or "Untitled Project",
             "status": "draft",
             "idea_text": req.idea_text,
             "step0_state": {"round_count": 0, "off_topic_streak": 0, "last_label": None}
@@ -459,7 +460,7 @@ async def create_draft_project(
         raise HTTPException(status_code=500, detail="Failed to create draft project.")
     except Exception as e:
         print(f"[Create Draft Project Error] {e}")
-        return {"id": "local-draft-" + str(int(datetime.now().timestamp())), "status": "draft", "idea_text": req.idea_text}
+        raise HTTPException(status_code=500, detail="Failed to create draft project.") from e
 
 
 @app.get("/projects/drafts")
@@ -630,7 +631,7 @@ Output strictly valid JSON with no markdown formatting:
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "llama-3.3-70b-versatile",
+                    "model": "openai/gpt-oss-120b",
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": idea_text}
