@@ -82,6 +82,10 @@ export default function ContactPage() {
       }
 
       if (!res.ok) throw new Error("Server error");
+      const result = await res.json();
+      if (result.email_sent !== true || result.db_saved !== true) {
+        throw new Error("Contact submission was not fully processed");
+      }
       setSubmitted(true);
       showToast("Message sent successfully.");
     } catch (err) {
