@@ -469,80 +469,14 @@ export const useMimarStore = create((set, get) => ({
         s.showToast("Classification stopped by user.");
         return null;
       }
-      console.warn(
-        "Backend classification fetch error, running resilient local fallback:",
-        err,
-      );
-
-      // Resilient local fallback classification if backend server is offline/unreachable
-      const lower = text
-        .toLowerCase()
-        .replace(/[^\w\s]/g, "")
-        .trim();
-      const words = lower.split(/\s+/);
-      const greetings = [
-        "hi",
-        "hello",
-        "hey",
-        "test",
-        "thanks",
-        "ok",
-        "okay",
-        "sup",
-        "yo",
-        "hi there",
-        "hello mimarai",
-        "mimarai",
-      ];
-
-      if (
-        words.length <= 4 &&
-        (greetings.includes(lower) || words.every((w) => greetings.includes(w)))
-      ) {
-        return {
-          status: "ok",
-          label: "OFF_TOPIC",
-          sub_case: null,
-          extracted_name: null,
-          explanation: "Greeting or minimal chit-chat detected.",
-          source: "local_fallback",
-        };
-      }
-
-      if (words.length <= 4) {
-        return {
-          status: "ok",
-          label: "TOO_VAGUE",
-          sub_case: "unexplained",
-          extracted_name: text,
-          explanation: "Named product/domain given without features.",
-          source: "local_fallback",
-        };
-      }
-
-      if (
-        lower.includes("app") &&
-        words.length <= 5 &&
-        !lower.includes("with") &&
-        !lower.includes("for")
-      ) {
-        return {
-          status: "ok",
-          label: "TOO_VAGUE",
-          sub_case: "no_domain",
-          extracted_name: null,
-          explanation: "Generic request without domain details.",
-          source: "local_fallback",
-        };
-      }
-
+      console.warn("Backend classification failed:", err);
       return {
-        status: "ok",
-        label: "READY",
-        sub_case: null,
-        extracted_name: null,
-        explanation: "Clear software idea provided.",
-        source: "local_fallback",
+        status: "error",
+        code:
+          err.name === "TimeoutError"
+            ? "CLASSIFICATION_TIMEOUT"
+            : "CLASSIFICATION_ERROR",
+        detail: "Having trouble understanding that — try again.",
       };
     } finally {
       get().setOperationRunning(false);
