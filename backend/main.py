@@ -261,8 +261,8 @@ async def submit_contact(msg: ContactMessage):
     if not msg.name.strip() or not msg.email.strip() or not msg.message.strip():
         raise HTTPException(status_code=422, detail="Name, email, and message are required.")
 
-    support_email = "support.mimarai@gmail.com"
-    
+    support_email = os.getenv("SUPPORT_EMAIL", "mimarai.support@gmail.com").strip()
+
     # 1. HTML escape user inputs to prevent HTML injection in emails
     safe_name = html.escape(msg.name.strip())
     safe_email = html.escape(msg.email.strip())
@@ -338,7 +338,7 @@ MimarAI Production Pipeline — Automated Notification"""
     <hr style="border: 0; border-top: 1px solid #1E293B; margin: 24px 0;">
     <p style="font-size: 13px; color: #94A3B8; margin-bottom: 0;">
       <strong>The MimarAI Team</strong><br>
-      Support: <a href="mailto:support.mimarai@gmail.com" style="color: #38BDF8;">support.mimarai@gmail.com</a>
+      Support: <a href="mailto:{support_email}" style="color: #38BDF8;">{support_email}</a>
     </p>
   </div>
 </body>
@@ -357,7 +357,7 @@ For reference, here's what you sent us:
 We'll follow up soon.
 
 The MimarAI Team
-Support: support.mimarai@gmail.com"""
+Support: {support_email}"""
 
     user_sent = send_smtp_email(msg.email.strip(), user_subject, user_html, user_plain)
 

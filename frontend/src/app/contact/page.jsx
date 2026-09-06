@@ -60,21 +60,21 @@ export default function ContactPage() {
     };
 
     try {
-      // 1. Try Vercel Serverless API Route first (/api/contact)
-      let res = await fetch("/api/contact", {
+      const backendStatus = getBackendUrlStatus();
+      if (!backendStatus.configured) {
+        throw new Error("Backend not configured");
+      }
+
+      // Prefer the live backend endpoint to avoid routing through the local Next API.
+      let res = await fetch(getBackendApiUrl("/contact"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
-      // 2. If the Vercel route fails, try the configured backend directly.
+      // Fallback to the local Next API only if the live backend is unavailable.
       if (!res.ok) {
-        const backendStatus = getBackendUrlStatus();
-        if (!backendStatus.configured) {
-          throw new Error("Backend not configured");
-        }
-
-        res = await fetch(getBackendApiUrl("/contact"), {
+        res = await fetch("/api/contact", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
