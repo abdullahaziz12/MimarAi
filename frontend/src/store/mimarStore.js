@@ -625,7 +625,7 @@ export const useMimarStore = create((set, get) => ({
   },
 
   // Pipeline runner: runRevisionPipeline
-  runRevisionPipeline: async (targetStage) => {
+  runRevisionPipeline: async (targetStage, sessionToken = null) => {
     const s = get();
     const meta = REVISION_META[targetStage];
     const store =
@@ -679,7 +679,7 @@ export const useMimarStore = create((set, get) => ({
     const projectId = s.projectId;
     const authHeaders = {
       "Content-Type": "application/json",
-      ...(s.sessionToken ? { Authorization: `Bearer ${s.sessionToken}` } : {}),
+      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
     };
 
     try {
@@ -781,7 +781,7 @@ export const useMimarStore = create((set, get) => ({
     }
   },
 
-  acceptPlan: async () => {
+  acceptPlan: async (sessionToken = null) => {
     const s = get();
     if (s.planAccepted) return;
     const commentCount = Object.keys(s.planComments).length;
@@ -810,7 +810,7 @@ export const useMimarStore = create((set, get) => ({
     }
     const authHeaders = {
       "Content-Type": "application/json",
-      ...(s.sessionToken ? { Authorization: `Bearer ${s.sessionToken}` } : {}),
+      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
     };
 
     try {

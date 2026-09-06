@@ -1,9 +1,11 @@
 "use client";
 
-import React from 'react';
-import { useMimarStore, REVISION_META } from '../store/mimarStore';
+import React from "react";
+import { useMimarStore, REVISION_META } from "../store/mimarStore";
+import { useAuth } from "../context/AuthContext";
 
 export default function ReviewCommentSheet({ stage }) {
+  const { session } = useAuth();
   const {
     openReviewSheetStage,
     setOpenReviewSheetStage,
@@ -14,16 +16,25 @@ export default function ReviewCommentSheet({ stage }) {
     deleteComment,
     showScreen,
     runRevisionPipeline,
-    operationRunning
+    operationRunning,
   } = useMimarStore();
 
   const isOpen = openReviewSheetStage === stage;
-  const store = stage === 'plan' ? planComments :
-                stage === 'structure' ? structureComments :
-                stage === 'diagram' ? diagramJsonComments : finalComments;
+  const store =
+    stage === "plan"
+      ? planComments
+      : stage === "structure"
+        ? structureComments
+        : stage === "diagram"
+          ? diagramJsonComments
+          : finalComments;
 
   const count = Object.keys(store).length;
-  const meta = REVISION_META[stage] || { noun: 'Stage', revising: 'REVISING', review: 'REVIEW' };
+  const meta = REVISION_META[stage] || {
+    noun: "Stage",
+    revising: "REVISING",
+    review: "REVIEW",
+  };
 
   const handleClose = () => {
     setOpenReviewSheetStage(null);
@@ -32,40 +43,41 @@ export default function ReviewCommentSheet({ stage }) {
   const handleSubmit = async () => {
     if (count === 0 || operationRunning) return;
     handleClose();
-    showScreen('interview', {
+    showScreen("interview", {
       isRevision: true,
       revisionContext: {
         targetStage: stage,
         noun: meta.noun,
-        pendingComments: { ...store }
-      }
+        pendingComments: { ...store },
+      },
     });
-    runRevisionPipeline(stage);
+    runRevisionPipeline(stage, session?.access_token || null);
   };
 
   return (
     <>
       <div
-        className={`sheet-backdrop ${isOpen ? 'open' : ''}`}
+        className={`sheet-backdrop ${isOpen ? "open" : ""}`}
         id={`sheetBackdrop${stage.charAt(0).toUpperCase() + stage.slice(1)}`}
         onClick={handleClose}
       ></div>
 
       <div
-        className={`sheet ${isOpen ? 'open' : ''}`}
+        className={`sheet ${isOpen ? "open" : ""}`}
         id={`reviewSheet${stage.charAt(0).toUpperCase() + stage.slice(1)}`}
       >
         <div className="sheet-head">
           <div className="sheet-title">Review Comments &amp; AI Directives</div>
           <div className="sheet-sub">
-            {count} {count === 1 ? 'COMMENT PENDING' : 'COMMENTS PENDING'}
+            {count} {count === 1 ? "COMMENT PENDING" : "COMMENTS PENDING"}
           </div>
         </div>
 
         <div className="sheet-body">
           {count === 0 ? (
             <div className="empty-state">
-              No comments pending on this stage. Click any row or item in the document to leave inline feedback.
+              No comments pending on this stage. Click any row or item in the
+              document to leave inline feedback.
             </div>
           ) : (
             Object.entries(store).map(([id, c]) => (
@@ -78,8 +90,11 @@ export default function ReviewCommentSheet({ stage }) {
                       handleClose();
                       const el = document.querySelector(`[data-id="${id}"]`);
                       if (el) {
-                        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-                        const trigger = el.querySelector('.comment-trigger');
+                        el.scrollIntoView({
+                          block: "center",
+                          behavior: "smooth",
+                        });
+                        const trigger = el.querySelector(".comment-trigger");
                         if (trigger) trigger.click();
                       }
                     }}
@@ -112,7 +127,9 @@ export default function ReviewCommentSheet({ stage }) {
             disabled={count === 0 || operationRunning}
             onClick={handleSubmit}
           >
-            {count === 0 ? 'Submit comments' : `Submit ${count} comment${count > 1 ? 's' : ''} →`}
+            {count === 0
+              ? "Submit comments"
+              : `Submit ${count} comment${count > 1 ? "s" : ""} →`}
           </button>
         </div>
       </div>

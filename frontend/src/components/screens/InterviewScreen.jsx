@@ -215,7 +215,10 @@ export default function InterviewScreen() {
     }
 
     if (interviewMode === "revision" && revisionContext) {
-      runRevisionPipeline(revisionContext.targetStage);
+      runRevisionPipeline(
+        revisionContext.targetStage,
+        session?.access_token || null,
+      );
     } else {
       await executeClassification(text);
     }
