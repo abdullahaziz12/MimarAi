@@ -1,15 +1,15 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import nodemailer from 'nodemailer';
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+import nodemailer from "nodemailer";
 
 function escapeHtml(str) {
-  if (!str) return '';
+  if (!str) return "";
   return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 export async function POST(req) {
@@ -19,58 +19,69 @@ export async function POST(req) {
 
     if (!name || !email || !message) {
       return NextResponse.json(
-        { error: 'Name, email, and message are required.' },
-        { status: 422 }
+        { error: "Name, email, and message are required." },
+        { status: 422 },
       );
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email.trim())) {
       return NextResponse.json(
-        { error: 'Invalid email address.' },
-        { status: 422 }
+        { error: "Invalid email address." },
+        { status: 422 },
       );
     }
 
     const safeName = escapeHtml(name.trim());
     const safeEmail = escapeHtml(email.trim());
-    const safeTopic = escapeHtml((topic || 'General Inquiry').trim());
+    const safeTopic = escapeHtml((topic || "General Inquiry").trim());
     const safeMessage = escapeHtml(message.trim());
 
     // 1. Save to Supabase DB if credentials are configured
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://tgyupsejfuvglbwjneob.supabase.co';
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRneXVwc2VqZnV2Z2xid2puZW9iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc0MTY4NDksImV4cCI6MjEwMjk5Mjg0OX0.vX_RvoGRxaHYtijcjaybDkI4x35FF63uv2rVJsj6Yvo';
-    
+    const supabaseUrl =
+      process.env.NEXT_PUBLIC_SUPABASE_URL ||
+      "https://tgyupsejfuvglbwjneob.supabase.co";
+    const supabaseKey =
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRneXVwc2VqZnV2Z2xid2puZW9iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc0MTY4NDksImV4cCI6MjEwMjk5Mjg0OX0.vX_RvoGRxaHYtijcjaybDkI4x35FF63uv2rVJsj6Yvo";
+
     let dbSaved = false;
     try {
       const supabase = createClient(supabaseUrl, supabaseKey);
-      const { error } = await supabase.from('contact_messages').insert({
+      const { error } = await supabase.from("contact_messages").insert({
         name: name.trim(),
         email: email.trim(),
-        topic: (topic || 'General Inquiry').trim(),
+        topic: (topic || "General Inquiry").trim(),
         message: message.trim(),
       });
       if (!error) dbSaved = true;
     } catch (dbErr) {
-      console.warn('[CONTACT API DB WARNING]', dbErr);
+      console.warn("[CONTACT API DB WARNING]", dbErr);
     }
 
     // 2. Email Dispatcher via Gmail SMTP
-    const gmailUser = process.env.GMAIL_USER || 'support.mimarai@gmail.com';
-    const gmailPass = (process.env.GMAIL_APP_PASSWORD || 'vllyflcyxihdesjs').replace(/\s+/g, '');
+    const supportEmail = (
+      process.env.SUPPORT_EMAIL ||
+      process.env.GMAIL_USER ||
+      "mimarai.support@gmail.com"
+    ).trim();
+    const gmailUser = process.env.GMAIL_USER || supportEmail;
+    const gmailPass = (
+      process.env.GMAIL_APP_PASSWORD || "vllyflcyxihdesjs"
+    ).replace(/\s+/g, "");
 
     let emailSent = false;
     if (gmailPass && gmailUser) {
       try {
         const transporter = nodemailer.createTransport({
-          service: 'gmail',
+          service: "gmail",
           auth: {
             user: gmailUser,
             pass: gmailPass,
           },
         });
 
-        // A. Notification Email to support.mimarai@gmail.com
+        // A. Notification Email to the configured support inbox
         const notifSubject = `New ${safeTopic} — MimarAI Contact Form`;
         const notifHtml = `<!DOCTYPE html>
 <html>
@@ -110,29 +121,30 @@ export async function POST(req) {
       <div style="font-size: 11px; color: #94A3B8; font-family: monospace; text-transform: uppercase; margin-bottom: 6px;">For reference, here's what you sent us:</div>
       <div style="color: #E2E8F0; white-space: pre-wrap;">"${safeMessage}"</div>
     </div>
+    <p>If you do not see our reply in a few minutes, please check your spam or junk folder.</p>
     <p>We'll follow up soon.</p>
     <hr style="border: 0; border-top: 1px solid #1E293B; margin: 24px 0;">
     <p style="font-size: 13px; color: #94A3B8; margin-bottom: 0;">
       <strong>The MimarAI Team</strong><br>
-      Support: <a href="mailto:support.mimarai@gmail.com" style="color: #38BDF8;">support.mimarai@gmail.com</a>
+      Support: <a href="mailto:${supportEmail}" style="color: #38BDF8;">${supportEmail}</a>
     </p>
   </div>
 </body>
 </html>`;
 
-        const userText = `Hi ${name.trim()},\n\nThanks for reaching out to MimarAI! This confirms we've received your ${safeTopic} and it's now in our queue.\n\nOur team reviews inquiries daily and typically responds within 24 business hours. If your message included a bug report, feel free to also open an issue on our GitHub repository for faster visibility:\nhttps://github.com/abdullahaziz12/MimarAi\n\nFor reference, here's what you sent us:\n"${message.trim()}"\n\nWe'll follow up soon.\n\nThe MimarAI Team\nSupport: support.mimarai@gmail.com`;
+        const userText = `Hi ${name.trim()},\n\nThanks for reaching out to MimarAI! This confirms we've received your ${safeTopic} and it's now in our queue.\n\nOur team reviews inquiries daily and typically responds within 24 business hours. If your message included a bug report, feel free to also open an issue on our GitHub repository for faster visibility:\nhttps://github.com/abdullahaziz12/MimarAi\n\nFor reference, here's what you sent us:\n"${message.trim()}"\n\nIf you do not see our reply in a few minutes, please check your spam or junk folder.\n\nWe'll follow up soon.\n\nThe MimarAI Team\nSupport: ${supportEmail}`;
 
         // Send Notification Email
         try {
           await transporter.sendMail({
             from: `"MimarAI Support" <${gmailUser}>`,
-            to: 'support.mimarai@gmail.com',
+            to: supportEmail,
             subject: notifSubject,
             text: notifText,
             html: notifHtml,
           });
         } catch (nErr) {
-          console.error('[NOTIF MAIL ERROR]', nErr);
+          console.error("[NOTIF MAIL ERROR]", nErr);
         }
 
         // Send User Confirmation Auto-Reply
@@ -146,24 +158,24 @@ export async function POST(req) {
           });
           emailSent = true;
         } catch (uErr) {
-          console.error('[USER CONFIRMATION MAIL ERROR]', uErr);
+          console.error("[USER CONFIRMATION MAIL ERROR]", uErr);
         }
       } catch (mailErr) {
-        console.error('[CONTACT API GENERAL MAIL ERROR]', mailErr);
+        console.error("[CONTACT API GENERAL MAIL ERROR]", mailErr);
       }
     }
 
     return NextResponse.json({
-      status: 'ok',
-      message: 'Message received. We will get back to you shortly.',
+      status: "ok",
+      message: "Message received. We will get back to you shortly.",
       email_sent: emailSent,
       db_saved: dbSaved,
     });
   } catch (err) {
-    console.error('[CONTACT API ERROR]', err);
+    console.error("[CONTACT API ERROR]", err);
     return NextResponse.json(
-      { error: 'Failed to process contact submission.' },
-      { status: 500 }
+      { error: "Failed to process contact submission." },
+      { status: 500 },
     );
   }
 }

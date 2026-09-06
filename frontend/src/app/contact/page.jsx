@@ -171,6 +171,28 @@ export default function ContactPage() {
                 </p>
 
                 <form id="contactForm" onSubmit={handleSubmit} noValidate>
+                  <p
+                    style={{
+                      margin: "0 0 18px",
+                      fontSize: "12px",
+                      lineHeight: 1.5,
+                      color: "var(--ink-secondary)",
+                    }}
+                  >
+                    For fastest follow-up, email{" "}
+                    <a
+                      href="mailto:mimarai.support@gmail.com"
+                      style={{
+                        color: "var(--blueprint-cyan)",
+                        textDecoration: "none",
+                      }}
+                    >
+                      mimarai.support@gmail.com
+                    </a>{" "}
+                    and check your spam or junk folder if the auto-reply does
+                    not appear quickly.
+                  </p>
+
                   {/* Topic Selector */}
                   <div className="topic-group">
                     <span className="topic-label">Inquiry Type</span>
@@ -311,6 +333,10 @@ export default function ContactPage() {
                   Thank you for reaching out. We have logged your submission and
                   will get back to you shortly.
                 </p>
+                <p style={{ color: "var(--ink-secondary)", fontSize: "13px" }}>
+                  If you do not see our follow-up email in a few minutes, please
+                  check your spam or junk folder.
+                </p>
                 <button
                   type="button"
                   className="btn-reset"
@@ -343,11 +369,11 @@ export default function ContactPage() {
               <div className="channel-item">
                 <span className="channel-label">Email Support</span>
                 <a
-                  href="mailto:support.mimarai@gmail.com"
+                  href="mailto:mimarai.support@gmail.com"
                   className="channel-val"
                   style={{ textDecoration: "none", color: "inherit" }}
                 >
-                  support.mimarai@gmail.com
+                  mimarai.support@gmail.com
                 </a>
               </div>
               <div className="channel-item">
