@@ -11,7 +11,7 @@ import "../styles/auth.css";
 
 export default function LandingPage() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
 
   const [drafts, setDrafts] = React.useState([]);
 
@@ -27,7 +27,11 @@ export default function LandingPage() {
           return;
         }
 
-        fetch(getBackendApiUrl("/api/projects/drafts"))
+        fetch(getBackendApiUrl("/api/projects/drafts"), {
+          headers: session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {},
+        })
           .then((res) => {
             if (res.ok) return res.json();
             return null;
@@ -57,7 +61,7 @@ export default function LandingPage() {
         }
       }
     } catch (e) {}
-  }, [user]);
+  }, [user, session]);
 
   const handleCtaClick = (e) => {
     if (!user) {

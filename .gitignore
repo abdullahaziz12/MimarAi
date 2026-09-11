@@ -1,4 +1,4 @@
-# Dependencies
+git restore --source=HEAD -- <the two deleted root docs># Dependencies
 node_modules/
 package-lock.json
 

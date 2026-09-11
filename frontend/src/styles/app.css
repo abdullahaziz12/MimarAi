@@ -580,6 +580,95 @@ html[data-initial-screen="final"] #screen-final,
 .app-shell .hud-item{ display: flex; align-items: center; gap: 7px; }
 .app-shell .hud-dot{ width: 6px; height: 6px; border-radius: 50%; background: var(--success-green); box-shadow: 0 0 6px var(--success-green-glow); }
 .app-shell .hud-dot.processing{ background: var(--accent-orange); animation: pulse 1.2s ease-in-out infinite; box-shadow: 0 0 8px var(--accent-orange-glow); }
+.app-shell .service-health{
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-left: 12px;
+}
+.app-shell .service-health-item{
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(14, 23, 43, 0.72);
+  border: 1px solid var(--border-line);
+  color: var(--ink-secondary);
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  min-height: 26px;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03);
+}
+.app-shell .service-health-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+.app-shell .service-health-icon {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.app-shell .service-health-dot{
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-muted);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.08);
+}
+.app-shell .service-health-text{
+  display: inline-flex;
+  align-items: center;
+}
+.app-shell .service-health-item.connected {
+  color: var(--success-green);
+  border-color: var(--success-green);
+  background: rgba(26, 116, 84, 0.12);
+  box-shadow: 0 0 0 1px rgba(46, 200, 149, 0.16), inset 0 0 8px rgba(46, 200, 149, 0.2);
+}
+.app-shell .service-health-item.connected .service-health-dot {
+  background: var(--success-green);
+  box-shadow: 0 0 4px var(--success-green-glow);
+}
+.app-shell .service-health-item.disconnected {
+  color: var(--danger-red);
+  border-color: var(--danger-red);
+  background: rgba(129, 52, 48, 0.12);
+  box-shadow: 0 0 0 1px rgba(255, 96, 96, 0.16), inset 0 0 8px rgba(255, 96, 96, 0.16);
+}
+.app-shell .service-health-item.disconnected .service-health-dot {
+  background: var(--danger-red);
+  box-shadow: 0 0 4px var(--danger-red);
+}
+.app-shell .service-health-item.checking {
+  color: var(--ink-secondary);
+  border-color: var(--border-line);
+}
+.app-shell .service-health-item.checking .service-health-dot {
+  background: var(--accent-orange);
+}
+
+@media (max-width: 768px) {
+  .app-shell .service-health {
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-left: 0;
+  }
+  .app-shell .service-health-item {
+    padding: 5px 10px;
+  }
+}
 
 /* ============================================================
    BUTTONS & CONTROLS
@@ -2497,6 +2586,9 @@ html[data-initial-screen="final"] #screen-final,
 .app-shell .sheet{ width: 100%; }
 .app-shell .ask-sheet{ width: 100%; }
 .app-shell .diagram-actions{ padding: 12px 16px; }
+.app-shell .app-footer{ height: auto; min-height: var(--footer-h); padding: 6px 12px; gap: 8px; }
+.app-shell .app-footer .hud-item:first-child{ min-width: 0; flex-wrap: wrap; }
+.app-shell .service-health{ margin-left: 0; }
 }
 
 /* ============================================================
