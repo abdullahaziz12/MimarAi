@@ -1,9 +1,12 @@
 import os
 import asyncio
 import json
+import re
+import unicodedata
 import httpx
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
+from uuid import UUID
 from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
@@ -42,6 +45,7 @@ supabase_url: Optional[str] = os.getenv("SUPABASE_URL")
 supabase_key: Optional[str] = os.getenv("SUPABASE_KEY")
 supabase_jwt_secret: Optional[str] = os.getenv("SUPABASE_JWT_SECRET")
 supabase_client = None
+service_health_cache = {"expires_at": 0.0, "data": None}
 
 def get_supabase(token: Optional[str] = None):
     url = os.getenv("SUPABASE_URL")
@@ -62,6 +66,34 @@ def get_supabase(token: Optional[str] = None):
             print(f"Supabase client initialization warning: {e}")
             return None
     return None
+
+
+def get_owned_project(client, user_id: Optional[str], project_id: str):
+    """Return an owned persisted project or reject the request before AI work."""
+    if not client or not user_id:
+        raise HTTPException(status_code=503, detail="Project storage is unavailable.")
+    if not project_id or project_id.startswith("local-draft-"):
+        raise HTTPException(status_code=400, detail="A persisted project ID is required.")
+    try:
+        UUID(project_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="Invalid project ID.")
+
+    try:
+        result = (
+            client.table("projects")
+            .select("*")
+            .eq("id", project_id)
+            .eq("owner_id", user_id)
+            .execute()
+        )
+    except Exception as exc:
+        print(f"[Project Authorization Error] {exc}")
+        raise HTTPException(status_code=404, detail="Project not found") from exc
+
+    if not result or not result.data:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return result.data[0]
 
 
 # --- JWT Authentication Dependency ---
@@ -130,7 +162,6 @@ import html
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-import re
 from pydantic import BaseModel, field_validator
 
 # --- Schemas ---
@@ -236,6 +267,68 @@ def health_db_check():
             "status": "error",
             "db": "connection_failed",
             "error": str(e)
+        }
+
+
+async def check_provider_health():
+    """Check provider reachability/model availability without generating tokens."""
+    gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+
+    async def check_gemini():
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            return "unavailable"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}"
+        try:
+            async with httpx.AsyncClient(timeout=4.0) as client:
+                response = await client.get(url, params={"key": api_key})
+            return "connected" if response.status_code == 200 else "unavailable"
+        except (httpx.HTTPError, ValueError):
+            return "unavailable"
+
+    async def check_groq():
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            return "unavailable"
+        try:
+            async with httpx.AsyncClient(timeout=4.0) as client:
+                response = await client.get(
+                    "https://api.groq.com/openai/v1/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+            if response.status_code != 200:
+                return "unavailable"
+            models = response.json().get("data", [])
+            return "connected" if any(model.get("id") == groq_model for model in models) else "unavailable"
+        except (httpx.HTTPError, ValueError, TypeError):
+            return "unavailable"
+
+    gemini_status, groq_status = await asyncio.gather(check_gemini(), check_groq())
+    return {"gemini": {"status": gemini_status}, "groq": {"status": groq_status}}
+
+
+@app.get("/health/services")
+async def health_services_check():
+    """Return cached backend/provider health without exposing provider credentials."""
+    now = datetime.now(timezone.utc).timestamp()
+    cached = service_health_cache.get("data")
+    if cached and service_health_cache.get("expires_at", 0) > now:
+        return cached
+
+    try:
+        provider_status = await check_provider_health()
+        result = {
+            "backend": {"status": "connected"},
+            **provider_status,
+        }
+        service_health_cache.update({"expires_at": now + 15, "data": result})
+        return result
+    except Exception:
+        return {
+            "backend": {"status": "connected"},
+            "gemini": {"status": "unavailable"},
+            "groq": {"status": "unavailable"},
         }
 
 
@@ -395,6 +488,40 @@ GREETING_WHITELIST = {
     "hello there", "testing", "cool", "great"
 }
 
+PROJECT_DOMAIN_TERMS = {
+    "bank", "banking", "hospital", "healthcare", "school", "education",
+    "ecommerce", "e-commerce", "commerce", "food delivery", "restaurant",
+    "loan", "inventory", "payroll", "crm", "marketplace", "attendance",
+    "logistics", "booking", "real estate", "social network"
+}
+
+PROJECT_SCOPE_TERMS = {
+    "manage", "management", "track", "tracking", "attendance", "payment",
+    "payments", "loan", "loans", "employee", "employees", "customer",
+    "customers", "booking", "bookings", "orders", "order", "delivery",
+    "upload", "document", "documents", "report", "reports", "notification",
+    "notifications", "role-based", "role based", "authentication", "login",
+    "dashboard", "workflow", "approval", "approvals", "history", "review"
+}
+
+def has_concrete_project_scope(text: str) -> bool:
+    """Recognize a domain plus at least one concrete capability before AI classification."""
+    normalized = unicodedata.normalize("NFKC", text).casefold()
+    tokens = re.findall(r"[\w]+", normalized, flags=re.UNICODE)
+
+    def contains_keyword(keyword: str) -> bool:
+        keyword_tokens = re.findall(r"[\w]+", keyword.casefold(), flags=re.UNICODE)
+        width = len(keyword_tokens)
+        return any(
+            tokens[index : index + width] == keyword_tokens
+            for index in range(len(tokens) - width + 1)
+        )
+
+    return (
+        any(contains_keyword(term) for term in PROJECT_DOMAIN_TERMS)
+        and any(contains_keyword(term) for term in PROJECT_SCOPE_TERMS)
+    )
+
 def check_regex_prefilter(text: str) -> bool:
     cleaned = re.sub(r'[^\w\s]', '', text.lower()).strip()
     words = cleaned.split()
@@ -419,6 +546,8 @@ def _update_project_step0_state(client, project_id, classification_result, curre
 
         if label == "TOO_VAGUE":
             round_count += 1
+        else:
+            round_count = 0
 
         new_state = {
             "round_count": round_count,
@@ -492,8 +621,7 @@ async def update_project_status(
     user_id = user.get("user_id")
     token = user.get("token")
     client = get_supabase(token)
-    if not client or project_id.startswith("local-draft-"):
-        return {"status": "ok", "project_id": project_id, "updated_status": req.status}
+    get_owned_project(client, user_id, project_id)
 
     try:
         # Enforce project ownership check
@@ -531,6 +659,9 @@ async def classify_idea(
     user_id = user.get("user_id")
     token = user.get("token")
     idea_text = req.idea_text.strip() if req.idea_text else ""
+
+    if not req.project_id or req.project_id.startswith("local-draft-"):
+        raise HTTPException(status_code=400, detail="A persisted project ID is required.")
     
     # 0. Empty idea_text check
     if not idea_text:
@@ -546,19 +677,9 @@ async def classify_idea(
             detail="Idea description exceeds 2,000 characters limit."
         )
 
-    # 2. Validate project_id existence & ownership if project_id is provided
+    # 2. Validate project ownership before classification/provider work.
     client = get_supabase(token)
-    if req.project_id and not req.project_id.startswith("local-draft-"):
-        if client and user_id:
-            try:
-                proj_check = client.table("projects").select("id").eq("id", req.project_id).eq("owner_id", user_id).execute()
-                if not proj_check or not proj_check.data:
-                    raise HTTPException(status_code=404, detail="Project not found")
-            except HTTPException:
-                raise
-            except Exception as e:
-                print(f"[Project Validation Error] {e}")
-                raise HTTPException(status_code=404, detail="Project not found")
+    get_owned_project(client, user_id, req.project_id)
 
     # 3. Rate limiting check (10 per hour)
     client = get_supabase(token)
@@ -598,6 +719,20 @@ async def classify_idea(
         _update_project_step0_state(client, req.project_id, result_payload, req.step0_state)
         return result_payload
 
+    # A concrete domain plus a capability is sufficient to proceed. Do not let
+    # an LLM incorrectly downgrade a detailed project idea to TOO_VAGUE.
+    if has_concrete_project_scope(idea_text):
+        result_payload = {
+            "status": "ok",
+            "label": "READY",
+            "sub_case": None,
+            "extracted_name": None,
+            "explanation": "A project domain and concrete capabilities were identified.",
+            "source": "scope_prefilter"
+        }
+        _update_project_step0_state(client, req.project_id, result_payload, req.step0_state)
+        return result_payload
+
     # 4. Groq API Call
     groq_api_key = os.getenv("GROQ_API_KEY")
     if not groq_api_key:
@@ -613,6 +748,8 @@ Your task is to classify a user's initial project idea into exactly one of three
    - "no_domain": The user mentions wanting an app or site but gives no domain or concept at all (e.g. "I want to build an app", "Make me a website").
    - "unexplained": The user names a product/domain but gives no features or details (e.g. "a banking app", "Uber clone", "FoodieApp").
 3. READY: The user provides a clear software idea with at least a basic domain and some features or scope (e.g. "a food delivery platform with live order tracking and driver assignments").
+
+Important classification rule: if the user provides a domain plus any concrete capability, workflow, user type, or business function, classify it as READY. Do not classify a detailed or imperfectly worded idea as TOO_VAGUE. For example, "a banking app with loan management and employee attendance" is READY.
 
 Output strictly valid JSON with no markdown formatting:
 {
@@ -719,7 +856,8 @@ async def call_gemini_api(
     if not gemini_key:
         raise HTTPException(status_code=500, detail="Gemini API unconfigured (GEMINI_API_KEY missing).")
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={gemini_key}"
+    gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_key}"
     payload = {
         "contents": [
             {"role": "user", "parts": [{"text": f"{system_prompt}\n\n{user_prompt}"}]}
@@ -762,10 +900,11 @@ async def call_groq_json(
     if not groq_key:
         raise HTTPException(status_code=500, detail="Groq API unconfigured (GROQ_API_KEY missing).")
     
+    groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
     payload = {
-        "model": "openai/gpt-oss-120b",
+        "model": groq_model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
@@ -851,24 +990,28 @@ async def generate_feature_pipeline(
     user_id = user.get("user_id")
     token = user.get("token")
     client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
     
     idea_text = (req and req.idea_text) or "Software application"
     fixed_inputs = (req and req.fixed_inputs) or {}
     
-    if client and not project_id.startswith("local-draft-"):
-        proj_res = client.table("projects").select("*").eq("id", project_id).eq("owner_id", user_id).execute()
-        if proj_res and proj_res.data:
-            project = proj_res.data[0]
-            if project.get("status") == "locked_generating":
-                raise HTTPException(status_code=429, detail="A generation run is already in progress for this project.")
-            if not req or not req.idea_text:
-                idea_text = project.get("idea_text") or idea_text
-            if not req or not req.fixed_inputs:
-                fixed_inputs = project.get("fixed_inputs") or fixed_inputs
+    if project.get("status") == "locked_generating":
+        raise HTTPException(status_code=429, detail="A generation run is already in progress for this project.")
+    if not req or not req.idea_text:
+        idea_text = project.get("idea_text") or idea_text
+    if not req or not req.fixed_inputs:
+        fixed_inputs = project.get("fixed_inputs") or fixed_inputs
 
-        check_generation_rate_limit(client, user_id, "pipeline")
-        client.table("projects").update({"status": "locked_generating"}).eq("id", project_id).execute()
+    if not idea_text.strip() or idea_text == "Software application":
+        raise HTTPException(status_code=400, detail="A classified project idea is required before generation.")
+    required_fixed_inputs = ("stack", "database", "deployment", "apis")
+    if any(not fixed_inputs.get(key) for key in required_fixed_inputs):
+        raise HTTPException(status_code=400, detail="All fixed inputs are required before generation.")
 
+    check_generation_rate_limit(client, user_id, "pipeline")
+    client.table("projects").update({"status": "locked_generating"}).eq("id", project_id).execute()
+
+    generation_succeeded = False
     try:
         context_str = f"Project Idea: {idea_text}\nFixed Inputs: {json.dumps(fixed_inputs)}"
 
@@ -965,14 +1108,15 @@ Output strictly valid JSON with no markdown formatting:
                 "note": f"Dual-model features generated ({len(final_features)} features)"
             }).execute()
 
+        generation_succeeded = True
         return {
             "status": "ok",
             "project_id": project_id,
             "generation_state": generation_payload
         }
     finally:
-        if client and not project_id.startswith("local-draft-"):
-            client.table("projects").update({"status": "reviewing"}).eq("id", project_id).execute()
+        if client and not project_id.startswith("local-draft-") and not generation_succeeded:
+            client.table("projects").update({"status": "generation_failed"}).eq("id", project_id).execute()
 
 
 @app.post("/projects/{project_id}/comments/batch-fix")
@@ -985,40 +1129,36 @@ async def process_comment_batch(
     user_id = user.get("user_id")
     token = user.get("token")
     client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
     
     submitted_comments = req.comments or []
     current_features = req.current_features or []
     original_state = None
 
-    if client and not project_id.startswith("local-draft-"):
-        proj_res = client.table("projects").select("*").eq("id", project_id).eq("owner_id", user_id).execute()
-        if proj_res and proj_res.data:
-            project = proj_res.data[0]
-            if project.get("status") == "locked_generating":
-                raise HTTPException(status_code=429, detail="A generation or comment batch is already in progress.")
-            if not current_features:
-                current_state = project.get("generation_state") or {}
-                original_state = current_state
-                current_features = current_state.get("features", [])
-            else:
-                original_state = project.get("generation_state") or {}
-        
-        check_generation_rate_limit(client, user_id, "batch")
-        client.table("projects").update({"status": "locked_generating"}).eq("id", project_id).execute()
+    if project.get("status") == "locked_generating":
+        raise HTTPException(status_code=429, detail="A generation or comment batch is already in progress.")
+    if not current_features:
+        current_state = project.get("generation_state") or {}
+        original_state = current_state
+        current_features = current_state.get("features", [])
+    else:
+        original_state = project.get("generation_state") or {}
 
-        # Fetch pending DB comments if not passed in req
-        if not submitted_comments:
-            comm_res = client.table("comments").select("*").eq("project_id", project_id).eq("status", "pending").execute()
-            submitted_comments = comm_res.data or []
+    check_generation_rate_limit(client, user_id, "batch")
+    client.table("projects").update({"status": "locked_generating"}).eq("id", project_id).execute()
+
+    # Fetch pending DB comments if not passed in req
+    if not submitted_comments:
+        comm_res = client.table("comments").select("*").eq("project_id", project_id).eq("status", "pending").execute()
+        submitted_comments = comm_res.data or []
 
     try:
         if not submitted_comments:
             return {"status": "ok", "message": "No pending comments to process."}
 
-        if client and not project_id.startswith("local-draft-"):
-            comment_ids = [c.get("id") for c in submitted_comments if c.get("id")]
-            if comment_ids:
-                client.table("comments").update({"status": "submitted"}).in_("id", comment_ids).eq("status", "pending").execute()
+        comment_ids = [c.get("id") for c in submitted_comments if c.get("id")]
+        if comment_ids:
+            client.table("comments").update({"status": "submitted"}).in_("id", comment_ids).eq("status", "pending").execute()
 
         # Gemini Batch Fix Pass
         system_prompt = """You are an AI software architect updating a project feature list based on user review comments.
@@ -1049,27 +1189,22 @@ Output strictly valid JSON with no markdown formatting:
             "adjusted_flag": False
         }
 
-        if client and not project_id.startswith("local-draft-"):
-            proj_res = client.table("projects").select("generation_state").eq("id", project_id).execute()
-            if proj_res and proj_res.data:
-                curr_state = proj_res.data[0].get("generation_state") or {}
-                curr_state["features"] = updated_features
-                generation_payload = curr_state
-                client.table("projects").update({"generation_state": curr_state, "status": "reviewing"}).eq("id", project_id).execute()
+        curr_state = project.get("generation_state") or {}
+        curr_state["features"] = updated_features
+        generation_payload = curr_state
+        client.table("projects").update({"generation_state": curr_state, "status": "reviewing"}).eq("id", project_id).execute()
 
-            comment_ids = [c.get("id") for c in submitted_comments if c.get("id")]
-            if comment_ids:
-                try:
-                    client.table("comments").update({"status": "resolved"}).in_("id", comment_ids).eq("status", "submitted").execute()
-                except Exception:
-                    if original_state is not None:
-                        client.table("projects").update({"generation_state": original_state}).eq("id", project_id).execute()
-                    raise HTTPException(status_code=502, detail="Failed to process your comments, please try again.")
+        if comment_ids:
+            try:
+                client.table("comments").update({"status": "resolved"}).in_("id", comment_ids).eq("status", "submitted").execute()
+            except Exception:
+                if original_state is not None:
+                    client.table("projects").update({"generation_state": original_state}).eq("id", project_id).execute()
+                raise HTTPException(status_code=502, detail="Failed to process your comments, please try again.")
 
         return {"status": "ok", "generation_state": generation_payload}
     finally:
-        if client and not project_id.startswith("local-draft-"):
-            client.table("projects").update({"status": "reviewing"}).eq("id", project_id).execute()
+        client.table("projects").update({"status": "reviewing"}).eq("id", project_id).execute()
 
 
 @app.post("/projects/{project_id}/features/{feature_id}/reject")
@@ -1082,14 +1217,7 @@ async def reject_feature(
     user_id = user.get("user_id")
     token = user.get("token")
     client = get_supabase(token)
-    if not client or project_id.startswith("local-draft-"):
-        return {"status": "ok", "feature_id": feature_id, "action": "rejected"}
-
-    proj_res = client.table("projects").select("*").eq("id", project_id).eq("owner_id", user_id).execute()
-    if not proj_res or not proj_res.data:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    project = proj_res.data[0]
+    project = get_owned_project(client, user_id, project_id)
     gen_state = project.get("generation_state") or {}
     features = gen_state.get("features", [])
     rejected = set(gen_state.get("rejected_feature_ids", []))
@@ -1119,14 +1247,7 @@ async def generate_dependency_order(
     user_id = user.get("user_id")
     token = user.get("token")
     client = get_supabase(token)
-    if not client or project_id.startswith("local-draft-"):
-        return {"status": "ok", "dependency_order": ["feat-1", "feat-2"]}
-
-    proj_res = client.table("projects").select("*").eq("id", project_id).eq("owner_id", user_id).execute()
-    if not proj_res or not proj_res.data:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    project = proj_res.data[0]
+    project = get_owned_project(client, user_id, project_id)
     gen_state = project.get("generation_state") or {}
     features = gen_state.get("features", [])
     rejected = set(gen_state.get("rejected_feature_ids", []))
@@ -1179,8 +1300,7 @@ async def get_project_comments(
     user_id = user.get("user_id")
     token = user.get("token")
     client = get_supabase(token)
-    if not client or project_id.startswith("local-draft-"):
-        return {"comments": []}
+    get_owned_project(client, user_id, project_id)
 
     res = client.table("comments").select("*").eq("project_id", project_id).order("created_at", desc=False).execute()
     return {"comments": res.data or []}
@@ -1196,12 +1316,7 @@ async def add_project_comment(
     user_id = user.get("user_id")
     token = user.get("token")
     client = get_supabase(token)
-    if not client or project_id.startswith("local-draft-"):
-        return {"id": "local-comm-1", "text": req.text, "status": "pending"}
-
-    proj_res = client.table("projects").select("id").eq("id", project_id).eq("owner_id", user_id).execute()
-    if not proj_res or not proj_res.data:
-        raise HTTPException(status_code=404, detail="Project not found")
+    get_owned_project(client, user_id, project_id)
 
     res = client.table("comments").insert({
         "project_id": project_id,

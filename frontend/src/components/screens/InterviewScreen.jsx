@@ -66,9 +66,20 @@ export default function InterviewScreen() {
     e.target.style.height = "auto";
     e.target.style.height = Math.min(e.target.scrollHeight, 140) + "px";
 
-    // Edit Invalidation (Phase 8): Editing idea text after READY invalidates READY state
-    if (step0Status === "ready") {
+    // Editing after a completed or exhausted attempt starts a clean Step 0 attempt.
+    if (
+      step0Status === "ready" ||
+      step0Status === "vague_fallback" ||
+      step0Status === "off_topic_fallback"
+    ) {
       setStep0Status("idle");
+      setStep0State({
+        round_count: 0,
+        off_topic_streak: 0,
+        last_label: null,
+        last_sub_case: null,
+        extracted_name: null,
+      });
     }
   };
 
@@ -105,7 +116,11 @@ export default function InterviewScreen() {
 
     if (label === "OFF_TOPIC") {
       const newStreak = (step0State.off_topic_streak || 0) + 1;
-      setStep0State({ off_topic_streak: newStreak, last_label: "OFF_TOPIC" });
+      setStep0State({
+        round_count: 0,
+        off_topic_streak: newStreak,
+        last_label: "OFF_TOPIC",
+      });
 
       if (newStreak >= 3) {
         setStep0Status("off_topic_fallback");
@@ -165,7 +180,13 @@ export default function InterviewScreen() {
         }));
       }
     } else if (label === "READY") {
-      setStep0State({ off_topic_streak: 0, last_label: "READY" });
+      setStep0State({
+        round_count: 0,
+        off_topic_streak: 0,
+        last_label: "READY",
+        last_sub_case: null,
+        extracted_name: null,
+      });
       setStep0Status("ready");
       useMimarStore.setState((state) => ({
         messages: [
@@ -233,7 +254,7 @@ export default function InterviewScreen() {
   };
 
   const handleFixedInputChange = (field, value) => {
-    setFixedInputs({ [field]: value });
+    setFixedInputs({ [field]: value }, session?.access_token || null);
   };
 
   const handleStartGeneration = async () => {

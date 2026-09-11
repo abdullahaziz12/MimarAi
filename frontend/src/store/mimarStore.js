@@ -322,7 +322,7 @@ export const useMimarStore = create((set, get) => ({
     set((state) => ({ step0State: { ...state.step0State, ...newState } }));
     get().saveProjectState();
   },
-  setFixedInputs: (inputs) => {
+  setFixedInputs: (inputs, sessionToken = null) => {
     set((state) => {
       const newFixedInputs =
         typeof inputs === "function"
@@ -338,7 +338,12 @@ export const useMimarStore = create((set, get) => ({
           );
           fetch(backendUrl, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              ...(sessionToken
+                ? { Authorization: `Bearer ${sessionToken}` }
+                : {}),
+            },
             body: JSON.stringify({ fixed_inputs: newFixedInputs }),
           }).catch((err) =>
             console.warn("Incremental fixed_inputs persistence failed:", err),
@@ -372,6 +377,15 @@ export const useMimarStore = create((set, get) => ({
   classifyIdeaStep0: async (userText, sessionToken = null) => {
     const s = get();
     if (!userText || !userText.trim()) return null;
+
+    if (!sessionToken) {
+      s.showToast("Your session has expired. Please sign in again.");
+      return {
+        status: "error",
+        code: "AUTH_REQUIRED",
+        detail: "A valid session is required to classify an idea.",
+      };
+    }
 
     const text = userText.trim();
     if (text.length > 2000) {
@@ -418,13 +432,21 @@ export const useMimarStore = create((set, get) => ({
           body: JSON.stringify({ idea_text: text }),
           signal,
         });
-        if (draftRes.ok) {
-          const draftData = await draftRes.json();
-          if (draftData && draftData.id) {
-            currentProjectId = draftData.id;
-            set({ projectId: currentProjectId });
-          }
+        if (!draftRes.ok) {
+          const errorData = await draftRes.json().catch(() => ({}));
+          const error = new Error(
+            errorData.detail || "Unable to create a project draft.",
+          );
+          error.status = draftRes.status;
+          throw error;
         }
+
+        const draftData = await draftRes.json();
+        if (!draftData?.id) {
+          throw new Error("Draft creation returned no project ID.");
+        }
+        currentProjectId = draftData.id;
+        set({ projectId: currentProjectId });
       } catch (err) {
         if (err.name === "AbortError") {
           s.showToast("Classification cancelled.");
@@ -432,7 +454,19 @@ export const useMimarStore = create((set, get) => ({
           set({ activeController: null });
           return null;
         }
-        console.warn("Draft creation fallback:", err);
+        console.warn("Draft creation failed:", err);
+        s.showToast(
+          err.status === 401
+            ? "Your session has expired. Please sign in again."
+            : "Unable to create your project draft. Please try again.",
+        );
+        get().setOperationRunning(false);
+        set({ activeController: null });
+        return {
+          status: "error",
+          code: err.status === 401 ? "AUTH_REQUIRED" : "DRAFT_CREATION_ERROR",
+          detail: err.message,
+        };
       }
     }
 
@@ -489,6 +523,37 @@ export const useMimarStore = create((set, get) => ({
   // Pipeline runner: runIdeaPipeline
   runIdeaPipeline: async (userText, sessionToken = null) => {
     const s = get();
+    const requiredInputs = s.fixedInputs || {};
+    const missingFixedInput = [
+      requiredInputs.stack,
+      requiredInputs.database,
+      requiredInputs.deployment,
+      requiredInputs.apis,
+    ].some((value) => !value);
+
+    if (!sessionToken) {
+      s.showToast("Your session has expired. Please sign in again.");
+      return;
+    }
+    if (!s.projectId) {
+      s.showToast(
+        "Your project draft is missing. Please submit your idea again.",
+      );
+      return;
+    }
+    if (
+      !userText?.trim() ||
+      s.step0Status !== "ready" ||
+      s.step0State.last_label !== "READY"
+    ) {
+      s.showToast("Finish Step 0 classification before generating your plan.");
+      return;
+    }
+    if (missingFixedInput) {
+      s.showToast("Complete all fixed inputs before generating your plan.");
+      return;
+    }
+
     s.setOperationRunning(true, "GENERATING INITIAL PLAN (DUAL-MODEL)");
     const controller = new AbortController();
     set({ activeController: controller, retryGenerationText: null });
@@ -533,7 +598,7 @@ export const useMimarStore = create((set, get) => ({
       };
 
       const res = await fetch(
-        `${backendUrl}/api/projects/${projectId || "local-draft-101"}/generate`,
+        `${backendUrl}/api/projects/${projectId}/generate`,
         {
           method: "POST",
           headers: authHeaders,
@@ -548,13 +613,14 @@ export const useMimarStore = create((set, get) => ({
       clearInterval(interval);
 
       if (!res.ok) {
-        let errMsg = "Feature generation run failed.";
-        if (res.status === 429) {
-          const errData = await res.json().catch(() => ({}));
-          errMsg =
-            errData.detail ||
-            "Limit reached for feature generation. Please try again later.";
-        }
+        const errData = await res.json().catch(() => ({}));
+        let errMsg =
+          errData.detail ||
+          (res.status === 401
+            ? "Your session has expired. Please sign in again."
+            : res.status === 429
+              ? "Limit reached for feature generation. Please try again later."
+              : "Feature generation run failed.");
         s.showToast(errMsg);
         set((state) => ({
           messages: state.messages
@@ -689,7 +755,7 @@ export const useMimarStore = create((set, get) => ({
           text: c.text,
         }));
         const res = await fetch(
-          `${backendUrl}/api/projects/${projectId || "local-draft-101"}/comments/batch-fix`,
+          `${backendUrl}/api/projects/${projectId}/comments/batch-fix`,
           {
             method: "POST",
             headers: authHeaders,
