@@ -97,19 +97,19 @@ export default function BlueprintWizardPage() {
 
       {/* APP FOOTER */}
       <footer className="app-footer">
-        <div className="hud-item">
+        <div className="hud-item hud-left">
           <div className="hud-dot" id="hudDot"></div>
-          <span id="hudStatus">
+          <span id="hudStatus" className="hud-status-text">
             {finalAccepted
               ? 'STATUS: SPEC VALIDATED & AGENT READY'
               : 'STATUS: DRAFTING IN PROGRESS'}
           </span>
           <DiagnosticBadge />
         </div>
-        <div className="hud-item">
-          <span>GRID: 24px LOCK</span>
-          <span>SCALE: 1:1</span>
-          <span style={{ color: 'var(--blueprint-cyan)' }}>DWG: MIMAR-2026-PRODUCTION</span>
+        <div className="hud-item hud-right">
+          <span className="hud-meta-grid">GRID: 24px LOCK</span>
+          <span className="hud-meta-scale">SCALE: 1:1</span>
+          <span className="hud-meta-dwg" style={{ color: 'var(--blueprint-cyan)' }}>DWG: MIMAR-2026-PRODUCTION</span>
         </div>
       </footer>
 

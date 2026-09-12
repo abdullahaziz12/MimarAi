@@ -5,30 +5,29 @@ import { getBackendUrlStatus, getBackendApiUrl } from "../lib/backendConfig";
 
 function BackendIcon() {
   return (
-    <svg className="service-health-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 7h16v5H4z" />
-      <path d="M4 14h16v5H4z" />
-      <path d="M7 10h.01M7 17h.01" />
+    <svg className="service-health-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2" y="2.75" width="12" height="4.5" rx="1.25" />
+      <rect x="2" y="8.75" width="12" height="4.5" rx="1.25" />
+      <circle cx="11.5" cy="5" r="0.6" fill="currentColor" stroke="none" />
+      <circle cx="11.5" cy="11" r="0.6" fill="currentColor" stroke="none" />
+      <line x1="4.5" y1="5" x2="7.5" y2="5" />
+      <line x1="4.5" y1="11" x2="7.5" y2="11" />
     </svg>
   );
 }
 
 function GeminiIcon() {
   return (
-    <svg className="service-health-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 3l8 8-8 8-8-8z" />
-      <path d="M12 8l4 4-4 4-4-4z" />
-      <path d="M12 3v18" />
+    <svg className="service-health-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M8 1C8 4.86599 11.134 8 15 8C11.134 8 8 11.134 8 15C8 11.134 4.86599 8 1 8C4.86599 8 8 4.86599 8 1Z" />
     </svg>
   );
 }
 
 function GroqIcon() {
   return (
-    <svg className="service-health-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M5 12h7" />
-      <path d="M12 5l7 7-7 7" />
-      <path d="M4 18h16" />
+    <svg className="service-health-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M8.7 1.5L3.5 8.75H7.75L7 14.5L12.5 7.25H8.25L8.7 1.5Z" />
     </svg>
   );
 }
@@ -90,16 +89,6 @@ export default function DiagnosticBadge() {
     };
   }, []);
 
-  const serviceLabel = (service, state) => {
-    if (state === "connected") {
-      return `${service}: Connected`;
-    }
-    if (state === "checking") {
-      return `${service}: Checking...`;
-    }
-    return `${service}: Not Connected`;
-  };
-
   const serviceIcon = {
     backend: <BackendIcon />,
     gemini: <GeminiIcon />,
@@ -127,19 +116,26 @@ export default function DiagnosticBadge() {
             : state === "checking"
               ? "checking"
               : "disconnected";
+        const stateText =
+          state === "connected"
+            ? "Connected"
+            : state === "checking"
+              ? "Checking..."
+              : "Not Connected";
+
         return (
-          <span
+          <div
             className={`service-health-item ${stateClass}`}
             key={service.key}
+            title={`${service.label}: ${stateText}`}
           >
             <span className="service-health-icon-wrap">
               {serviceIcon[service.key]}
             </span>
-            <span className="service-health-dot" aria-hidden="true"></span>
-            <span className="service-health-text">
-              {serviceLabel(service.label, state)}
-            </span>
-          </span>
+            <span className="service-health-name">{service.label}</span>
+            <span className="service-health-dot" aria-hidden="true" />
+            <span className="service-health-status">{stateText}</span>
+          </div>
         );
       })}
     </div>

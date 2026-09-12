@@ -68,7 +68,7 @@
   /* Shell Measurements */
   --nav-width: 60px;
   --header-h:  62px;
-  --footer-h:  28px;
+  --footer-h:  32px;
 
   /* Motion Design System (Calm, Fast, Purposeful) */
   --duration-instant: 60ms;
@@ -562,111 +562,262 @@ html[data-initial-screen="final"] #screen-final,
 .app-shell #screen-interview{ overflow: hidden; }
 
 /* ---- FOOTER ---- */
-.app-shell .app-footer{
+.app-shell .app-footer {
   height: var(--footer-h);
+  min-height: var(--footer-h);
+  max-height: var(--footer-h);
   flex: 0 0 auto;
-  background: var(--bg-surface-deep);
-  border-top: 1px solid var(--border-line);
+  background: rgba(6, 11, 22, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 18px;
+  padding: 0 14px;
   font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--ink-muted);
+  color: var(--ink-secondary);
   z-index: 40;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
-.app-shell .hud-item{ display: flex; align-items: center; gap: 7px; }
-.app-shell .hud-dot{ width: 6px; height: 6px; border-radius: 50%; background: var(--success-green); box-shadow: 0 0 6px var(--success-green-glow); }
-.app-shell .hud-dot.processing{ background: var(--accent-orange); animation: pulse 1.2s ease-in-out infinite; box-shadow: 0 0 8px var(--accent-orange-glow); }
-.app-shell .service-health{
+.app-shell .hud-item {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-left: 12px;
+  gap: 8px;
+  min-width: 0;
 }
-.app-shell .service-health-item{
+
+.app-shell .hud-item.hud-left {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  justify-content: flex-start;
+}
+
+.app-shell .hud-item.hud-right {
+  flex: 0 0 auto;
+  gap: 12px;
+  font-size: 9.5px;
+  color: #64748b;
+  letter-spacing: 0.03em;
+}
+
+.app-shell .hud-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--success-green);
+  box-shadow: 0 0 6px var(--success-green-glow);
+  flex-shrink: 0;
+}
+
+.app-shell .hud-dot.processing {
+  background: var(--accent-orange);
+  animation: pulse 1.2s ease-in-out infinite;
+  box-shadow: 0 0 8px var(--accent-orange-glow);
+}
+
+.app-shell .hud-status-text {
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+
+/* Service Health Telemetry Cluster */
+.app-shell .service-health {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  background: rgba(14, 23, 43, 0.72);
-  border: 1px solid var(--border-line);
-  color: var(--ink-secondary);
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+.app-shell .service-health-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  height: 20px;
+  border-radius: 4px;
+  background: rgba(13, 22, 38, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
   white-space: nowrap;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9.5px;
   line-height: 1;
-  min-height: 26px;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03);
+  letter-spacing: 0.02em;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  box-sizing: border-box;
+  user-select: none;
 }
+
+.app-shell .service-health-item:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  transform: translateY(-0.5px);
+}
+
 .app-shell .service-health-icon-wrap {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
-  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
 }
+
 .app-shell .service-health-icon {
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
 }
-.app-shell .service-health-dot{
-  width: 6px;
-  height: 6px;
+
+.app-shell .service-health-name {
+  font-weight: 500;
+  color: #94a3b8;
+}
+
+.app-shell .service-health-dot {
+  width: 4.5px;
+  height: 4.5px;
   border-radius: 50%;
   background: var(--ink-muted);
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.08);
+  flex-shrink: 0;
+  margin: 0 1px;
 }
-.app-shell .service-health-text{
-  display: inline-flex;
-  align-items: center;
+
+.app-shell .service-health-status {
+  font-weight: 600;
+  font-size: 9px;
+  letter-spacing: 0.02em;
 }
+
+/* Connected State (Subtle Emerald Glass) */
 .app-shell .service-health-item.connected {
-  color: var(--success-green);
-  border-color: var(--success-green);
-  background: rgba(26, 116, 84, 0.12);
-  box-shadow: 0 0 0 1px rgba(46, 200, 149, 0.16), inset 0 0 8px rgba(46, 200, 149, 0.2);
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.22);
 }
+
+.app-shell .service-health-item.connected:hover {
+  background: rgba(16, 185, 129, 0.13);
+  border-color: rgba(16, 185, 129, 0.35);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.15);
+}
+
+.app-shell .service-health-item.connected .service-health-icon {
+  color: #34d399;
+}
+
+.app-shell .service-health-item.connected .service-health-name {
+  color: #cbd5e1;
+}
+
 .app-shell .service-health-item.connected .service-health-dot {
-  background: var(--success-green);
-  box-shadow: 0 0 4px var(--success-green-glow);
+  background: #10b981;
+  box-shadow: 0 0 5px rgba(16, 185, 129, 0.7);
 }
+
+.app-shell .service-health-item.connected .service-health-status {
+  color: #34d399;
+}
+
+/* Disconnected State (Subtle Rose Glass) */
 .app-shell .service-health-item.disconnected {
-  color: var(--danger-red);
-  border-color: var(--danger-red);
-  background: rgba(129, 52, 48, 0.12);
-  box-shadow: 0 0 0 1px rgba(255, 96, 96, 0.16), inset 0 0 8px rgba(255, 96, 96, 0.16);
+  background: rgba(244, 63, 94, 0.08);
+  border-color: rgba(244, 63, 94, 0.22);
 }
+
+.app-shell .service-health-item.disconnected:hover {
+  background: rgba(244, 63, 94, 0.13);
+  border-color: rgba(244, 63, 94, 0.35);
+  box-shadow: 0 0 8px rgba(244, 63, 94, 0.15);
+}
+
+.app-shell .service-health-item.disconnected .service-health-icon {
+  color: #fb7185;
+}
+
+.app-shell .service-health-item.disconnected .service-health-name {
+  color: #cbd5e1;
+}
+
 .app-shell .service-health-item.disconnected .service-health-dot {
-  background: var(--danger-red);
-  box-shadow: 0 0 4px var(--danger-red);
+  background: #f43f5e;
+  box-shadow: 0 0 5px rgba(244, 63, 94, 0.7);
 }
+
+.app-shell .service-health-item.disconnected .service-health-status {
+  color: #fb7185;
+}
+
+/* Checking State (Subtle Amber Glass) */
 .app-shell .service-health-item.checking {
-  color: var(--ink-secondary);
-  border-color: var(--border-line);
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.22);
 }
+
+.app-shell .service-health-item.checking .service-health-icon {
+  color: #fbbf24;
+}
+
+.app-shell .service-health-item.checking .service-health-name {
+  color: #cbd5e1;
+}
+
 .app-shell .service-health-item.checking .service-health-dot {
-  background: var(--accent-orange);
+  background: #f59e0b;
+  box-shadow: 0 0 5px rgba(245, 158, 11, 0.6);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.app-shell .service-health-item.checking .service-health-status {
+  color: #fbbf24;
+}
+
+/* Responsive Rules for Breakpoint Resilience */
+@media (max-width: 1280px) {
+  .app-shell .hud-meta-grid,
+  .app-shell .hud-meta-scale {
+    display: none;
+  }
+}
+
+@media (max-width: 1024px) {
+  .app-shell .hud-meta-dwg {
+    display: none;
+  }
+  .app-shell .service-health-status {
+    display: none;
+  }
 }
 
 @media (max-width: 768px) {
+  .app-shell .hud-status-text {
+    display: none;
+  }
   .app-shell .service-health {
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-left: 0;
+    margin-left: 4px;
+    gap: 4px;
   }
   .app-shell .service-health-item {
-    padding: 5px 10px;
+    padding: 0 6px;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-shell .service-health-name {
+    display: none;
+  }
+  .app-shell .service-health-item {
+    padding: 0 4px;
   }
 }
 
@@ -2586,9 +2737,9 @@ html[data-initial-screen="final"] #screen-final,
 .app-shell .sheet{ width: 100%; }
 .app-shell .ask-sheet{ width: 100%; }
 .app-shell .diagram-actions{ padding: 12px 16px; }
-.app-shell .app-footer{ height: auto; min-height: var(--footer-h); padding: 6px 12px; gap: 8px; }
-.app-shell .app-footer .hud-item:first-child{ min-width: 0; flex-wrap: wrap; }
-.app-shell .service-health{ margin-left: 0; }
+.app-shell .app-footer{ height: var(--footer-h); min-height: var(--footer-h); padding: 0 10px; }
+.app-shell .app-footer .hud-item:first-child{ min-width: 0; flex-wrap: nowrap; }
+.app-shell .service-health{ margin-left: 4px; }
 }
 
 /* ============================================================
