@@ -14,6 +14,7 @@ export default function LandingPage() {
   const { user, session } = useAuth();
 
   const [drafts, setDrafts] = React.useState([]);
+  const [draftsError, setDraftsError] = React.useState(null);
 
   useEffect(() => {
     document.body.style.overflow = "auto";
@@ -32,16 +33,21 @@ export default function LandingPage() {
             ? { Authorization: `Bearer ${session.access_token}` }
             : {},
         })
-          .then((res) => {
-            if (res.ok) return res.json();
-            return null;
-          })
-          .then((data) => {
-            if (data && data.drafts) {
-              setDrafts(data.drafts);
+          .then(async (res) => {
+            if (res.ok) {
+              const data = await res.json();
+              if (data && data.drafts) {
+                setDrafts(data.drafts);
+                setDraftsError(null);
+              }
+            } else {
+              const errData = await res.json().catch(() => ({}));
+              setDraftsError(errData.message || errData.detail || "Unable to load draft projects.");
             }
           })
-          .catch(() => {});
+          .catch((err) => {
+            setDraftsError("Unable to connect to service for pending drafts.");
+          });
       } catch {
         // Missing env config fails loudly at source; no hidden stale fallback.
       }
@@ -160,8 +166,30 @@ export default function LandingPage() {
             </a>
           </div>
 
+          {/* Phase 9: Draft Loading Error Display */}
+          {user && draftsError && (
+            <div
+              style={{
+                marginTop: "20px",
+                padding: "12px 14px",
+                borderRadius: "8px",
+                background: "rgba(239, 68, 68, 0.12)",
+                border: "1px solid rgba(239, 68, 68, 0.4)",
+                maxWidth: "520px",
+                color: "#FCA5A5",
+                fontSize: "12px",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <span style={{ fontSize: "14px" }}>⚠️</span>
+              <span>Failed to load pending drafts: {draftsError}</span>
+            </div>
+          )}
+
           {/* Phase 9: Continue Draft Projects */}
-          {user && drafts.length > 0 && (
+          {user && !draftsError && drafts.length > 0 && (
             <div
               style={{
                 marginTop: "20px",

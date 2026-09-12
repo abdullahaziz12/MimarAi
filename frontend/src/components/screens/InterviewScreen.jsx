@@ -262,19 +262,39 @@ export default function InterviewScreen() {
     if (!ideaText) return;
     const backendStatus = getBackendUrlStatus();
     if (projectId && backendStatus.configured) {
-      fetch(getBackendApiUrl(`/api/projects/${projectId}/status`), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(session?.access_token
-            ? { Authorization: `Bearer ${session.access_token}` }
-            : {}),
-        },
-        body: JSON.stringify({
-          status: "generating",
-          fixed_inputs: fixedInputs,
-        }),
-      }).catch((err) => console.warn("Status update warning:", err));
+      try {
+        const res = await fetch(
+          getBackendApiUrl(`/api/projects/${projectId}/status`),
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(session?.access_token
+                ? { Authorization: `Bearer ${session.access_token}` }
+                : {}),
+            },
+            body: JSON.stringify({
+              status: "generating",
+              fixed_inputs: fixedInputs,
+            }),
+          },
+        );
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg =
+            errData.message ||
+            errData.detail ||
+            `Status update failed with status ${res.status}`;
+          showToast(`Unable to start generation: ${errMsg}`);
+          return;
+        }
+      } catch (err) {
+        console.error("Status update error:", err);
+        showToast(
+          `Unable to start generation: ${err.message || "Network error"}`,
+        );
+        return;
+      }
     }
     runIdeaPipeline(ideaText, session?.access_token || null);
   };

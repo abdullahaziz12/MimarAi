@@ -8,6 +8,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 from uuid import UUID
 from fastapi import FastAPI, HTTPException, Depends, Header, Request
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from dotenv import load_dotenv
@@ -20,6 +22,66 @@ app = FastAPI(
     description="Precision Architecture & Planning Layer API",
     version="0.1.0"
 )
+
+# Standardized Error Response Formatter
+def build_error_payload(status_code: int, detail: Any) -> Dict[str, Any]:
+    if isinstance(detail, dict) and detail.get("status") == "error":
+        return detail
+
+    error_type = "internal_error"
+    if status_code == 400:
+        error_type = "bad_request"
+    elif status_code == 401:
+        error_type = "unauthorized"
+    elif status_code == 403:
+        error_type = "forbidden"
+    elif status_code == 404:
+        error_type = "not_found"
+    elif status_code == 422:
+        error_type = "validation_error"
+    elif status_code == 429:
+        error_type = "rate_limit_exceeded"
+    elif status_code == 500:
+        detail_str = str(detail).lower()
+        if "unconfigured" in detail_str or "missing" in detail_str:
+            error_type = "config_error"
+        else:
+            error_type = "internal_error"
+    elif status_code == 502:
+        error_type = "provider_error"
+    elif status_code == 503:
+        error_type = "storage_unavailable"
+    elif status_code == 504:
+        error_type = "timeout_error"
+
+    if isinstance(detail, dict):
+        msg = detail.get("message") or detail.get("detail") or str(detail)
+    else:
+        msg = str(detail)
+
+    return {
+        "status": "error",
+        "error_type": error_type,
+        "message": msg
+    }
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    payload = build_error_payload(exc.status_code, exc.detail)
+    return JSONResponse(status_code=exc.status_code, content=payload)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={
+            "status": "error",
+            "error_type": "validation_error",
+            "message": str(exc)
+        }
+    )
 
 # CORS setup
 frontend_url = os.getenv("FRONTEND_URL", "https://mimar-ai.vercel.app")
@@ -601,14 +663,14 @@ async def get_draft_projects(
     token = user.get("token")
     client = get_supabase(token)
     if not client or not user_id:
-        return {"drafts": []}
+        raise HTTPException(status_code=503, detail="Project storage is unavailable.")
 
     try:
         res = client.table("projects").select("*").eq("owner_id", user_id).eq("status", "draft").order("created_at", desc=True).execute()
         return {"drafts": res.data or []}
     except Exception as e:
         print(f"[Get Draft Projects Error] {e}")
-        return {"drafts": []}
+        raise HTTPException(status_code=500, detail="Failed to fetch draft projects.") from e
 
 
 @app.post("/projects/{project_id}/status")
@@ -647,7 +709,7 @@ async def update_project_status(
         raise
     except Exception as e:
         print(f"[Update Project Status Error] {e}")
-        return {"status": "warning", "message": str(e)}
+        raise HTTPException(status_code=500, detail=f"Failed to update project status: {str(e)}")
 
 
 @app.post("/interview/classify")

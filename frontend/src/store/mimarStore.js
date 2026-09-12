@@ -426,27 +426,60 @@ export const useMimarStore = create((set, get) => ({
 
     if (!currentProjectId) {
       try {
-        const draftRes = await fetch(`${backendUrl}/api/projects/draft`, {
-          method: "POST",
-          headers: authHeaders,
-          body: JSON.stringify({ idea_text: text }),
-          signal,
-        });
-        if (!draftRes.ok) {
-          const errorData = await draftRes.json().catch(() => ({}));
-          const error = new Error(
-            errorData.detail || "Unable to create a project draft.",
-          );
-          error.status = draftRes.status;
-          throw error;
+        // Check for existing resumable draft before creating a duplicate
+        try {
+          const draftsRes = await fetch(`${backendUrl}/api/projects/drafts`, {
+            method: "GET",
+            headers: authHeaders,
+            signal,
+          });
+          if (draftsRes.ok) {
+            const draftsData = await draftsRes.json();
+            const userDrafts = draftsData?.drafts || [];
+            const normalizedText = text.trim().toLowerCase();
+            const matchingDraft = userDrafts.find((d) => {
+              const draftIdea = (d.idea_text || "").trim().toLowerCase();
+              return (
+                draftIdea === normalizedText ||
+                (draftIdea.length > 10 &&
+                  (draftIdea.startsWith(normalizedText) ||
+                    normalizedText.startsWith(draftIdea)))
+              );
+            });
+            if (matchingDraft?.id) {
+              currentProjectId = matchingDraft.id;
+              set({ projectId: currentProjectId });
+            }
+          }
+        } catch (e) {
+          if (e.name === "AbortError") throw e;
         }
 
-        const draftData = await draftRes.json();
-        if (!draftData?.id) {
-          throw new Error("Draft creation returned no project ID.");
+        if (!currentProjectId) {
+          const draftRes = await fetch(`${backendUrl}/api/projects/draft`, {
+            method: "POST",
+            headers: authHeaders,
+            body: JSON.stringify({ idea_text: text }),
+            signal,
+          });
+          if (!draftRes.ok) {
+            const errorData = await draftRes.json().catch(() => ({}));
+            const error = new Error(
+              errorData.message ||
+                errorData.detail ||
+                "Unable to create a project draft.",
+            );
+            error.status = draftRes.status;
+            throw error;
+          }
+
+          const draftData = await draftRes.json();
+          if (!draftData?.id) {
+            throw new Error("Draft creation returned no project ID.");
+          }
+          currentProjectId = draftData.id;
+          set({ projectId: currentProjectId });
         }
-        currentProjectId = draftData.id;
-        set({ projectId: currentProjectId });
       } catch (err) {
         if (err.name === "AbortError") {
           s.showToast("Classification cancelled.");
