@@ -6,6 +6,7 @@ import unicodedata
 import httpx
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
+import uuid
 from uuid import UUID
 from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.responses import JSONResponse
@@ -544,6 +545,32 @@ class UpdateProjectStatusRequest(BaseModel):
     status: Optional[str] = None
     fixed_inputs: Optional[Dict[str, Any]] = None
 
+
+# --- V3.3 Clarifying Questions Schemas ---
+class GenerateClarifyingQuestionsRequest(BaseModel):
+    idea_text: str
+    density_flags: Optional[Dict[str, Any]] = None
+
+    @field_validator("idea_text")
+    @classmethod
+    def validate_idea(cls, v: str) -> str:
+        cleaned = (v or "").strip()
+        if not cleaned:
+            raise ValueError("idea_text cannot be empty.")
+        if len(cleaned) > 2500:
+            raise ValueError("idea_text exceeds 2500 characters limit.")
+        return cleaned
+
+
+class ClarifyingAnswerItem(BaseModel):
+    question_id: str
+    answer: str
+
+
+class SubmitClarifyingAnswersRequest(BaseModel):
+    answers: List[ClarifyingAnswerItem]
+
+
 GREETING_WHITELIST = {
     "hi", "hello", "hey", "test", "thanks", "thank you", "ok", "okay",
     "good morning", "good afternoon", "good evening", "sup", "yo", "hi there",
@@ -643,7 +670,8 @@ async def create_draft_project(
             "name": (req.idea_text or "Untitled Project").strip()[:120] or "Untitled Project",
             "status": "draft",
             "idea_text": req.idea_text,
-            "step0_state": {"round_count": 0, "off_topic_streak": 0, "last_label": None}
+            "step0_state": {"round_count": 0, "off_topic_streak": 0, "last_label": None},
+            "density_flags": dict(DEFAULT_DENSITY_FLAGS)
         }).execute()
         
         if res.data:
@@ -1002,6 +1030,107 @@ async def call_groq_json(
     raise HTTPException(status_code=502, detail="Groq API request failed after retry.")
 
 
+# V3.2 Density Check Heuristic Definitions
+DEFAULT_DENSITY_FLAGS = {
+    "clarifying_questions": "full",
+    "personas": "ask",
+    "nfrs": "ask"
+}
+
+PERSONA_PATTERNS = [
+    r"\badmin\b", r"\badministrator\b", r"\badministrators\b", r"\buser\b", r"\busers\b",
+    r"\bdoctor\b", r"\bdoctors\b", r"\bpatient\b", r"\bpatients\b", r"\bcustomer\b", r"\bcustomers\b",
+    r"\bstaff\b", r"\bmanager\b", r"\bmanagers\b", r"\brole\b", r"\broles\b", r"\bpermission\b",
+    r"\bpermissions\b", r"\baccess\s+level[s]?\b", r"\bguest\b", r"\bguests\b", r"\bmember\b",
+    r"\bmembers\b", r"\bclient\b", r"\bclients\b", r"\bclinician\b", r"\bclinicians\b",
+    r"\bhygienist\b", r"\bhygienists\b", r"\bemployee\b", r"\bemployees\b", r"\btenant\b",
+    r"\btenants\b", r"\bconsumer\b", r"\bconsumers\b", r"\bprovider\b", r"\bproviders\b",
+    r"\bvendor\b", r"\bvendors\b"
+]
+
+SCALE_PATTERNS = [
+    r"\bconcurrent\b", r"\bthroughput\b", r"\bqps\b", r"\btps\b", r"\blatency\b", r"\bload\s*balanced\b",
+    r"\bscale\b", r"\bscalable\b", r"\bscalability\b", r"\btraffic\b",
+    r"\b\d+[\s\-]*(?:users|concurrent|thousand|thousands|million|millions|daily|monthly|requests|reqs|per\s+second|qps|tps|records|transactions|txs|gb|tb|pb)\b",
+    r"\b(?:thousands|millions|billions)\s+of\s+(?:users|requests|records|transactions|events|visitors)\b",
+    r"\bhigh[\s\-]*(?:scale|volume|traffic|throughput|availability|load)\b"
+]
+
+SENSITIVITY_PATTERNS = [
+    r"\bmedical\b", r"\bhealth\b", r"\bhealthcare\b", r"\bpatient\s+record[s]?\b",
+    r"\bhipaa\b", r"\bpci\b", r"\bpci[\s\-]dss\b", r"\bgdpr\b", r"\bsoc[\s\-]?2\b",
+    r"\bfinancial\b", r"\bpayment\b", r"\bpayments\b", r"\bbank\b", r"\bbanking\b",
+    r"\bcredit\s+card[s]?\b", r"\bdebit\s+card[s]?\b", r"\bchildren\b", r"\bminors\b",
+    r"\bcoppa\b", r"\bpersonal\s+data\b", r"\bpii\b", r"\bconfidential\b",
+    r"\behr\b", r"\bemr\b", r"\bphi\b", r"\bencrypted\s+at\s+rest\b",
+    r"\bend[\s\-]to[\s\-]end\s+encrypt\w*\b"
+]
+
+
+def compute_density_flags(idea_text: str, resolved_answer: Optional[str] = None) -> Dict[str, str]:
+    """
+    Pure heuristic (non-AI) to compute V3.2 density flags:
+    - clarifying_questions: 'full' | 'partial' | 'skip'
+    - personas: 'ask' | 'skip'
+    - nfrs: 'ask' | 'skip'
+    """
+    try:
+        if not isinstance(idea_text, str):
+            return dict(DEFAULT_DENSITY_FLAGS)
+
+        combined_text = idea_text.strip()
+        if resolved_answer and isinstance(resolved_answer, str):
+            combined_text += f" {resolved_answer.strip()}"
+
+        if not combined_text:
+            return dict(DEFAULT_DENSITY_FLAGS)
+
+        text_lower = combined_text.lower()
+        words = text_lower.split()
+        word_count = len(words)
+
+        clauses = [c.strip() for c in re.split(r'[.!?;,]+', combined_text) if c.strip()]
+        clause_count = len(clauses)
+
+        has_personas = any(bool(re.search(pat, text_lower)) for pat in PERSONA_PATTERNS)
+        has_scale = any(bool(re.search(pat, text_lower)) for pat in SCALE_PATTERNS)
+        has_sensitivity = any(bool(re.search(pat, text_lower)) for pat in SENSITIVITY_PATTERNS)
+
+        # 1. Personas: 'skip' if persona keywords detected, else 'ask'
+        personas = "skip" if has_personas else "ask"
+
+        # 2. NFRs: 'skip' if both scale AND sensitivity detected, else 'ask'
+        nfrs = "skip" if (has_scale and has_sensitivity) else "ask"
+
+        # 3. Clarifying Questions:
+        # Rule 1: Short/sparse (< 20 words) -> always 'full'
+        if word_count < 20:
+            clarifying_questions = "full"
+        # Rule 3: Dense (>= 35 words and >= 3 clauses)
+        elif word_count >= 35 and clause_count >= 3:
+            if has_personas and has_scale and has_sensitivity:
+                clarifying_questions = "skip"
+            elif has_personas or has_scale or has_sensitivity:
+                clarifying_questions = "partial"
+            else:
+                clarifying_questions = "full"
+        # Rule 2: Moderate (20 <= word_count < 35)
+        else:
+            if has_personas or has_scale or has_sensitivity:
+                clarifying_questions = "partial"
+            else:
+                clarifying_questions = "full"
+
+        return {
+            "clarifying_questions": clarifying_questions,
+            "personas": personas,
+            "nfrs": nfrs
+        }
+    except Exception as e:
+        print(f"[Density Check Warning] {e}")
+        return dict(DEFAULT_DENSITY_FLAGS)
+
+
 @app.post("/projects/{project_id}/contradiction-scan")
 @app.post("/api/projects/{project_id}/contradiction-scan")
 async def scan_project_contradictions(
@@ -1064,6 +1193,10 @@ If a genuine contradiction is found:
     explanation = scan_res.get("explanation") if found else None
     conflicting_parts = scan_res.get("conflicting_parts") if found else []
 
+    # V3.2 Density Check (pure heuristic, synchronous, zero AI call)
+    full_idea_text = f"{idea_text}\n{resolved_answer}" if resolved_answer else idea_text
+    density_flags = compute_density_flags(full_idea_text)
+
     # Persist check record to contradiction_checks table
     if client and not project_id.startswith("local-draft-"):
         try:
@@ -1078,7 +1211,7 @@ If a genuine contradiction is found:
         except Exception as e:
             print(f"[Contradiction Checks DB Warning] {e}")
 
-        # Update project step0_state with contradiction resolution outcome
+        # Update project step0_state and density_flags with contradiction resolution outcome
         try:
             step0_state = project.get("step0_state") or {}
             step0_state["last_contradiction_result"] = {
@@ -1093,9 +1226,12 @@ If a genuine contradiction is found:
             elif not found:
                 step0_state["contradiction_unresolved"] = False
 
-            client.table("projects").update({"step0_state": step0_state}).eq("id", project_id).execute()
+            client.table("projects").update({
+                "step0_state": step0_state,
+                "density_flags": density_flags
+            }).eq("id", project_id).execute()
         except Exception as e:
-            print(f"[Step0 State Contradiction Update Warning] {e}")
+            print(f"[Step0 State Contradiction & Density Update Warning] {e}")
 
     unresolved = bool(round_num >= 2 and found)
     return {
@@ -1104,8 +1240,212 @@ If a genuine contradiction is found:
         "explanation": explanation,
         "conflicting_parts": conflicting_parts,
         "round": round_num,
-        "contradiction_unresolved": unresolved
+        "contradiction_unresolved": unresolved,
+        "density_flags": density_flags
     }
+
+
+# --- V3.3 Deepened Clarifying Questions Endpoints ---
+@app.post("/projects/{project_id}/clarifying-questions")
+@app.post("/api/projects/{project_id}/clarifying-questions")
+async def generate_clarifying_questions(
+    project_id: str,
+    req: GenerateClarifyingQuestionsRequest,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+
+    density_flags = req.density_flags
+    if not density_flags or not isinstance(density_flags, dict):
+        density_flags = project.get("density_flags") or DEFAULT_DENSITY_FLAGS
+
+    cq_flag = density_flags.get("clarifying_questions", "full")
+    if cq_flag == "skip":
+        return {
+            "status": "skipped",
+            "message": "Clarifying questions skipped due to high idea density.",
+            "density_flag": "skip",
+            "questions": []
+        }
+
+    target_count_str = "1 to 2" if cq_flag == "partial" else "2 to 4"
+    max_questions = 2 if cq_flag == "partial" else 4
+
+    personas_covered = (density_flags.get("personas") == "skip")
+    nfrs_covered = (density_flags.get("nfrs") == "skip")
+
+    covered_rules = []
+    if personas_covered:
+        covered_rules.append("- User roles and personas are already defined in the idea. DO NOT ask who the users/roles are or what user types exist.")
+    if nfrs_covered:
+        covered_rules.append("- Scale, traffic, and compliance/security constraints are already specified. DO NOT ask about scale or compliance.")
+
+    covered_section = "\n".join(covered_rules) if covered_rules else "- Focus directly on core business logic, user workflows, and key domain edge cases."
+
+    system_prompt = f"""You are a software architect conducting a requirements clarification interview for a project specification.
+Generate {target_count_str} targeted, highly domain-specific clarifying questions for the provided project idea.
+
+CRITICAL CONSTRAINTS:
+1. STRICTLY FORBIDDEN: Generic filler questions such as:
+   - "What features do you want to include?"
+   - "Can you tell me more about your idea?"
+   - "What is your target audience or budget?"
+   - "What technology stack do you prefer?"
+2. DOMAIN SPECIFICITY: Every question must focus on specific domain workflows, business rules, or decision points for this exact project type.
+   - Example (Loan app): "Should loan approval require a single loan officer or a multi-step approval workflow?"
+   - Example (Healthcare): "Do appointments require upfront deposits or insurance pre-verification during booking?"
+   - Example (Logistics): "Does package tracking rely on manual barcode scans at checkpoints or automated GPS telemetry?"
+3. AVOID REDUNDANCY WITH EXISTING SIGNALS:
+{covered_section}
+4. EXACT COUNT: Output between {target_count_str} questions.
+
+You MUST respond strictly with a valid JSON object matching this schema:
+{{
+  "questions": [
+    "Question 1 text",
+    "Question 2 text"
+  ]
+}}"""
+
+    user_prompt = f"Project Idea:\n{req.idea_text}"
+    repair_prompt = f"Your previous response was malformed. Generate strictly valid JSON with {target_count_str} domain-specific clarifying questions.\n\nProject Idea:\n{req.idea_text}"
+
+    try:
+        res = await call_groq_json(system_prompt, user_prompt, retry_user_prompt=repair_prompt)
+        questions_raw = res.get("questions", [])
+        if not isinstance(questions_raw, list) or len(questions_raw) == 0:
+            res = await call_groq_json(system_prompt, repair_prompt, retry=False)
+            questions_raw = res.get("questions", [])
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[Clarifying Questions Generation Error] {e}")
+        raise HTTPException(status_code=502, detail="Clarifying questions provider unavailable.") from e
+
+    questions = [str(q).strip() for q in questions_raw if str(q).strip()][:max_questions]
+    if not questions:
+        raise HTTPException(status_code=502, detail="Clarifying questions generation returned empty results.")
+
+    inserted_questions = []
+    if client and not project_id.startswith("local-draft-"):
+        for q_text in questions:
+            try:
+                insert_res = client.table("clarifying_questions").insert({
+                    "project_id": project_id,
+                    "question": q_text,
+                    "answer": None,
+                    "round": 1
+                }).execute()
+                if insert_res.data:
+                    inserted_questions.append({
+                        "id": insert_res.data[0]["id"],
+                        "question": q_text
+                    })
+                else:
+                    inserted_questions.append({
+                        "id": str(uuid.uuid4()),
+                        "question": q_text
+                    })
+            except Exception as e:
+                print(f"[Clarifying Questions DB Insert Warning] {e}")
+                inserted_questions.append({
+                    "id": str(uuid.uuid4()),
+                    "question": q_text
+                })
+    else:
+        for q_text in questions:
+            inserted_questions.append({
+                "id": str(uuid.uuid4()),
+                "question": q_text
+            })
+
+    return {
+        "status": "ok",
+        "density_flag": cq_flag,
+        "questions": inserted_questions
+    }
+
+
+@app.post("/projects/{project_id}/clarifying-questions/answer")
+@app.post("/api/projects/{project_id}/clarifying-questions/answer")
+async def submit_clarifying_answers(
+    project_id: str,
+    req: SubmitClarifyingAnswersRequest,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+
+    if not req.answers:
+        raise HTTPException(status_code=400, detail="Answers list cannot be empty.")
+
+    updated_count = 0
+    for item in req.answers:
+        q_id = item.question_id
+        ans = (item.answer or "").strip()
+        if not ans:
+            continue
+        if client and not project_id.startswith("local-draft-"):
+            try:
+                UUID(q_id)
+                client.table("clarifying_questions").update({"answer": ans}).eq("id", q_id).eq("project_id", project_id).execute()
+                updated_count += 1
+            except Exception as e:
+                print(f"[Clarifying Questions Answer Update Warning] {e}")
+
+    # Fold answers into project step0_state for downstream generation
+    if client and not project_id.startswith("local-draft-"):
+        try:
+            step0_state = project.get("step0_state") or {}
+            qa_list = []
+            try:
+                records = client.table("clarifying_questions").select("id, question, answer").eq("project_id", project_id).order("created_at", desc=False).execute()
+                if records and records.data:
+                    qa_list = records.data
+            except Exception as e:
+                print(f"[Fetch Clarifying QA Warning] {e}")
+
+            step0_state["clarifying_qa"] = qa_list
+            step0_state["clarifying_completed"] = True
+
+            client.table("projects").update({
+                "step0_state": step0_state
+            }).eq("id", project_id).execute()
+        except Exception as e:
+            print(f"[Project Step0 State Clarifying Update Warning] {e}")
+
+    return {
+        "status": "ok",
+        "message": "Clarifying answers saved successfully.",
+        "updated_count": updated_count
+    }
+
+
+@app.get("/projects/{project_id}/clarifying-questions")
+@app.get("/api/projects/{project_id}/clarifying-questions")
+async def get_clarifying_questions(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    get_owned_project(client, user_id, project_id)
+
+    if not client or project_id.startswith("local-draft-"):
+        return {"questions": []}
+
+    try:
+        res = client.table("clarifying_questions").select("*").eq("project_id", project_id).order("created_at", desc=False).execute()
+        return {"questions": res.data or []}
+    except Exception as e:
+        print(f"[Get Clarifying Questions Error] {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch clarifying questions.") from e
 
 
 def check_generation_rate_limit(client, user_id: str, limit_type: str):

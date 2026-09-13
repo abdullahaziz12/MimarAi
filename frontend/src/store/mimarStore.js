@@ -176,6 +176,12 @@ const initialMimarState = {
     unresolved: false,
   },
 
+  // V3.2 Density & V3.3 Clarifying Questions State
+  densityFlags: null,
+  clarifyingQuestions: [],
+  clarifyingAnswers: {},
+  clarifyingStatus: "idle", // 'idle' | 'generating' | 'ready' | 'skipped' | 'completed' | 'error'
+
   // Chat message history
   messages: [
     {
@@ -639,6 +645,188 @@ export const useMimarStore = create((set, get) => ({
       return {
         status: "error",
         detail: "Having trouble verifying requirement consistency — try again.",
+      };
+    } finally {
+      get().setOperationRunning(false);
+      set({ activeController: null });
+      get().saveProjectState();
+    }
+  },
+
+  // V3.3 Deepened Clarifying Questions
+  fetchClarifyingQuestions: async (
+    ideaText,
+    densityFlags = null,
+    sessionToken = null
+  ) => {
+    const s = get();
+    if (!sessionToken) {
+      return {
+        status: "error",
+        detail: "A valid session is required to generate clarifying questions.",
+      };
+    }
+    const currentProjectId = s.projectId;
+    if (!currentProjectId) {
+      return {
+        status: "error",
+        detail: "A persisted project is required before generating clarifying questions.",
+      };
+    }
+
+    // Check density flags skip
+    const currentDensityFlags = densityFlags || s.densityFlags;
+    if (currentDensityFlags?.clarifying_questions === "skip") {
+      set({ clarifyingStatus: "skipped", clarifyingQuestions: [] });
+      return {
+        status: "skipped",
+        questions: [],
+      };
+    }
+
+    s.setOperationRunning(true, "GENERATING CLARIFYING QUESTIONS");
+    const controller = new AbortController();
+    set({ activeController: controller, clarifyingStatus: "generating" });
+    const signal = controller.signal;
+
+    let backendUrl = "";
+    try {
+      backendUrl = getBackendApiUrl("").replace(/\/$/, "");
+    } catch (err) {
+      get().setOperationRunning(false);
+      set({ activeController: null, clarifyingStatus: "error" });
+      return {
+        status: "error",
+        detail: "Backend URL is not configured.",
+      };
+    }
+
+    try {
+      const authHeaders = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${sessionToken}`,
+      };
+
+      const res = await fetch(
+        `${backendUrl}/api/projects/${currentProjectId}/clarifying-questions`,
+        {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({
+            idea_text: ideaText,
+            density_flags: currentDensityFlags,
+          }),
+          signal,
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: Failed to generate clarifying questions`);
+      }
+
+      const result = await res.json();
+      if (result.status === "skipped" || (result.questions && result.questions.length === 0)) {
+        set({ clarifyingStatus: "skipped", clarifyingQuestions: [] });
+      } else {
+        set({
+          clarifyingStatus: "ready",
+          clarifyingQuestions: result.questions || [],
+        });
+      }
+      return result;
+    } catch (err) {
+      if (err.name === "AbortError") {
+        s.showToast("Clarifying questions generation stopped by user.");
+        return null;
+      }
+      console.warn("Clarifying questions error:", err);
+      set({ clarifyingStatus: "error" });
+      return {
+        status: "error",
+        detail: "Having trouble generating clarifying questions — try again.",
+      };
+    } finally {
+      get().setOperationRunning(false);
+      set({ activeController: null });
+      get().saveProjectState();
+    }
+  },
+
+  submitClarifyingAnswers: async (answersArray, sessionToken = null) => {
+    const s = get();
+    if (!sessionToken) {
+      return {
+        status: "error",
+        detail: "A valid session is required to submit answers.",
+      };
+    }
+    const currentProjectId = s.projectId;
+    if (!currentProjectId) {
+      return {
+        status: "error",
+        detail: "A persisted project is required before submitting answers.",
+      };
+    }
+
+    s.setOperationRunning(true, "SAVING CLARIFYING ANSWERS");
+    const controller = new AbortController();
+    set({ activeController: controller });
+    const signal = controller.signal;
+
+    let backendUrl = "";
+    try {
+      backendUrl = getBackendApiUrl("").replace(/\/$/, "");
+    } catch (err) {
+      get().setOperationRunning(false);
+      set({ activeController: null });
+      return {
+        status: "error",
+        detail: "Backend URL is not configured.",
+      };
+    }
+
+    try {
+      const authHeaders = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${sessionToken}`,
+      };
+
+      const res = await fetch(
+        `${backendUrl}/api/projects/${currentProjectId}/clarifying-questions/answer`,
+        {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({
+            answers: answersArray,
+          }),
+          signal,
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: Failed to submit clarifying answers`);
+      }
+
+      const result = await res.json();
+      const updatedAnswersMap = { ...s.clarifyingAnswers };
+      answersArray.forEach((a) => {
+        updatedAnswersMap[a.question_id] = a.answer;
+      });
+
+      set({
+        clarifyingStatus: "completed",
+        clarifyingAnswers: updatedAnswersMap,
+      });
+      return result;
+    } catch (err) {
+      if (err.name === "AbortError") {
+        s.showToast("Submitting answers stopped by user.");
+        return null;
+      }
+      console.warn("Submit clarifying answers error:", err);
+      return {
+        status: "error",
+        detail: "Having trouble saving your answers — try again.",
       };
     } finally {
       get().setOperationRunning(false);
