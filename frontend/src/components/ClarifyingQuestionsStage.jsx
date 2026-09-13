@@ -17,8 +17,14 @@ export default function ClarifyingQuestionsStage({
     }));
   };
 
+  // All questions must have a non-empty trimmed answer before Save is enabled
+  const allAnswered =
+    questions.length > 0 &&
+    questions.every((q) => (answers[q.id] || "").trim().length > 0);
+
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (!allAnswered) return; // Guard: do nothing if any answer is blank
     const formatted = questions.map((q) => ({
       question_id: q.id,
       answer: (answers[q.id] || "").trim(),
@@ -146,22 +152,32 @@ export default function ClarifyingQuestionsStage({
           >
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || !allAnswered}
+              title={!allAnswered ? "Please answer all questions before proceeding" : ""}
               style={{
-                background: "linear-gradient(135deg, #0284C7, #0369A1)",
-                color: "#FFFFFF",
-                border: "none",
+                background: allAnswered
+                  ? "linear-gradient(135deg, #0284C7, #0369A1)"
+                  : "rgba(71, 85, 105, 0.5)",
+                color: allAnswered ? "#FFFFFF" : "#64748B",
+                border: "1px solid",
+                borderColor: allAnswered
+                  ? "transparent"
+                  : "rgba(71, 85, 105, 0.4)",
                 borderRadius: "6px",
                 padding: "8px 16px",
                 fontSize: "13px",
                 fontWeight: 600,
-                cursor: isSubmitting ? "not-allowed" : "pointer",
-                boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
-                transition: "opacity 0.2s",
+                cursor: isSubmitting || !allAnswered ? "not-allowed" : "pointer",
+                boxShadow: allAnswered ? "0 2px 4px rgba(0,0,0,0.2)" : "none",
+                transition: "all 0.2s",
                 opacity: isSubmitting ? 0.6 : 1,
               }}
             >
-              {isSubmitting ? "Saving Answers…" : "Save Answers & Proceed"}
+              {isSubmitting
+                ? "Saving Answers…"
+                : !allAnswered
+                ? `Answer all ${questions.length} questions to proceed`
+                : "Save Answers & Proceed"}
             </button>
           </div>
         )}
