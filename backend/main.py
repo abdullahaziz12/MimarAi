@@ -6,6 +6,7 @@ import unicodedata
 import httpx
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
+import uuid
 from uuid import UUID
 from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.responses import JSONResponse
@@ -543,6 +544,32 @@ class CreateDraftRequest(BaseModel):
 class UpdateProjectStatusRequest(BaseModel):
     status: Optional[str] = None
     fixed_inputs: Optional[Dict[str, Any]] = None
+
+
+# --- V3.3 Clarifying Questions Schemas ---
+class GenerateClarifyingQuestionsRequest(BaseModel):
+    idea_text: str
+    density_flags: Optional[Dict[str, Any]] = None
+
+    @field_validator("idea_text")
+    @classmethod
+    def validate_idea(cls, v: str) -> str:
+        cleaned = (v or "").strip()
+        if not cleaned:
+            raise ValueError("idea_text cannot be empty.")
+        if len(cleaned) > 2500:
+            raise ValueError("idea_text exceeds 2500 characters limit.")
+        return cleaned
+
+
+class ClarifyingAnswerItem(BaseModel):
+    question_id: str
+    answer: str
+
+
+class SubmitClarifyingAnswersRequest(BaseModel):
+    answers: List[ClarifyingAnswerItem]
+
 
 GREETING_WHITELIST = {
     "hi", "hello", "hey", "test", "thanks", "thank you", "ok", "okay",
@@ -1216,6 +1243,209 @@ If a genuine contradiction is found:
         "contradiction_unresolved": unresolved,
         "density_flags": density_flags
     }
+
+
+# --- V3.3 Deepened Clarifying Questions Endpoints ---
+@app.post("/projects/{project_id}/clarifying-questions")
+@app.post("/api/projects/{project_id}/clarifying-questions")
+async def generate_clarifying_questions(
+    project_id: str,
+    req: GenerateClarifyingQuestionsRequest,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+
+    density_flags = req.density_flags
+    if not density_flags or not isinstance(density_flags, dict):
+        density_flags = project.get("density_flags") or DEFAULT_DENSITY_FLAGS
+
+    cq_flag = density_flags.get("clarifying_questions", "full")
+    if cq_flag == "skip":
+        return {
+            "status": "skipped",
+            "message": "Clarifying questions skipped due to high idea density.",
+            "density_flag": "skip",
+            "questions": []
+        }
+
+    target_count_str = "1 to 2" if cq_flag == "partial" else "2 to 4"
+    max_questions = 2 if cq_flag == "partial" else 4
+
+    personas_covered = (density_flags.get("personas") == "skip")
+    nfrs_covered = (density_flags.get("nfrs") == "skip")
+
+    covered_rules = []
+    if personas_covered:
+        covered_rules.append("- User roles and personas are already defined in the idea. DO NOT ask who the users/roles are or what user types exist.")
+    if nfrs_covered:
+        covered_rules.append("- Scale, traffic, and compliance/security constraints are already specified. DO NOT ask about scale or compliance.")
+
+    covered_section = "\n".join(covered_rules) if covered_rules else "- Focus directly on core business logic, user workflows, and key domain edge cases."
+
+    system_prompt = f"""You are a software architect conducting a requirements clarification interview for a project specification.
+Generate {target_count_str} targeted, highly domain-specific clarifying questions for the provided project idea.
+
+CRITICAL CONSTRAINTS:
+1. STRICTLY FORBIDDEN: Generic filler questions such as:
+   - "What features do you want to include?"
+   - "Can you tell me more about your idea?"
+   - "What is your target audience or budget?"
+   - "What technology stack do you prefer?"
+2. DOMAIN SPECIFICITY: Every question must focus on specific domain workflows, business rules, or decision points for this exact project type.
+   - Example (Loan app): "Should loan approval require a single loan officer or a multi-step approval workflow?"
+   - Example (Healthcare): "Do appointments require upfront deposits or insurance pre-verification during booking?"
+   - Example (Logistics): "Does package tracking rely on manual barcode scans at checkpoints or automated GPS telemetry?"
+3. AVOID REDUNDANCY WITH EXISTING SIGNALS:
+{covered_section}
+4. EXACT COUNT: Output between {target_count_str} questions.
+
+You MUST respond strictly with a valid JSON object matching this schema:
+{{
+  "questions": [
+    "Question 1 text",
+    "Question 2 text"
+  ]
+}}"""
+
+    user_prompt = f"Project Idea:\n{req.idea_text}"
+    repair_prompt = f"Your previous response was malformed. Generate strictly valid JSON with {target_count_str} domain-specific clarifying questions.\n\nProject Idea:\n{req.idea_text}"
+
+    try:
+        res = await call_groq_json(system_prompt, user_prompt, retry_user_prompt=repair_prompt)
+        questions_raw = res.get("questions", [])
+        if not isinstance(questions_raw, list) or len(questions_raw) == 0:
+            res = await call_groq_json(system_prompt, repair_prompt, retry=False)
+            questions_raw = res.get("questions", [])
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[Clarifying Questions Generation Error] {e}")
+        raise HTTPException(status_code=502, detail="Clarifying questions provider unavailable.") from e
+
+    questions = [str(q).strip() for q in questions_raw if str(q).strip()][:max_questions]
+    if not questions:
+        raise HTTPException(status_code=502, detail="Clarifying questions generation returned empty results.")
+
+    inserted_questions = []
+    if client and not project_id.startswith("local-draft-"):
+        for q_text in questions:
+            try:
+                insert_res = client.table("clarifying_questions").insert({
+                    "project_id": project_id,
+                    "question": q_text,
+                    "answer": None,
+                    "round": 1
+                }).execute()
+                if insert_res.data:
+                    inserted_questions.append({
+                        "id": insert_res.data[0]["id"],
+                        "question": q_text
+                    })
+                else:
+                    inserted_questions.append({
+                        "id": str(uuid.uuid4()),
+                        "question": q_text
+                    })
+            except Exception as e:
+                print(f"[Clarifying Questions DB Insert Warning] {e}")
+                inserted_questions.append({
+                    "id": str(uuid.uuid4()),
+                    "question": q_text
+                })
+    else:
+        for q_text in questions:
+            inserted_questions.append({
+                "id": str(uuid.uuid4()),
+                "question": q_text
+            })
+
+    return {
+        "status": "ok",
+        "density_flag": cq_flag,
+        "questions": inserted_questions
+    }
+
+
+@app.post("/projects/{project_id}/clarifying-questions/answer")
+@app.post("/api/projects/{project_id}/clarifying-questions/answer")
+async def submit_clarifying_answers(
+    project_id: str,
+    req: SubmitClarifyingAnswersRequest,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+
+    if not req.answers:
+        raise HTTPException(status_code=400, detail="Answers list cannot be empty.")
+
+    updated_count = 0
+    for item in req.answers:
+        q_id = item.question_id
+        ans = (item.answer or "").strip()
+        if not ans:
+            continue
+        if client and not project_id.startswith("local-draft-"):
+            try:
+                UUID(q_id)
+                client.table("clarifying_questions").update({"answer": ans}).eq("id", q_id).eq("project_id", project_id).execute()
+                updated_count += 1
+            except Exception as e:
+                print(f"[Clarifying Questions Answer Update Warning] {e}")
+
+    # Fold answers into project step0_state for downstream generation
+    if client and not project_id.startswith("local-draft-"):
+        try:
+            step0_state = project.get("step0_state") or {}
+            qa_list = []
+            try:
+                records = client.table("clarifying_questions").select("id, question, answer").eq("project_id", project_id).order("created_at", desc=False).execute()
+                if records and records.data:
+                    qa_list = records.data
+            except Exception as e:
+                print(f"[Fetch Clarifying QA Warning] {e}")
+
+            step0_state["clarifying_qa"] = qa_list
+            step0_state["clarifying_completed"] = True
+
+            client.table("projects").update({
+                "step0_state": step0_state
+            }).eq("id", project_id).execute()
+        except Exception as e:
+            print(f"[Project Step0 State Clarifying Update Warning] {e}")
+
+    return {
+        "status": "ok",
+        "message": "Clarifying answers saved successfully.",
+        "updated_count": updated_count
+    }
+
+
+@app.get("/projects/{project_id}/clarifying-questions")
+@app.get("/api/projects/{project_id}/clarifying-questions")
+async def get_clarifying_questions(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    get_owned_project(client, user_id, project_id)
+
+    if not client or project_id.startswith("local-draft-"):
+        return {"questions": []}
+
+    try:
+        res = client.table("clarifying_questions").select("*").eq("project_id", project_id).order("created_at", desc=False).execute()
+        return {"questions": res.data or []}
+    except Exception as e:
+        print(f"[Get Clarifying Questions Error] {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch clarifying questions.") from e
 
 
 def check_generation_rate_limit(client, user_id: str, limit_type: str):

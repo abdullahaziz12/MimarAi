@@ -7,6 +7,7 @@ import { getBackendApiUrl, getBackendUrlStatus } from "../../lib/backendConfig";
 import ExamplePromptFallback from "../ExamplePromptFallback";
 import FixedInputsCollection from "../FixedInputsCollection";
 import StartTriggerGate from "../StartTriggerGate";
+import ClarifyingQuestionsStage from "../ClarifyingQuestionsStage";
 
 export default function InterviewScreen() {
   const { session } = useAuth();
@@ -23,6 +24,11 @@ export default function InterviewScreen() {
     step0Status,
     contradictionState,
     fixedInputs,
+    densityFlags,
+    clarifyingQuestions,
+    clarifyingStatus,
+    fetchClarifyingQuestions,
+    submitClarifyingAnswers,
     runIdeaPipeline,
     runRevisionPipeline,
     classifyIdeaStep0,
@@ -38,6 +44,7 @@ export default function InterviewScreen() {
   const [inputVal, setInputVal] = useState("");
   const [retryPrompt, setRetryPrompt] = useState(null);
   const [retryContradiction, setRetryContradiction] = useState(null);
+  const [isSubmittingClarifications, setIsSubmittingClarifications] = useState(false);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
 
@@ -129,32 +136,80 @@ export default function InterviewScreen() {
           ],
         }));
       } else {
-        // Round 2 cap reached -> proceed anyway, flag noted
+        // Round 2 cap reached -> proceed with density check outcome
+        await proceedAfterContradiction(baseIdea, scanResult.density_flags);
+      }
+    } else {
+      // Clean
+      await proceedAfterContradiction(baseIdea, scanResult.density_flags);
+    }
+  };
+
+  const proceedAfterContradiction = async (baseIdea, densityFlagsData) => {
+    const density = densityFlagsData || {};
+    const cqFlag = density.clarifying_questions || "full";
+
+    if (cqFlag !== "skip") {
+      setStep0Status("clarifying");
+      const cqRes = await fetchClarifyingQuestions(
+        baseIdea,
+        density,
+        session?.access_token || null
+      );
+      if (cqRes?.status === "ok" && cqRes.questions && cqRes.questions.length > 0) {
+        useMimarStore.setState((state) => ({
+          messages: [
+            ...state.messages,
+            {
+              id: "ai-cq-intro-" + Date.now(),
+              role: "ai",
+              text: `To fine-tune your architecture plan, please clarify the ${cqRes.questions.length} ${cqRes.questions.length === 1 ? "question" : "questions"} below:`,
+            },
+          ],
+        }));
+        return;
+      }
+    }
+
+    // Skipped or completed without questions
+    setStep0Status("ready");
+    useMimarStore.setState((state) => ({
+      messages: [
+        ...state.messages,
+        {
+          id: "ai-ready-" + Date.now(),
+          role: "ai",
+          text: "Great! Your project idea looks clear and ready for architecture planning. Please configure your target fixed inputs below to proceed.",
+        },
+      ],
+    }));
+  };
+
+  const handleClarifyingSubmit = async (answersArray) => {
+    setIsSubmittingClarifications(true);
+    try {
+      const res = await submitClarifyingAnswers(
+        answersArray,
+        session?.access_token || null
+      );
+      if (res?.status === "ok") {
+        showToast("Clarifying details saved!");
         setStep0Status("ready");
         useMimarStore.setState((state) => ({
           messages: [
             ...state.messages,
             {
-              id: "ai-contra-unresolved-" + Date.now(),
+              id: "ai-ready-" + Date.now(),
               role: "ai",
-              text: "Requirement conflict noted. We'll proceed with architecture planning and flag this for your review during the Implementation Plan step. Please configure your fixed inputs below to continue.",
+              text: "Clarifying details saved. Please configure your target fixed inputs below to proceed.",
             },
           ],
         }));
+      } else {
+        showToast(res?.detail || "Failed to save answers — please retry.");
       }
-    } else {
-      // Clean
-      setStep0Status("ready");
-      useMimarStore.setState((state) => ({
-        messages: [
-          ...state.messages,
-          {
-            id: "ai-ready-" + Date.now(),
-            role: "ai",
-            text: "Great! Your project idea looks clear and ready for architecture planning. Please configure your target fixed inputs below to proceed.",
-          },
-        ],
-      }));
+    } finally {
+      setIsSubmittingClarifications(false);
     }
   };
 
@@ -563,6 +618,19 @@ export default function InterviewScreen() {
                     step0Status === "off_topic_fallback" ? "off_topic" : "vague"
                   }
                   onSelectPrompt={handleSelectExamplePrompt}
+                />
+              )}
+
+              {/* V3.3: Clarifying Questions Stage */}
+              {(step0Status === "clarifying" ||
+                (clarifyingQuestions &&
+                  clarifyingQuestions.length > 0 &&
+                  step0Status !== "ready")) && (
+                <ClarifyingQuestionsStage
+                  questions={clarifyingQuestions}
+                  onSubmit={handleClarifyingSubmit}
+                  isSubmitting={isSubmittingClarifications || operationRunning}
+                  isCompleted={step0Status === "ready"}
                 />
               )}
 
