@@ -1219,6 +1219,7 @@ If a genuine contradiction is found:
                 "explanation": explanation,
                 "conflicting_parts": conflicting_parts,
                 "round": round_num,
+                "resolved_answer": resolved_answer,
                 "checked_at": datetime.now(timezone.utc).isoformat()
             }
             if round_num >= 2 and found:
@@ -1493,6 +1494,53 @@ def check_generation_rate_limit(client, user_id: str, limit_type: str):
         print(f"[Generation Rate Limit Warning] {e}")
 
 
+def assemble_effective_idea_context(
+    base_idea_text: str,
+    contradiction_data: Optional[Dict[str, Any]] = None,
+    clarifying_qa: Optional[List[Dict[str, Any]]] = None,
+    contradiction_unresolved: bool = False
+) -> str:
+    """
+    Folds base project idea with persisted contradiction resolution details
+    and answered clarifying questions into a single coherent context string for generation.
+    """
+    sections = [base_idea_text.strip()]
+
+    # 1. Fold in Contradiction Resolution / Ambiguity context
+    if contradiction_data and isinstance(contradiction_data, dict):
+        resolved_ans = (contradiction_data.get("resolved_answer") or "").strip()
+        explanation = (contradiction_data.get("explanation") or "").strip()
+        if resolved_ans:
+            if explanation:
+                sections.append(
+                    f"Regarding an earlier ambiguity ({explanation}): the user clarified that {resolved_ans}."
+                )
+            else:
+                sections.append(
+                    f"Regarding an earlier ambiguity: the user clarified that {resolved_ans}."
+                )
+        elif contradiction_unresolved and explanation:
+            sections.append(
+                f"Note on unresolved ambiguity: A conflict was identified during analysis: {explanation}."
+            )
+
+    # 2. Fold in Clarifying Questions & Answers
+    if clarifying_qa and isinstance(clarifying_qa, list):
+        valid_qa = [
+            qa for qa in clarifying_qa
+            if isinstance(qa, dict) and qa.get("question") and qa.get("answer") and str(qa.get("answer")).strip()
+        ]
+        if valid_qa:
+            qa_lines = []
+            for qa in valid_qa:
+                q = str(qa["question"]).strip()
+                a = str(qa["answer"]).strip()
+                qa_lines.append(f"Additional detail provided: Q: '{q}' A: '{a}'")
+            sections.append("\n".join(qa_lines))
+
+    return "\n\n".join(sections)
+
+
 @app.post("/projects/{project_id}/generate")
 @app.post("/api/projects/{project_id}/generate")
 async def generate_feature_pipeline(
@@ -1505,15 +1553,11 @@ async def generate_feature_pipeline(
     client = get_supabase(token)
     project = get_owned_project(client, user_id, project_id)
     
-    idea_text = (req and req.idea_text) or "Software application"
-    fixed_inputs = (req and req.fixed_inputs) or {}
+    idea_text = project.get("idea_text") or (req and req.idea_text) or "Software application"
+    fixed_inputs = (req and req.fixed_inputs) or project.get("fixed_inputs") or {}
     
     if project.get("status") == "locked_generating":
         raise HTTPException(status_code=429, detail="A generation run is already in progress for this project.")
-    if not req or not req.idea_text:
-        idea_text = project.get("idea_text") or idea_text
-    if not req or not req.fixed_inputs:
-        fixed_inputs = project.get("fixed_inputs") or fixed_inputs
 
     if not idea_text.strip() or idea_text == "Software application":
         raise HTTPException(status_code=400, detail="A classified project idea is required before generation.")
@@ -1526,7 +1570,68 @@ async def generate_feature_pipeline(
 
     generation_succeeded = False
     try:
-        context_str = f"Project Idea: {idea_text}\nFixed Inputs: {json.dumps(fixed_inputs)}"
+        # Retrieve persisted Step 0 context (Contradiction resolution & Clarifying QA)
+        step0_state = project.get("step0_state") or {}
+        contradiction_unresolved = bool(step0_state.get("contradiction_unresolved", False))
+        contradiction_data = step0_state.get("last_contradiction_result") or {}
+        clarifying_qa = step0_state.get("clarifying_qa") or []
+
+        # If client is connected and real project, query authoritative tables with 1 retry on failure
+        if client and not project_id.startswith("local-draft-"):
+            # Authoritative fetch from clarifying_questions table
+            try:
+                cq_res = client.table("clarifying_questions").select("id, question, answer").eq("project_id", project_id).order("created_at", desc=False).execute()
+                if cq_res and isinstance(cq_res.data, list) and cq_res.data:
+                    clarifying_qa = cq_res.data
+            except Exception as e1:
+                print(f"[Fetch Clarifying Questions Retry 1] {e1}")
+                try:
+                    cq_res = client.table("clarifying_questions").select("id, question, answer").eq("project_id", project_id).order("created_at", desc=False).execute()
+                    if cq_res and isinstance(cq_res.data, list) and cq_res.data:
+                        clarifying_qa = cq_res.data
+                except Exception as e2:
+                    print(f"[Fetch Clarifying Questions Failed] {e2}")
+                    raise HTTPException(
+                        status_code=502,
+                        detail="Failed to retrieve clarifying questions context from database."
+                    ) from e2
+
+            # Check contradiction_checks table for resolved_answer if not in step0_state
+            if not contradiction_data.get("resolved_answer"):
+                try:
+                    cc_res = client.table("contradiction_checks").select("round, found, explanation, conflicting_parts, resolved_answer").eq("project_id", project_id).order("created_at", desc=True).limit(5).execute()
+                    if cc_res and isinstance(cc_res.data, list) and cc_res.data:
+                        for row in cc_res.data:
+                            if row.get("resolved_answer"):
+                                contradiction_data = row
+                                break
+                        if not contradiction_data and cc_res.data:
+                            contradiction_data = cc_res.data[0]
+                except Exception as e1:
+                    print(f"[Fetch Contradiction Checks Retry 1] {e1}")
+                    try:
+                        cc_res = client.table("contradiction_checks").select("round, found, explanation, conflicting_parts, resolved_answer").eq("project_id", project_id).order("created_at", desc=True).limit(5).execute()
+                        if cc_res and isinstance(cc_res.data, list) and cc_res.data:
+                            for row in cc_res.data:
+                                if row.get("resolved_answer"):
+                                    contradiction_data = row
+                                    break
+                            if not contradiction_data and cc_res.data:
+                                contradiction_data = cc_res.data[0]
+                    except Exception as e2:
+                        print(f"[Fetch Contradiction Checks Failed] {e2}")
+                        raise HTTPException(
+                            status_code=502,
+                            detail="Failed to retrieve contradiction scan context from database."
+                        ) from e2
+
+        effective_idea_text = assemble_effective_idea_context(
+            base_idea_text=idea_text,
+            contradiction_data=contradiction_data,
+            clarifying_qa=clarifying_qa,
+            contradiction_unresolved=contradiction_unresolved
+        )
+        context_str = f"Project Idea: {effective_idea_text}\nFixed Inputs: {json.dumps(fixed_inputs)}"
 
         # Step 1: Parallel Independent Drafting (Gemini + Groq)
         system_prompt_draft = """You are an expert AI software architect.
@@ -1617,12 +1722,11 @@ Output strictly valid JSON with no markdown formatting:
             adjusted_flag = True
 
         # Ensure contradiction_unresolved flags adjusted_flag
-        step0_state = project.get("step0_state") or {}
-        if step0_state.get("contradiction_unresolved"):
+        if contradiction_unresolved:
             adjusted_flag = True
 
         generation_payload = {
-            "idea_objective": gemini_draft.get("idea_objective") or idea_text,
+            "idea_objective": gemini_draft.get("idea_objective") or effective_idea_text,
             "fixed_inputs": fixed_inputs,
             "features": final_features,
             "rejected_feature_ids": [],
