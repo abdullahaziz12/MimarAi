@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS projects (
     step0_state JSONB DEFAULT '{}'::jsonb,
     fixed_inputs JSONB DEFAULT '{}'::jsonb,
     generation_state JSONB DEFAULT '{}'::jsonb,
+    density_flags JSONB DEFAULT '{"clarifying_questions": "full", "personas": "ask", "nfrs": "ask"}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
