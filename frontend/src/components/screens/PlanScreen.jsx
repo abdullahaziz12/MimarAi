@@ -118,6 +118,27 @@ export default function PlanScreen() {
             <h2>Implementation Plan</h2>
             <div className="sub">
               <span>GENERATED VIA DUAL-MODEL PIPELINE</span>
+              {currentGenState.adjusted_flag && (
+                <span
+                  className="adjusted-badge"
+                  id="planAdjustedBadge"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    color: "#F59E0B",
+                    background: "rgba(245, 158, 11, 0.15)",
+                    border: "1px solid #F59E0B",
+                    padding: "2px 8px",
+                    borderRadius: "12px",
+                    fontSize: "11px",
+                    fontWeight: "600",
+                    marginLeft: "8px",
+                  }}
+                >
+                  ⚠ Adjusted — Please Review
+                </span>
+              )}
               {planAccepted && (
                 <span
                   className="accepted-badge"
@@ -175,6 +196,44 @@ export default function PlanScreen() {
               Dual-model cross-checked feature plan. Click any section to
               comment, or click Accept Plan to lock and progress.
             </div>
+
+            {currentGenState.fix_pass_failed && (
+              <div
+                className="fix-pass-failed-notice"
+                id="fixPassFailedNotice"
+                style={{
+                  padding: "12px 16px",
+                  borderRadius: "6px",
+                  background: "rgba(245, 158, 11, 0.12)",
+                  border: "1px solid #F59E0B",
+                  color: "#FBBF24",
+                  fontSize: "13px",
+                  marginBottom: "16px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                }}
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="#F59E0B"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ flexShrink: 0 }}
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                <span>
+                  We couldn&apos;t apply an automatic adjustment to this plan — please review the features closely.
+                </span>
+              </div>
+            )}
 
             {/* 1. IDEA & OBJECTIVE */}
             <div className="section-label">Idea &amp; Objective</div>
