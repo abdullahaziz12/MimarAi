@@ -6,6 +6,7 @@ import unicodedata
 import httpx
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
+import uuid
 from uuid import UUID
 from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.responses import JSONResponse
