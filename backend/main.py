@@ -1125,11 +1125,19 @@ Output strictly valid JSON with no markdown formatting:
         repair_prompt = f"Your previous validation response was malformed or unparseable. Re-check this plan and return only the required JSON object with is_valid and a flags array.\n\n{validation_prompt}"
         try:
             val1 = await call_groq_json(system_prompt_val, validation_prompt, retry_user_prompt=repair_prompt)
+            if "is_valid" not in val1:
+                # Bug A1 Fix: missing is_valid is a validation failure, retry with repair prompt
+                val1 = await call_groq_json(system_prompt_val, repair_prompt, retry=False)
+                if "is_valid" not in val1:
+                    raise HTTPException(status_code=502, detail="Generation failed: validation response could not be confirmed.")
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=502, detail="Generation failed, please try again.") from e
 
-        adjusted_flag = bool(not val1.get("is_valid", True) and val1.get("flags"))
+        adjusted_flag = bool(not val1["is_valid"] and val1.get("flags"))
         final_features = merged_features
+        fix_pass_failed = False
         if adjusted_flag:
             fix_prompt = f"Context:\n{context_str}\n\nCurrent Features:\n{json.dumps(merged_features)}\n\nGroq validation flags:\n{json.dumps(val1.get('flags'))}\n\nFix only the issues identified by those flags and return the complete corrected feature list in the required JSON shape."
             try:
@@ -1137,15 +1145,29 @@ Output strictly valid JSON with no markdown formatting:
                 final_features = fix_res["features"]
             except Exception as e:
                 print(f"[Step 4 Gemini Fix Error] {e}")
+                # Bug A2 Fix: keep merged_features fallback but record fix_pass_failed = True
+                fix_pass_failed = True
                 final_features = merged_features
 
         final_validation_prompt = f"Context:\n{context_str}\n\nFeatures after the single fix pass:\n{json.dumps(final_features)}"
         final_repair_prompt = f"Your previous final validation response was malformed or unparseable. Return only valid JSON with is_valid and flags.\n\n{final_validation_prompt}"
         try:
             val2 = await call_groq_json(system_prompt_val, final_validation_prompt, retry_user_prompt=final_repair_prompt)
+            if "is_valid" not in val2:
+                # Fail-closed retry for final validation pass as well
+                val2 = await call_groq_json(system_prompt_val, final_repair_prompt, retry=False)
+                if "is_valid" not in val2:
+                    raise HTTPException(status_code=502, detail="Generation failed: final validation response could not be confirmed.")
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=502, detail="Generation failed, please try again.") from e
-        if not val2.get("is_valid", True) and val2.get("flags"):
+        if not val2["is_valid"] and val2.get("flags"):
+            adjusted_flag = True
+
+        # Ensure contradiction_unresolved flags adjusted_flag
+        step0_state = project.get("step0_state") or {}
+        if step0_state.get("contradiction_unresolved"):
             adjusted_flag = True
 
         generation_payload = {
@@ -1155,6 +1177,7 @@ Output strictly valid JSON with no markdown formatting:
             "rejected_feature_ids": [],
             "dependency_order": [f.get("id") for f in final_features if f.get("id")],
             "adjusted_flag": adjusted_flag,
+            "fix_pass_failed": fix_pass_failed,
             "generated_at": datetime.now(timezone.utc).isoformat()
         }
 
