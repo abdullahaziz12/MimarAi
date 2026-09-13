@@ -161,12 +161,19 @@ const initialMimarState = {
     last_sub_case: null,
     extracted_name: null,
   },
-  step0Status: "idle", // 'idle' | 'classifying' | 'ready' | 'vague_fallback' | 'off_topic_fallback' | 'error'
+  step0Status: "idle", // 'idle' | 'classifying' | 'ready' | 'contradiction_resolving' | 'vague_fallback' | 'off_topic_fallback' | 'error'
   fixedInputs: {
     stack: null,
     database: null,
     deployment: null,
     apis: null,
+  },
+  contradictionState: {
+    round: 0,
+    found: false,
+    explanation: null,
+    conflicting_parts: [],
+    unresolved: false,
   },
 
   // Chat message history
@@ -542,6 +549,96 @@ export const useMimarStore = create((set, get) => ({
             ? "CLASSIFICATION_TIMEOUT"
             : "CLASSIFICATION_ERROR",
         detail: "Having trouble understanding that — try again.",
+      };
+    } finally {
+      get().setOperationRunning(false);
+      set({ activeController: null });
+      get().saveProjectState();
+    }
+  },
+
+  scanIdeaContradictions: async (
+    userText,
+    round = 1,
+    resolvedAnswer = null,
+    sessionToken = null
+  ) => {
+    const s = get();
+    if (!sessionToken) {
+      return {
+        status: "error",
+        detail: "A valid session is required to scan for contradictions.",
+      };
+    }
+    const currentProjectId = s.projectId;
+    if (!currentProjectId) {
+      return {
+        status: "error",
+        detail: "A persisted project is required before contradiction scanning.",
+      };
+    }
+
+    s.setOperationRunning(true, "SCANNING FOR CONTRADICTIONS");
+    const controller = new AbortController();
+    set({ activeController: controller });
+    const signal = controller.signal;
+
+    let backendUrl = "";
+    try {
+      backendUrl = getBackendApiUrl("").replace(/\/$/, "");
+    } catch (err) {
+      get().setOperationRunning(false);
+      set({ activeController: null });
+      return {
+        status: "error",
+        detail: "Backend URL is not configured.",
+      };
+    }
+
+    try {
+      const authHeaders = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${sessionToken}`,
+      };
+
+      const res = await fetch(
+        `${backendUrl}/api/projects/${currentProjectId}/contradiction-scan`,
+        {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({
+            idea_text: userText,
+            round: round,
+            resolved_answer: resolvedAnswer,
+          }),
+          signal,
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: Contradiction scan request failed`);
+      }
+
+      const result = await res.json();
+      set({
+        contradictionState: {
+          round: result.round,
+          found: result.contradiction,
+          explanation: result.explanation,
+          conflicting_parts: result.conflicting_parts || [],
+          unresolved: result.contradiction_unresolved || false,
+        },
+      });
+      return result;
+    } catch (err) {
+      if (err.name === "AbortError") {
+        s.showToast("Contradiction scan stopped by user.");
+        return null;
+      }
+      console.warn("Contradiction scan error:", err);
+      return {
+        status: "error",
+        detail: "Having trouble verifying requirement consistency — try again.",
       };
     } finally {
       get().setOperationRunning(false);

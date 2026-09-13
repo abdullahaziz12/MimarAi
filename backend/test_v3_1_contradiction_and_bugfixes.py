@@ -170,3 +170,155 @@ class TestBugFixesAndContradictionScan(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(gen_state["adjusted_flag"])
         # Features fell back to merged_features
         self.assertEqual(len(gen_state["features"]), 1)
+
+    # --- V3.1 CONTRADICTION SCAN TESTS ---
+    @patch.object(main, "get_supabase")
+    @patch.object(main, "get_owned_project")
+    @patch.object(main, "call_groq_json")
+    async def test_contradiction_scan_clean_idea_returns_false(
+        self, mock_groq, mock_get_project, mock_supabase
+    ):
+        mock_get_project.return_value = dict(self.mock_project)
+        mock_supabase_client = MagicMock()
+        mock_supabase.return_value = mock_supabase_client
+
+        mock_groq.return_value = {"contradiction": False}
+
+        resp = self.client.post(
+            f"/api/projects/{self.mock_project['id']}/contradiction-scan",
+            headers=self.auth_headers,
+            json={
+                "idea_text": "A personal expense tracker with receipt scanning and monthly summary charts",
+                "round": 1
+            }
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["status"], "ok")
+        self.assertFalse(data["contradiction"])
+        self.assertIsNone(data["explanation"])
+        self.assertEqual(data["round"], 1)
+        self.assertFalse(data["contradiction_unresolved"])
+
+        # Check DB insert was called on contradiction_checks
+        mock_supabase_client.table.assert_any_call("contradiction_checks")
+
+    @patch.object(main, "get_supabase")
+    @patch.object(main, "get_owned_project")
+    @patch.object(main, "call_groq_json")
+    async def test_contradiction_scan_conflict_detected_round_1(
+        self, mock_groq, mock_get_project, mock_supabase
+    ):
+        mock_get_project.return_value = dict(self.mock_project)
+        mock_supabase_client = MagicMock()
+        mock_supabase.return_value = mock_supabase_client
+
+        mock_groq.return_value = {
+            "contradiction": True,
+            "explanation": "Requirement conflict between offline-only local storage and real-time live cloud collaboration.",
+            "conflicting_parts": ["offline-only with no servers", "real-time multi-user live cloud collaboration"]
+        }
+
+        resp = self.client.post(
+            f"/api/projects/{self.mock_project['id']}/contradiction-scan",
+            headers=self.auth_headers,
+            json={
+                "idea_text": "An offline-only notes app with no servers, but with real-time multi-user live cloud collaboration across web clients",
+                "round": 1
+            }
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["status"], "ok")
+        self.assertTrue(data["contradiction"])
+        self.assertIn("Requirement conflict", data["explanation"])
+        self.assertEqual(len(data["conflicting_parts"]), 2)
+        self.assertEqual(data["round"], 1)
+        self.assertFalse(data["contradiction_unresolved"])
+
+    @patch.object(main, "get_supabase")
+    @patch.object(main, "get_owned_project")
+    @patch.object(main, "call_groq_json")
+    async def test_contradiction_scan_round_2_cap_sets_unresolved(
+        self, mock_groq, mock_get_project, mock_supabase
+    ):
+        mock_get_project.return_value = dict(self.mock_project)
+        mock_supabase_client = MagicMock()
+        mock_supabase.return_value = mock_supabase_client
+
+        mock_groq.return_value = {
+            "contradiction": True,
+            "explanation": "Unresolved conflict remaining after clarification.",
+            "conflicting_parts": ["no accounts", "personalized cloud preferences"]
+        }
+
+        resp = self.client.post(
+            f"/api/projects/{self.mock_project['id']}/contradiction-scan",
+            headers=self.auth_headers,
+            json={
+                "idea_text": "An app with no user accounts, but personalized cloud sync preferences saved across all devices",
+                "round": 2,
+                "resolved_answer": "I still want zero login and zero accounts, but preferences must sync across everyone's devices."
+            }
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["status"], "ok")
+        self.assertTrue(data["contradiction"])
+        self.assertEqual(data["round"], 2)
+        self.assertTrue(data["contradiction_unresolved"])
+
+    @patch.object(main, "get_supabase")
+    async def test_contradiction_scan_ownership_check(self, mock_supabase):
+        mock_query = MagicMock()
+        mock_result = MagicMock()
+        mock_result.data = [] # Project not owned by user
+        mock_query.select.return_value = mock_query
+        mock_query.eq.return_value = mock_query
+        mock_query.execute.return_value = mock_result
+        mock_supabase_client = MagicMock()
+        mock_supabase_client.table.return_value = mock_query
+        mock_supabase.return_value = mock_supabase_client
+
+        resp = self.client.post(
+            "/api/projects/99999999-9999-4999-8999-999999999999/contradiction-scan",
+            headers=self.auth_headers,
+            json={"idea_text": "Valid idea description", "round": 1}
+        )
+
+        self.assertEqual(resp.status_code, 404)
+        data = resp.json()
+        self.assertEqual(data["status"], "error")
+        self.assertEqual(data["error_type"], "not_found")
+
+    @patch.object(main, "get_supabase")
+    @patch.object(main, "get_owned_project")
+    @patch.object(main, "call_groq_json")
+    async def test_contradiction_scan_fail_closed_on_persistent_error(
+        self, mock_groq, mock_get_project, mock_supabase
+    ):
+        mock_get_project.return_value = dict(self.mock_project)
+        mock_supabase_client = MagicMock()
+        mock_supabase.return_value = mock_supabase_client
+
+        # Return invalid shape twice (missing contradiction boolean)
+        mock_groq.side_effect = [
+            {"unexpected_key": 123},
+            {"still_broken": True}
+        ]
+
+        resp = self.client.post(
+            f"/api/projects/{self.mock_project['id']}/contradiction-scan",
+            headers=self.auth_headers,
+            json={"idea_text": "Valid idea description", "round": 1}
+        )
+
+        # Fails closed with 502, never defaults to contradiction: false
+        self.assertEqual(resp.status_code, 502)
+        data = resp.json()
+        self.assertEqual(data["status"], "error")
+        self.assertEqual(data["error_type"], "provider_error")
+

@@ -21,10 +21,12 @@ export default function InterviewScreen() {
     ideaText,
     step0State,
     step0Status,
+    contradictionState,
     fixedInputs,
     runIdeaPipeline,
     runRevisionPipeline,
     classifyIdeaStep0,
+    scanIdeaContradictions,
     setStep0Status,
     setStep0State,
     setFixedInputs,
@@ -35,6 +37,7 @@ export default function InterviewScreen() {
 
   const [inputVal, setInputVal] = useState("");
   const [retryPrompt, setRetryPrompt] = useState(null);
+  const [retryContradiction, setRetryContradiction] = useState(null);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
 
@@ -83,8 +86,81 @@ export default function InterviewScreen() {
     }
   };
 
+  const runContradictionScan = async (baseIdea, round = 1, resolvedAnswer = null) => {
+    setRetryPrompt(null);
+    setRetryContradiction(null);
+    const scanResult = await scanIdeaContradictions(
+      baseIdea,
+      round,
+      resolvedAnswer,
+      session?.access_token || null
+    );
+
+    if (!scanResult) return;
+
+    if (scanResult.status === "error") {
+      const errText =
+        scanResult.detail ||
+        "Having trouble verifying requirement consistency — try again.";
+      useMimarStore.setState((state) => ({
+        messages: [
+          ...state.messages,
+          { id: "ai-contra-err-" + Date.now(), role: "ai", text: errText },
+        ],
+      }));
+      setRetryContradiction({ baseIdea, round, resolvedAnswer });
+      return;
+    }
+
+    if (scanResult.contradiction) {
+      if (round < 2) {
+        setStep0Status("contradiction_resolving");
+        const promptMsg =
+          scanResult.explanation ||
+          "We noticed potential conflicting requirements in your description.";
+        useMimarStore.setState((state) => ({
+          messages: [
+            ...state.messages,
+            {
+              id: "ai-contra-" + Date.now(),
+              role: "ai",
+              text: `⚠️ Requirement Conflict Detected:\n${promptMsg}\n\nPlease clarify how you would like these requirements to work together.`,
+            },
+          ],
+        }));
+      } else {
+        // Round 2 cap reached -> proceed anyway, flag noted
+        setStep0Status("ready");
+        useMimarStore.setState((state) => ({
+          messages: [
+            ...state.messages,
+            {
+              id: "ai-contra-unresolved-" + Date.now(),
+              role: "ai",
+              text: "Requirement conflict noted. We'll proceed with architecture planning and flag this for your review during the Implementation Plan step. Please configure your fixed inputs below to continue.",
+            },
+          ],
+        }));
+      }
+    } else {
+      // Clean
+      setStep0Status("ready");
+      useMimarStore.setState((state) => ({
+        messages: [
+          ...state.messages,
+          {
+            id: "ai-ready-" + Date.now(),
+            role: "ai",
+            text: "Great! Your project idea looks clear and ready for architecture planning. Please configure your target fixed inputs below to proceed.",
+          },
+        ],
+      }));
+    }
+  };
+
   const executeClassification = async (text) => {
     setRetryPrompt(null);
+    setRetryContradiction(null);
     const result = await classifyIdeaStep0(text, session?.access_token || null);
 
     if (!result) return;
@@ -187,17 +263,8 @@ export default function InterviewScreen() {
         last_sub_case: null,
         extracted_name: null,
       });
-      setStep0Status("ready");
-      useMimarStore.setState((state) => ({
-        messages: [
-          ...state.messages,
-          {
-            id: "ai-ready-" + Date.now(),
-            role: "ai",
-            text: "Great! Your project idea looks clear and ready for architecture planning. Please configure your target fixed inputs below to proceed.",
-          },
-        ],
-      }));
+      // V3.1 Contradiction Scan Stage (Round 1)
+      await runContradictionScan(text, 1, null);
     }
   };
 
@@ -229,7 +296,9 @@ export default function InterviewScreen() {
       ],
     }));
 
-    setIdeaText(text);
+    if (step0Status !== "contradiction_resolving") {
+      setIdeaText(text);
+    }
     setInputVal("");
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -240,6 +309,9 @@ export default function InterviewScreen() {
         revisionContext.targetStage,
         session?.access_token || null,
       );
+    } else if (step0Status === "contradiction_resolving") {
+      // User is submitting resolution for round 2 scan
+      await runContradictionScan(ideaText || text, 2, text);
     } else {
       await executeClassification(text);
     }
@@ -426,6 +498,33 @@ export default function InterviewScreen() {
                     }}
                   >
                     🔄 Retry Classification
+                  </button>
+                </div>
+              )}
+
+              {/* Retry button for V3.1 Contradiction Scan failure handling */}
+              {retryContradiction && !operationRunning && (
+                <div className="row ai" style={{ marginTop: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      runContradictionScan(
+                        retryContradiction.baseIdea,
+                        retryContradiction.round,
+                        retryContradiction.resolvedAnswer,
+                      )
+                    }
+                    style={{
+                      background: "#1E293B",
+                      border: "1px solid #F59E0B",
+                      color: "#F59E0B",
+                      padding: "6px 12px",
+                      borderRadius: "4px",
+                      fontSize: "12px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    🔄 Retry Contradiction Scan
                   </button>
                 </div>
               )}

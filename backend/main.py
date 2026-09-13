@@ -907,6 +907,11 @@ class CommentCreateRequest(BaseModel):
 class CommentUpdateRequest(BaseModel):
     text: str
 
+class ContradictionScanRequest(BaseModel):
+    idea_text: str
+    round: int = 1
+    resolved_answer: Optional[str] = None
+
 async def call_gemini_api(
     system_prompt: str,
     user_prompt: str,
@@ -995,6 +1000,112 @@ async def call_groq_json(
             if attempt == (1 if retry else 0):
                 raise
     raise HTTPException(status_code=502, detail="Groq API request failed after retry.")
+
+
+@app.post("/projects/{project_id}/contradiction-scan")
+@app.post("/api/projects/{project_id}/contradiction-scan")
+async def scan_project_contradictions(
+    project_id: str,
+    req: ContradictionScanRequest,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+
+    idea_text = req.idea_text.strip() if req.idea_text else ""
+    if not idea_text:
+        raise HTTPException(status_code=400, detail="Idea text cannot be empty.")
+    if len(idea_text) > 2000:
+        raise HTTPException(status_code=400, detail="Idea description exceeds 2,000 characters limit.")
+
+    round_num = req.round if req.round in (1, 2) else 1
+    resolved_answer = req.resolved_answer.strip() if req.resolved_answer else None
+
+    system_prompt = """You are an architectural assistant analyzing a software project idea for internal contradictions.
+Your task is to look specifically for internal contradictions and logical conflicts between stated requirements in the user's idea text.
+Do NOT flag vagueness, broad scope, or missing technical details — only flag genuine logical conflicts where two requirements directly contradict each other (e.g., "offline-first with no servers" combined with "real-time multi-user cloud synchronization", or "no user accounts / no database" combined with "personalized saved user profiles across devices").
+
+Output strictly valid JSON with no markdown formatting:
+If no contradiction is found:
+{
+  "contradiction": false
+}
+
+If a genuine contradiction is found:
+{
+  "contradiction": true,
+  "explanation": "<Plain-language description of the conflict>",
+  "conflicting_parts": ["<requirement A as stated>", "<requirement B as stated>"]
+}"""
+
+    if resolved_answer:
+        user_prompt = f"Original Project Idea:\n{idea_text}\n\nUser Resolution / Clarification:\n{resolved_answer}"
+    else:
+        user_prompt = f"Project Idea:\n{idea_text}"
+
+    repair_prompt = f"Your previous response was malformed or unparseable. Analyze the following idea for internal contradictions and return strictly valid JSON conforming to the schema with contradiction (boolean) and explanation (if true).\n\n{user_prompt}"
+
+    try:
+        scan_res = await call_groq_json(system_prompt, user_prompt, retry_user_prompt=repair_prompt)
+        if "contradiction" not in scan_res or not isinstance(scan_res.get("contradiction"), bool):
+            # Malformed shape: fail-closed, retry once explicitly
+            scan_res = await call_groq_json(system_prompt, repair_prompt, retry=False)
+            if "contradiction" not in scan_res or not isinstance(scan_res.get("contradiction"), bool):
+                raise HTTPException(status_code=502, detail="Contradiction scan failed to return a valid verification shape.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[Contradiction Scan Error] {e}")
+        raise HTTPException(status_code=502, detail="Contradiction scan service unavailable.") from e
+
+    found = scan_res.get("contradiction", False)
+    explanation = scan_res.get("explanation") if found else None
+    conflicting_parts = scan_res.get("conflicting_parts") if found else []
+
+    # Persist check record to contradiction_checks table
+    if client and not project_id.startswith("local-draft-"):
+        try:
+            client.table("contradiction_checks").insert({
+                "project_id": project_id,
+                "round": round_num,
+                "found": found,
+                "explanation": explanation,
+                "conflicting_parts": conflicting_parts,
+                "resolved_answer": resolved_answer
+            }).execute()
+        except Exception as e:
+            print(f"[Contradiction Checks DB Warning] {e}")
+
+        # Update project step0_state with contradiction resolution outcome
+        try:
+            step0_state = project.get("step0_state") or {}
+            step0_state["last_contradiction_result"] = {
+                "found": found,
+                "explanation": explanation,
+                "conflicting_parts": conflicting_parts,
+                "round": round_num,
+                "checked_at": datetime.now(timezone.utc).isoformat()
+            }
+            if round_num >= 2 and found:
+                step0_state["contradiction_unresolved"] = True
+            elif not found:
+                step0_state["contradiction_unresolved"] = False
+
+            client.table("projects").update({"step0_state": step0_state}).eq("id", project_id).execute()
+        except Exception as e:
+            print(f"[Step0 State Contradiction Update Warning] {e}")
+
+    unresolved = bool(round_num >= 2 and found)
+    return {
+        "status": "ok",
+        "contradiction": found,
+        "explanation": explanation,
+        "conflicting_parts": conflicting_parts,
+        "round": round_num,
+        "contradiction_unresolved": unresolved
+    }
 
 
 def check_generation_rate_limit(client, user_id: str, limit_type: str):
