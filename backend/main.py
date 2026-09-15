@@ -5,7 +5,7 @@ import re
 import unicodedata
 import httpx
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 import uuid
 from uuid import UUID
 from fastapi import FastAPI, HTTPException, Depends, Header, Request
@@ -569,6 +569,23 @@ class ClarifyingAnswerItem(BaseModel):
 
 class SubmitClarifyingAnswersRequest(BaseModel):
     answers: List[ClarifyingAnswerItem]
+
+
+# --- V3.4 & V3.5 Persona & NFR Capture Schemas ---
+NFR_SCALE_ALLOWED = {"just_me", "small_team", "hundreds_of_users", "thousands_plus"}
+NFR_DATA_SENSITIVITY_ALLOWED = {"none_public", "personal", "sensitive"}
+NFR_AVAILABILITY_ALLOWED = {"best_effort", "needs_to_be_reliable", "mission_critical"}
+
+
+class PersonaCaptureRequest(BaseModel):
+    answer: str
+
+
+class NFRCaptureRequest(BaseModel):
+    scale: Optional[str] = None
+    data_sensitivity: Optional[str] = None
+    availability: Optional[str] = None
+
 
 
 GREETING_WHITELIST = {
@@ -1449,6 +1466,163 @@ async def get_clarifying_questions(
         raise HTTPException(status_code=500, detail="Failed to fetch clarifying questions.") from e
 
 
+# --- V3.4 Persona Capture Endpoints ---
+@app.post("/projects/{project_id}/personas")
+@app.post("/api/projects/{project_id}/personas")
+async def submit_personas(
+    project_id: str,
+    req: PersonaCaptureRequest,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+
+    answer = (req.answer or "").strip()
+    if not answer:
+        raise HTTPException(status_code=400, detail="Persona answer cannot be empty.")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    persona_record = {
+        "answer": answer,
+        "captured_at": now_iso
+    }
+
+    if client and not project_id.startswith("local-draft-"):
+        step0_state = project.get("step0_state") or {}
+        step0_state["personas"] = persona_record
+
+        saved = False
+        last_err = None
+        for attempt in range(2):
+            try:
+                client.table("projects").update({
+                    "personas": persona_record,
+                    "step0_state": step0_state
+                }).eq("id", project_id).execute()
+                saved = True
+                break
+            except Exception as e:
+                last_err = e
+                print(f"[Persist Persona Attempt {attempt+1} Warning] {e}")
+
+        if not saved:
+            raise HTTPException(
+                status_code=502,
+                detail="Failed to persist persona data to database."
+            ) from last_err
+
+    return {
+        "status": "ok",
+        "message": "Persona details saved successfully.",
+        "personas": persona_record
+    }
+
+
+@app.get("/projects/{project_id}/personas")
+@app.get("/api/projects/{project_id}/personas")
+async def get_personas(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+
+    personas = project.get("personas") or (project.get("step0_state") or {}).get("personas")
+    return {"personas": personas}
+
+
+# --- V3.5 NFR Capture Endpoints ---
+@app.post("/projects/{project_id}/nfrs")
+@app.post("/api/projects/{project_id}/nfrs")
+async def submit_nfrs(
+    project_id: str,
+    req: NFRCaptureRequest,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+
+    scale = (req.scale or "").strip()
+    data_sensitivity = (req.data_sensitivity or "").strip()
+    availability = (req.availability or "").strip()
+
+    if not scale or scale not in NFR_SCALE_ALLOWED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid scale value '{scale}'. Must be one of: {', '.join(sorted(NFR_SCALE_ALLOWED))}."
+        )
+    if not data_sensitivity or data_sensitivity not in NFR_DATA_SENSITIVITY_ALLOWED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid data_sensitivity value '{data_sensitivity}'. Must be one of: {', '.join(sorted(NFR_DATA_SENSITIVITY_ALLOWED))}."
+        )
+    if not availability or availability not in NFR_AVAILABILITY_ALLOWED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid availability value '{availability}'. Must be one of: {', '.join(sorted(NFR_AVAILABILITY_ALLOWED))}."
+        )
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    nfr_record = {
+        "scale": scale,
+        "data_sensitivity": data_sensitivity,
+        "availability": availability,
+        "captured_at": now_iso
+    }
+
+    if client and not project_id.startswith("local-draft-"):
+        step0_state = project.get("step0_state") or {}
+        step0_state["nfrs"] = nfr_record
+
+        saved = False
+        last_err = None
+        for attempt in range(2):
+            try:
+                client.table("projects").update({
+                    "nfrs": nfr_record,
+                    "step0_state": step0_state
+                }).eq("id", project_id).execute()
+                saved = True
+                break
+            except Exception as e:
+                last_err = e
+                print(f"[Persist NFR Attempt {attempt+1} Warning] {e}")
+
+        if not saved:
+            raise HTTPException(
+                status_code=502,
+                detail="Failed to persist NFR data to database."
+            ) from last_err
+
+    return {
+        "status": "ok",
+        "message": "NFR details saved successfully.",
+        "nfrs": nfr_record
+    }
+
+
+@app.get("/projects/{project_id}/nfrs")
+@app.get("/api/projects/{project_id}/nfrs")
+async def get_nfrs(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+
+    nfrs = project.get("nfrs") or (project.get("step0_state") or {}).get("nfrs")
+    return {"nfrs": nfrs}
+
+
+
 def check_generation_rate_limit(client, user_id: str, limit_type: str):
     if not client or not user_id:
         return
@@ -1498,11 +1672,14 @@ def assemble_effective_idea_context(
     base_idea_text: str,
     contradiction_data: Optional[Dict[str, Any]] = None,
     clarifying_qa: Optional[List[Dict[str, Any]]] = None,
-    contradiction_unresolved: bool = False
+    contradiction_unresolved: bool = False,
+    personas_data: Optional[Union[Dict[str, Any], str]] = None,
+    nfrs_data: Optional[Dict[str, Any]] = None
 ) -> str:
     """
-    Folds base project idea with persisted contradiction resolution details
-    and answered clarifying questions into a single coherent context string for generation.
+    Folds base project idea with persisted contradiction resolution details,
+    answered clarifying questions, persona capture data, and non-functional requirements (NFRs)
+    into a single coherent context string for generation.
     """
     sections = [base_idea_text.strip()]
 
@@ -1538,6 +1715,35 @@ def assemble_effective_idea_context(
                 qa_lines.append(f"Additional detail provided: Q: '{q}' A: '{a}'")
             sections.append("\n".join(qa_lines))
 
+    # 3. Fold in Persona Capture context
+    if personas_data:
+        persona_text = ""
+        if isinstance(personas_data, dict):
+            persona_text = (personas_data.get("answer") or "").strip()
+        elif isinstance(personas_data, str):
+            persona_text = personas_data.strip()
+        if persona_text:
+            sections.append(f"User types: {persona_text}")
+
+    # 4. Fold in NFR Capture context
+    if nfrs_data and isinstance(nfrs_data, dict):
+        scale = (nfrs_data.get("scale") or "").strip()
+        sensitivity = (nfrs_data.get("data_sensitivity") or "").strip()
+        availability = (nfrs_data.get("availability") or "").strip()
+        if scale and sensitivity and availability:
+            sections.append(
+                f"Non-functional requirements: expected scale is {scale}, data sensitivity is {sensitivity}, availability requirement is {availability}."
+            )
+        elif scale or sensitivity or availability:
+            parts = []
+            if scale:
+                parts.append(f"expected scale is {scale}")
+            if sensitivity:
+                parts.append(f"data sensitivity is {sensitivity}")
+            if availability:
+                parts.append(f"availability requirement is {availability}")
+            sections.append(f"Non-functional requirements: {', '.join(parts)}.")
+
     return "\n\n".join(sections)
 
 
@@ -1570,11 +1776,13 @@ async def generate_feature_pipeline(
 
     generation_succeeded = False
     try:
-        # Retrieve persisted Step 0 context (Contradiction resolution & Clarifying QA)
+        # Retrieve persisted Step 0 context (Contradiction resolution, Clarifying QA, Personas, NFRs)
         step0_state = project.get("step0_state") or {}
         contradiction_unresolved = bool(step0_state.get("contradiction_unresolved", False))
         contradiction_data = step0_state.get("last_contradiction_result") or {}
         clarifying_qa = step0_state.get("clarifying_qa") or []
+        personas_data = project.get("personas") or step0_state.get("personas") or {}
+        nfrs_data = project.get("nfrs") or step0_state.get("nfrs") or {}
 
         # If client is connected and real project, query authoritative tables with 1 retry on failure
         if client and not project_id.startswith("local-draft-"):
@@ -1629,7 +1837,9 @@ async def generate_feature_pipeline(
             base_idea_text=idea_text,
             contradiction_data=contradiction_data,
             clarifying_qa=clarifying_qa,
-            contradiction_unresolved=contradiction_unresolved
+            contradiction_unresolved=contradiction_unresolved,
+            personas_data=personas_data,
+            nfrs_data=nfrs_data
         )
         context_str = f"Project Idea: {effective_idea_text}\nFixed Inputs: {json.dumps(fixed_inputs)}"
 
