@@ -1815,23 +1815,8 @@ async def generate_feature_pipeline(
                                 break
                         if not contradiction_data and cc_res.data:
                             contradiction_data = cc_res.data[0]
-                except Exception as e1:
-                    print(f"[Fetch Contradiction Checks Retry 1] {e1}")
-                    try:
-                        cc_res = client.table("contradiction_checks").select("round, found, explanation, conflicting_parts, resolved_answer").eq("project_id", project_id).order("created_at", desc=True).limit(5).execute()
-                        if cc_res and isinstance(cc_res.data, list) and cc_res.data:
-                            for row in cc_res.data:
-                                if row.get("resolved_answer"):
-                                    contradiction_data = row
-                                    break
-                            if not contradiction_data and cc_res.data:
-                                contradiction_data = cc_res.data[0]
-                    except Exception as e2:
-                        print(f"[Fetch Contradiction Checks Failed] {e2}")
-                        raise HTTPException(
-                            status_code=502,
-                            detail="Failed to retrieve contradiction scan context from database."
-                        ) from e2
+                except Exception as e:
+                    print(f"[Fetch Contradiction Checks Warning] {e}")
 
         effective_idea_text = assemble_effective_idea_context(
             base_idea_text=idea_text,
