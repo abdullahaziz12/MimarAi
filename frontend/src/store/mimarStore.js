@@ -182,6 +182,12 @@ const initialMimarState = {
   clarifyingAnswers: {},
   clarifyingStatus: "idle", // 'idle' | 'generating' | 'ready' | 'skipped' | 'completed' | 'error'
 
+  // V3.4 Persona & V3.5 NFR State
+  personaAnswer: "",
+  personaStatus: "idle", // 'idle' | 'ready' | 'completed' | 'skipped'
+  nfrData: { scale: "", data_sensitivity: "", availability: "" },
+  nfrStatus: "idle", // 'idle' | 'ready' | 'completed' | 'skipped'
+
   // Chat message history
   messages: [
     {
@@ -834,6 +840,163 @@ export const useMimarStore = create((set, get) => ({
       get().saveProjectState();
     }
   },
+
+  // V3.4 Persona Capture Action
+  submitPersonaAnswer: async (answerText, sessionToken = null) => {
+    const s = get();
+    if (!sessionToken) {
+      return {
+        status: "error",
+        detail: "A valid session is required to submit persona details.",
+      };
+    }
+    const currentProjectId = s.projectId;
+    if (!currentProjectId) {
+      return {
+        status: "error",
+        detail: "A persisted project is required before submitting persona details.",
+      };
+    }
+
+    s.setOperationRunning(true, "SAVING PERSONA DETAILS");
+    const controller = new AbortController();
+    set({ activeController: controller });
+    const signal = controller.signal;
+
+    let backendUrl = "";
+    try {
+      backendUrl = getBackendApiUrl("").replace(/\/$/, "");
+    } catch (err) {
+      get().setOperationRunning(false);
+      set({ activeController: null });
+      return {
+        status: "error",
+        detail: "Backend URL is not configured.",
+      };
+    }
+
+    try {
+      const authHeaders = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${sessionToken}`,
+      };
+
+      const res = await fetch(
+        `${backendUrl}/api/projects/${currentProjectId}/personas`,
+        {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({
+            answer: (answerText || "").trim(),
+          }),
+          signal,
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: Failed to submit persona details`);
+      }
+
+      const result = await res.json();
+      set({
+        personaStatus: "completed",
+        personaAnswer: (answerText || "").trim(),
+      });
+      return result;
+    } catch (err) {
+      if (err.name === "AbortError") {
+        s.showToast("Submitting persona details stopped by user.");
+        return null;
+      }
+      console.warn("Submit persona error:", err);
+      return {
+        status: "error",
+        detail: "Having trouble saving persona details — try again.",
+      };
+    } finally {
+      get().setOperationRunning(false);
+      set({ activeController: null });
+      get().saveProjectState();
+    }
+  },
+
+  // V3.5 NFR Capture Action
+  submitNfrData: async (nfrObj, sessionToken = null) => {
+    const s = get();
+    if (!sessionToken) {
+      return {
+        status: "error",
+        detail: "A valid session is required to submit NFR details.",
+      };
+    }
+    const currentProjectId = s.projectId;
+    if (!currentProjectId) {
+      return {
+        status: "error",
+        detail: "A persisted project is required before submitting NFR details.",
+      };
+    }
+
+    s.setOperationRunning(true, "SAVING NON-FUNCTIONAL REQUIREMENTS");
+    const controller = new AbortController();
+    set({ activeController: controller });
+    const signal = controller.signal;
+
+    let backendUrl = "";
+    try {
+      backendUrl = getBackendApiUrl("").replace(/\/$/, "");
+    } catch (err) {
+      get().setOperationRunning(false);
+      set({ activeController: null });
+      return {
+        status: "error",
+        detail: "Backend URL is not configured.",
+      };
+    }
+
+    try {
+      const authHeaders = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${sessionToken}`,
+      };
+
+      const res = await fetch(
+        `${backendUrl}/api/projects/${currentProjectId}/nfrs`,
+        {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify(nfrObj),
+          signal,
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: Failed to submit NFR details`);
+      }
+
+      const result = await res.json();
+      set({
+        nfrStatus: "completed",
+        nfrData: nfrObj,
+      });
+      return result;
+    } catch (err) {
+      if (err.name === "AbortError") {
+        s.showToast("Submitting NFR details stopped by user.");
+        return null;
+      }
+      console.warn("Submit NFR error:", err);
+      return {
+        status: "error",
+        detail: "Having trouble saving NFR details — try again.",
+      };
+    } finally {
+      get().setOperationRunning(false);
+      set({ activeController: null });
+      get().saveProjectState();
+    }
+  },
+
 
   generationState: null,
   dependencyOrder: [],

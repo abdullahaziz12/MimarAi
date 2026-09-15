@@ -8,6 +8,8 @@ import ExamplePromptFallback from "../ExamplePromptFallback";
 import FixedInputsCollection from "../FixedInputsCollection";
 import StartTriggerGate from "../StartTriggerGate";
 import ClarifyingQuestionsStage from "../ClarifyingQuestionsStage";
+import PersonaCaptureStage from "../PersonaCaptureStage";
+import NFRCaptureStage from "../NFRCaptureStage";
 
 export default function InterviewScreen() {
   const { session } = useAuth();
@@ -29,6 +31,10 @@ export default function InterviewScreen() {
     clarifyingStatus,
     fetchClarifyingQuestions,
     submitClarifyingAnswers,
+    personaStatus,
+    nfrStatus,
+    submitPersonaAnswer,
+    submitNfrData,
     runIdeaPipeline,
     runRevisionPipeline,
     classifyIdeaStep0,
@@ -45,6 +51,8 @@ export default function InterviewScreen() {
   const [retryPrompt, setRetryPrompt] = useState(null);
   const [retryContradiction, setRetryContradiction] = useState(null);
   const [isSubmittingClarifications, setIsSubmittingClarifications] = useState(false);
+  const [isSubmittingPersona, setIsSubmittingPersona] = useState(false);
+  const [isSubmittingNfr, setIsSubmittingNfr] = useState(false);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
 
@@ -145,6 +153,63 @@ export default function InterviewScreen() {
     }
   };
 
+  // Helper: after all interview stages resolve, advance to fixed inputs
+  const advanceToReady = () => {
+    setStep0Status("ready");
+    useMimarStore.setState((state) => ({
+      messages: [
+        ...state.messages,
+        {
+          id: "ai-ready-" + Date.now(),
+          role: "ai",
+          text: "Great! Your project idea looks clear and ready for architecture planning. Please configure your target fixed inputs below to proceed.",
+        },
+      ],
+    }));
+  };
+
+  // Helper: advance to NFR stage (or skip to ready)
+  const advanceToNfrStage = (density) => {
+    if ((density || {}).nfrs === "skip") {
+      useMimarStore.setState({ nfrStatus: "skipped" });
+      advanceToReady();
+    } else {
+      setStep0Status("nfr_capture");
+      useMimarStore.setState({ nfrStatus: "ready" });
+      useMimarStore.setState((state) => ({
+        messages: [
+          ...state.messages,
+          {
+            id: "ai-nfr-intro-" + Date.now(),
+            role: "ai",
+            text: "Next, select your system constraints — expected scale, data sensitivity, and availability requirement:",
+          },
+        ],
+      }));
+    }
+  };
+
+  // Helper: advance to Persona stage (or skip to NFR)
+  const advanceToPersonaStage = (density) => {
+    if ((density || {}).personas === "skip") {
+      useMimarStore.setState({ personaStatus: "skipped" });
+      advanceToNfrStage(density);
+    } else {
+      setStep0Status("persona_capture");
+      useMimarStore.setState({ personaStatus: "ready" });
+      useMimarStore.setState((state) => ({
+        messages: [
+          ...state.messages,
+          {
+            id: "ai-persona-intro-" + Date.now(),
+            role: "ai",
+            text: "To tailor features to real user needs, please describe who will use this system:",
+          },
+        ],
+      }));
+    }
+  };
+
   const proceedAfterContradiction = async (baseIdea, densityFlagsData) => {
     const density = densityFlagsData || {};
     const cqFlag = density.clarifying_questions || "full";
@@ -171,18 +236,8 @@ export default function InterviewScreen() {
       }
     }
 
-    // Skipped or completed without questions
-    setStep0Status("ready");
-    useMimarStore.setState((state) => ({
-      messages: [
-        ...state.messages,
-        {
-          id: "ai-ready-" + Date.now(),
-          role: "ai",
-          text: "Great! Your project idea looks clear and ready for architecture planning. Please configure your target fixed inputs below to proceed.",
-        },
-      ],
-    }));
+    // CQ skipped or completed without questions — advance to Persona stage
+    advanceToPersonaStage(density);
   };
 
   const handleClarifyingSubmit = async (answersArray) => {
@@ -194,22 +249,53 @@ export default function InterviewScreen() {
       );
       if (res?.status === "ok") {
         showToast("Clarifying details saved!");
-        setStep0Status("ready");
-        useMimarStore.setState((state) => ({
-          messages: [
-            ...state.messages,
-            {
-              id: "ai-ready-" + Date.now(),
-              role: "ai",
-              text: "Clarifying details saved. Please configure your target fixed inputs below to proceed.",
-            },
-          ],
-        }));
+        // Advance to Persona stage instead of jumping to ready
+        const density = densityFlags || {};
+        advanceToPersonaStage(density);
       } else {
         showToast(res?.detail || "Failed to save answers — please retry.");
       }
     } finally {
       setIsSubmittingClarifications(false);
+    }
+  };
+
+  // V3.4: Persona Capture submit handler
+  const handlePersonaSubmit = async (answerText) => {
+    setIsSubmittingPersona(true);
+    try {
+      const res = await submitPersonaAnswer(
+        answerText,
+        session?.access_token || null
+      );
+      if (res?.status === "ok") {
+        showToast("Persona details saved!");
+        const density = densityFlags || {};
+        advanceToNfrStage(density);
+      } else {
+        showToast(res?.detail || "Failed to save persona details — please retry.");
+      }
+    } finally {
+      setIsSubmittingPersona(false);
+    }
+  };
+
+  // V3.5: NFR Capture submit handler
+  const handleNfrSubmit = async (nfrObj) => {
+    setIsSubmittingNfr(true);
+    try {
+      const res = await submitNfrData(
+        nfrObj,
+        session?.access_token || null
+      );
+      if (res?.status === "ok") {
+        showToast("Non-functional requirements saved!");
+        advanceToReady();
+      } else {
+        showToast(res?.detail || "Failed to save NFR details — please retry.");
+      }
+    } finally {
+      setIsSubmittingNfr(false);
     }
   };
 
@@ -625,12 +711,30 @@ export default function InterviewScreen() {
               {(step0Status === "clarifying" ||
                 (clarifyingQuestions &&
                   clarifyingQuestions.length > 0 &&
-                  step0Status !== "ready")) && (
+                  !["ready", "persona_capture", "nfr_capture"].includes(step0Status))) && (
                 <ClarifyingQuestionsStage
                   questions={clarifyingQuestions}
                   onSubmit={handleClarifyingSubmit}
                   isSubmitting={isSubmittingClarifications || operationRunning}
-                  isCompleted={step0Status === "ready"}
+                  isCompleted={["ready", "persona_capture", "nfr_capture"].includes(step0Status)}
+                />
+              )}
+
+              {/* V3.4: Persona Capture Stage */}
+              {step0Status === "persona_capture" && personaStatus === "ready" && (
+                <PersonaCaptureStage
+                  onSubmit={handlePersonaSubmit}
+                  isSubmitting={isSubmittingPersona || operationRunning}
+                  isCompleted={personaStatus === "completed"}
+                />
+              )}
+
+              {/* V3.5: NFR Capture Stage */}
+              {step0Status === "nfr_capture" && nfrStatus === "ready" && (
+                <NFRCaptureStage
+                  onSubmit={handleNfrSubmit}
+                  isSubmitting={isSubmittingNfr || operationRunning}
+                  isCompleted={nfrStatus === "completed"}
                 />
               )}
 
