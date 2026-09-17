@@ -94,7 +94,13 @@ class TestBugFixesAndContradictionScan(unittest.IsolatedAsyncioTestCase):
 
         mock_gemini.return_value = {
             "idea_objective": "A loan management app",
-            "features": [{"id": "feat-1", "name": "Loan Desk", "description": "Desc", "source": "user_originated"}]
+            "features": [{
+                "id": "feat-1",
+                "name": "Loan Desk",
+                "description": "Desk for loan officers to review applications.",
+                "source": "user_originated",
+                "acceptance_criteria": ["Loan officer can approve or reject application."]
+            }]
         }
 
         # Groq draft, val1 (missing is_valid), val1 retry (valid!), val2 (valid)

@@ -985,10 +985,31 @@ class ContradictionScanRequest(BaseModel):
     round: int = 1
     resolved_answer: Optional[str] = None
 
+def parse_llm_json(raw: str) -> Dict[str, Any]:
+    """
+    Robust JSON parser for LLM responses that strips markdown code blocks
+    and extracts json payloads safely.
+    """
+    if not isinstance(raw, str):
+        return {}
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    cleaned = cleaned.strip()
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        match = re.search(r"(\{.*\})", cleaned, re.DOTALL)
+        if match:
+            return json.loads(match.group(1))
+        raise
+
+
 async def call_gemini_api(
     system_prompt: str,
     user_prompt: str,
-    timeout: float = 12.0,
+    timeout: float = 30.0,
     retry_user_prompt: Optional[str] = None,
     retry: bool = True,
 ) -> Dict[str, Any]:
@@ -996,7 +1017,7 @@ async def call_gemini_api(
     if not gemini_key:
         raise HTTPException(status_code=500, detail="Gemini API unconfigured (GEMINI_API_KEY missing).")
     
-    gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    gemini_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_key}"
     payload = {
         "contents": [
@@ -1020,7 +1041,7 @@ async def call_gemini_api(
                 if resp.status_code == 200:
                     data = resp.json()
                     raw = data["candidates"][0]["content"]["parts"][0]["text"]
-                    return json.loads(raw)
+                    return parse_llm_json(raw)
                 print(f"[Gemini API Error Attempt {attempt+1}] Status {resp.status_code}: {resp.text}")
         except Exception as e:
             print(f"[Gemini Call Exception Attempt {attempt+1}] {e}")
@@ -1032,7 +1053,7 @@ async def call_gemini_api(
 async def call_groq_json(
     system_prompt: str,
     user_prompt: str,
-    timeout: float = 10.0,
+    timeout: float = 25.0,
     retry_user_prompt: Optional[str] = None,
     retry: bool = True,
 ) -> Dict[str, Any]:
@@ -1066,13 +1087,244 @@ async def call_groq_json(
                 if resp.status_code == 200:
                     data = resp.json()
                     raw = data["choices"][0]["message"]["content"]
-                    return json.loads(raw)
+                    return parse_llm_json(raw)
                 print(f"[Groq API Error Attempt {attempt+1}] Status {resp.status_code}: {resp.text}")
         except Exception as e:
             print(f"[Groq Call Exception Attempt {attempt+1}] {e}")
             if attempt == (1 if retry else 0):
                 raise
     raise HTTPException(status_code=502, detail="Groq API request failed after retry.")
+
+
+# --- V3.9 Requirement Quality Standard Definitions & Heuristics ---
+
+ABSOLUTE_IMPOSSIBLE_PATTERNS = [
+    r"\b100%\s+accuracy\b",
+    r"\b100%\s+uptime\b",
+    r"\b100%\s+secure\b",
+    r"\b100%\s+availability\b",
+    r"\bzero\s+downtime\b",
+    r"\bzero\s+latency\b",
+    r"\bnever\s+fails\b",
+    r"\bnever\s+crash\w*\b",
+    r"\binfinitely\s+scalable\b",
+    r"\bunlimited\s+users\b",
+    r"\bunhackable\b",
+    r"\bzero\s+bugs\b"
+]
+
+ATOMIC_VIOLATION_PATTERNS = [
+    r"\b(?:and\s+also|and\s+then|as\s+well\s+as)\b",
+    r"\b(?:allows|enables|provides|creates|sends|manages|tracks|processes|stores|updates|deletes|notifies|generates)\s+.*?\s+and\s+(?:allows|enables|provides|creates|sends|manages|tracks|processes|stores|updates|deletes|notifies|generates)\b",
+    r",\s*and\s+(?:also\s+)?(?:allow|enable|provide|create|send|manage|track|process|store|update|delete|notify|generate)\w*\b",
+    r"\b(?:manages|handles)\s+both\s+.*\s+and\s+.*\b"
+]
+
+INDEPENDENCE_VIOLATION_PATTERNS = [
+    r"\b(?:as\s+(?:described|mentioned|defined|specified)\s+in|depends\s+on|refer\s+to|see|per|from|after)\s+(?:feature|feat)[_\-\s]?\d*\b",
+    r"\bfeat[_\-]\d+\b",
+    r"\bfeature\s+\d+\b"
+]
+
+
+def evaluate_code_level_quality(feature: Dict[str, Any], fixed_inputs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Evaluates the 5 code-level quality characteristics in pure Python (NO AI call):
+    1. Atomic: single behavior, not multiple distinct verbs/actions joined by 'and'
+    2. Complete: acceptance_criteria is non-empty list of non-empty strings
+    3. Traceable: reasoning is non-null & non-empty when provenance == 'ai_inferred'
+    4. Independent: does not reference another feature by ID/name without standalone context
+    5. Feasible: no impossible absolute claims (100% accuracy, zero downtime, etc.)
+    """
+    failed_checks = []
+
+    name = str(feature.get("name") or "").strip()
+    description = str(feature.get("description") or "").strip()
+    full_text = f"{name}. {description}".strip()
+
+    rules = feature.get("business_rules") or []
+    rules_text = " ".join([str(r) for r in rules]) if isinstance(rules, list) else str(rules)
+    criteria = feature.get("acceptance_criteria") or []
+    criteria_text = " ".join([str(c) for c in criteria]) if isinstance(criteria, list) else str(criteria)
+    all_text = f"{full_text} {rules_text} {criteria_text}".lower()
+
+    # 1. Atomic Check
+    is_atomic = True
+    desc_lower = description.lower()
+    for pat in ATOMIC_VIOLATION_PATTERNS:
+        if re.search(pat, desc_lower):
+            is_atomic = False
+            break
+    if not is_atomic:
+        failed_checks.append("atomic")
+
+    # 2. Complete Check
+    is_complete = True
+    if not isinstance(criteria, list) or len(criteria) == 0:
+        is_complete = False
+    else:
+        non_empty_criteria = [str(c).strip() for c in criteria if str(c).strip()]
+        if len(non_empty_criteria) == 0:
+            is_complete = False
+    if not is_complete:
+        failed_checks.append("complete")
+
+    # 3. Traceable Check
+    provenance = str(feature.get("provenance") or feature.get("source") or "").strip().lower()
+    is_traceable = True
+    if provenance in ("ai_inferred", "ai_added"):
+        reasoning = feature.get("reasoning")
+        if reasoning is None or not str(reasoning).strip():
+            is_traceable = False
+    if not is_traceable:
+        failed_checks.append("traceable")
+
+    # 4. Independent Check
+    is_independent = True
+    for pat in INDEPENDENCE_VIOLATION_PATTERNS:
+        if re.search(pat, desc_lower):
+            is_independent = False
+            break
+    if not is_independent:
+        failed_checks.append("independent")
+
+    # 5. Feasible Check
+    is_feasible = True
+    for pat in ABSOLUTE_IMPOSSIBLE_PATTERNS:
+        if re.search(pat, all_text):
+            is_feasible = False
+            break
+    if not is_feasible:
+        failed_checks.append("feasible")
+
+    existing_flags = feature.get("quality_flags") or {}
+    existing_failed = list(existing_flags.get("failed_checks") or [])
+    combined_failed = sorted(list(set(existing_failed + failed_checks)))
+
+    return {
+        "atomic": is_atomic,
+        "complete": is_complete,
+        "traceable": is_traceable,
+        "independent": is_independent,
+        "feasible": is_feasible,
+        "failed_checks": combined_failed
+    }
+
+
+def normalize_feature_schema(
+    raw_feature: Dict[str, Any],
+    default_id: str = "feat-1",
+    default_provenance: str = "user_originated",
+    source_model: str = "gemini"
+) -> Dict[str, Any]:
+    """
+    Ensures a feature dictionary conforms strictly to the V3.9 Requirement Quality Standard schema.
+    """
+    feat_id = str(raw_feature.get("id") or default_id).strip()
+    name = str(raw_feature.get("name") or "Unnamed Feature").strip()
+    description = str(raw_feature.get("description") or "").strip()
+
+    raw_prov = str(raw_feature.get("provenance") or raw_feature.get("source") or default_provenance).strip().lower()
+    provenance = "ai_inferred" if raw_prov in ("ai_inferred", "ai_added", "inferred") else "user_originated"
+    source = provenance
+
+    def _to_str_list(val: Any) -> List[str]:
+        if isinstance(val, list):
+            return [str(x).strip() for x in val if str(x).strip()]
+        elif isinstance(val, str) and val.strip():
+            return [val.strip()]
+        return []
+
+    business_rules = _to_str_list(raw_feature.get("business_rules"))
+    data_touched = _to_str_list(raw_feature.get("data_touched"))
+    actor_role = _to_str_list(raw_feature.get("actor_role"))
+    acceptance_criteria = _to_str_list(raw_feature.get("acceptance_criteria"))
+    exclusions = _to_str_list(raw_feature.get("exclusions"))
+
+    raw_priority = str(raw_feature.get("priority") or "must_have").strip().lower()
+    if raw_priority not in ("must_have", "should_have", "nice_to_have"):
+        raw_priority = "must_have"
+    priority = raw_priority
+
+    raw_reasoning = raw_feature.get("reasoning")
+    reasoning = str(raw_reasoning).strip() if raw_reasoning is not None and str(raw_reasoning).strip() else None
+
+    raw_src_model = str(raw_feature.get("source_model") or source_model).strip().lower()
+    if raw_src_model not in ("gemini", "groq", "merged"):
+        raw_src_model = source_model
+
+    normalized = {
+        "id": feat_id,
+        "name": name,
+        "description": description,
+        "source": source,
+        "business_rules": business_rules,
+        "data_touched": data_touched,
+        "actor_role": actor_role,
+        "acceptance_criteria": acceptance_criteria,
+        "exclusions": exclusions,
+        "priority": priority,
+        "provenance": provenance,
+        "reasoning": reasoning,
+        "source_model": raw_src_model,
+        "quality_flags": raw_feature.get("quality_flags") or {
+            "atomic": True,
+            "complete": True,
+            "traceable": True,
+            "independent": True,
+            "feasible": True,
+            "failed_checks": []
+        }
+    }
+
+    normalized["quality_flags"] = evaluate_code_level_quality(normalized)
+    return normalized
+
+
+def are_features_overlapping(feat_a: Dict[str, Any], feat_b: Dict[str, Any]) -> bool:
+    """
+    Determines if two features match by data_touched and actor_role overlap
+    per the V3.9 Quality Standard spec (replacing plain name-string matching).
+    """
+    def _normalize_tokens(items: Any) -> set:
+        tokens = set()
+        if isinstance(items, list):
+            for x in items:
+                words = re.findall(r'[a-z0-9]+', str(x).lower())
+                tokens.update(words)
+        elif isinstance(items, str):
+            words = re.findall(r'[a-z0-9]+', items.lower())
+            tokens.update(words)
+        return tokens
+
+    data_a = _normalize_tokens(feat_a.get("data_touched"))
+    data_b = _normalize_tokens(feat_b.get("data_touched"))
+    actors_a = _normalize_tokens(feat_a.get("actor_role"))
+    actors_b = _normalize_tokens(feat_b.get("actor_role"))
+
+    stopwords = {"user", "app", "data", "system", "role", "the", "a", "an", "and", "or"}
+    clean_data_a = data_a - stopwords
+    clean_data_b = data_b - stopwords
+    clean_actors_a = actors_a - stopwords
+    clean_actors_b = actors_b - stopwords
+
+    data_overlap = bool(clean_data_a and clean_data_b and (clean_data_a & clean_data_b))
+    actor_overlap = bool(clean_actors_a and clean_actors_b and (clean_actors_a & clean_actors_b))
+
+    if data_overlap and actor_overlap:
+        return True
+
+    if clean_data_a and clean_data_b:
+        jaccard = len(clean_data_a & clean_data_b) / len(clean_data_a | clean_data_b)
+        if jaccard >= 0.5:
+            return True
+
+    if not (clean_data_a or clean_data_b or clean_actors_a or clean_actors_b):
+        name_a = str(feat_a.get("name") or "").strip().lower()
+        name_b = str(feat_b.get("name") or "").strip().lower()
+        return bool(name_a and name_b and name_a == name_b)
+
+    return False
 
 
 # V3.2 Density Check Heuristic Definitions
@@ -2146,8 +2398,10 @@ async def generate_feature_pipeline(
         context_str = f"Project Idea: {effective_idea_text}\nFixed Inputs: {json.dumps(fixed_inputs)}"
 
         # Step 1: Parallel Independent Drafting (Gemini + Groq)
-        system_prompt_draft = """You are an expert AI software architect.
+        system_prompt_draft = """You are an expert AI software architect creating technical specifications adhering to the V3.9 Requirement Quality Standard.
 Generate a comprehensive list of 4-6 core technical features specifically tailored for the user's project idea.
+Each feature must be atomic, feasible, and fully formed.
+
 Output strictly valid JSON with no markdown formatting:
 {
   "idea_objective": "<1-2 sentence synthesized objective statement specifically for this project>",
@@ -2155,14 +2409,46 @@ Output strictly valid JSON with no markdown formatting:
     {
       "id": "feat-1",
       "name": "<Feature Name>",
-      "description": "<One-sentence technical description>",
-      "source": "user_originated"
+      "description": "<One-sentence technical summary for the feature card UI>",
+      "source": "user_originated",
+      "business_rules": [
+        "<Rule 1: concrete domain constraint or permission>",
+        "<Rule 2: operational workflow rule>"
+      ],
+      "data_touched": ["<data_entity_1>", "<data_entity_2>"],
+      "actor_role": ["<actor_1 (role/permission)>", "<actor_2 (role/permission)>"],
+      "acceptance_criteria": [
+        "<Criterion 1: concrete testable condition with trigger/action/result>",
+        "<Criterion 2: verification outcome>"
+      ],
+      "exclusions": [
+        "<v1 boundary: explicit statement of what is not supported in v1>"
+      ],
+      "priority": "must_have",
+      "provenance": "user_originated",
+      "reasoning": null,
+      "source_model": "gemini"
     },
     {
       "id": "feat-2",
       "name": "<Feature Name>",
-      "description": "<One-sentence technical description>",
-      "source": "ai_added"
+      "description": "<One-sentence technical summary for the feature card UI>",
+      "source": "ai_inferred",
+      "business_rules": [
+        "<Rule 1: concrete domain constraint>"
+      ],
+      "data_touched": ["<data_entity_1>"],
+      "actor_role": ["<actor_1 (role/permission)>"],
+      "acceptance_criteria": [
+        "<Criterion 1: concrete testable condition>"
+      ],
+      "exclusions": [
+        "<v1 boundary>"
+      ],
+      "priority": "should_have",
+      "provenance": "ai_inferred",
+      "reasoning": "<Mandatory architectural reasoning explaining why this feature is needed>",
+      "source_model": "groq"
     }
   ]
 }"""
@@ -2175,26 +2461,75 @@ Output strictly valid JSON with no markdown formatting:
             print(f"[Step 1 Parallel Drafting Error] {e}")
             raise HTTPException(status_code=502, detail="Generation failed, please try again.") from e
 
-        # Step 2: Diff & Merge
-        gemini_feats = gemini_draft.get("features", [])
-        groq_feats = groq_draft.get("features", [])
+        # Normalize raw draft outputs
+        gemini_feats = [
+            normalize_feature_schema(f, default_id=f"feat-{i+1}", default_provenance="user_originated", source_model="gemini")
+            for i, f in enumerate(gemini_draft.get("features", []))
+            if isinstance(f, dict)
+        ]
+        groq_feats = [
+            normalize_feature_schema(f, default_id=f"feat-groq-{i+1}", default_provenance="ai_inferred", source_model="groq")
+            for i, f in enumerate(groq_draft.get("features", []))
+            if isinstance(f, dict)
+        ]
 
+        # Step 2: Diff & Merge based on data_touched + actor_role overlap
         merged_features = list(gemini_feats)
-        gemini_names = {f.get("name", "").lower() for f in gemini_feats}
+        for gf in groq_feats:
+            matched_idx = -1
+            for idx, mf in enumerate(merged_features):
+                if are_features_overlapping(gf, mf):
+                    matched_idx = idx
+                    break
 
-        for idx, gf in enumerate(groq_feats):
-            if gf.get("name", "").lower() not in gemini_names:
-                gf["source"] = "ai_added"
+            if matched_idx >= 0:
+                merged_features[matched_idx]["source_model"] = "merged"
+                for r in gf.get("business_rules", []):
+                    if r not in merged_features[matched_idx]["business_rules"]:
+                        merged_features[matched_idx]["business_rules"].append(r)
+                for ac in gf.get("acceptance_criteria", []):
+                    if ac not in merged_features[matched_idx]["acceptance_criteria"]:
+                        merged_features[matched_idx]["acceptance_criteria"].append(ac)
+            else:
                 gf["id"] = f"feat-{len(merged_features) + 1}"
+                gf["provenance"] = "ai_inferred"
+                gf["source"] = "ai_inferred"
+                gf["source_model"] = "groq"
+                if not gf.get("reasoning"):
+                    gf["reasoning"] = f"Inferred by architectural analysis to support {gf.get('name')} workflows."
+                gf["quality_flags"] = evaluate_code_level_quality(gf, fixed_inputs)
                 merged_features.append(gf)
 
-        system_prompt_val = """You are an architectural validator. Check constraint violations against fixed inputs, scope relevance, and completeness. Output only valid JSON: {\"is_valid\": true, \"flags\": [\"specific reason\"]}."""
-        validation_prompt = f"Context:\n{context_str}\n\nFeatures:\n{json.dumps(merged_features)}"
-        repair_prompt = f"Your previous validation response was malformed or unparseable. Re-check this plan and return only the required JSON object with is_valid and a flags array.\n\n{validation_prompt}"
+        # Step 3: Validation (Code-level checks + Groq model-judged characteristics pass)
+        for f in merged_features:
+            f["quality_flags"] = evaluate_code_level_quality(f, fixed_inputs)
+
+        system_prompt_val = """You are an architectural validator checking a project feature plan against fixed inputs and the V3.9 Requirement Quality Standard.
+Validate each feature against system constraints and the 5 model-judged quality characteristics:
+1. "correct": Feature genuinely maps to stated idea/actors (not a detached assumption).
+2. "necessary": Feature is domain-relevant (not irrelevant bloat).
+3. "unambiguous": No vague terms ("fast", "efficient", "modern") without concrete definition.
+4. "understandable": Plain language without unexplained jargon.
+5. "clear_and_concise": No filler adjectives ("robust", "seamless") without concrete meaning.
+
+Output strictly valid JSON with no markdown:
+{
+  "is_valid": true,
+  "flags": [],
+  "feature_evaluations": [
+    {
+      "id": "feat-1",
+      "is_valid": true,
+      "failed_checks": []
+    }
+  ]
+}"""
+        validation_prompt = f"Context:\n{context_str}\n\nFeatures (V3.9 Schema):\n{json.dumps(merged_features)}"
+        repair_prompt = f"Your previous validation response was malformed. Validate features and return JSON with is_valid, flags, and feature_evaluations.\n\n{validation_prompt}"
+
         try:
             val1 = await call_groq_json(system_prompt_val, validation_prompt, retry_user_prompt=repair_prompt)
             if "is_valid" not in val1:
-                # Bug A1 Fix: missing is_valid is a validation failure, retry with repair prompt
                 val1 = await call_groq_json(system_prompt_val, repair_prompt, retry=False)
                 if "is_valid" not in val1:
                     raise HTTPException(status_code=502, detail="Generation failed: validation response could not be confirmed.")
@@ -2203,26 +2538,70 @@ Output strictly valid JSON with no markdown formatting:
         except Exception as e:
             raise HTTPException(status_code=502, detail="Generation failed, please try again.") from e
 
-        adjusted_flag = bool(not val1["is_valid"] and val1.get("flags"))
+        eval_map = {ev.get("id"): ev for ev in val1.get("feature_evaluations", []) if isinstance(ev, dict)}
+        for f in merged_features:
+            ev = eval_map.get(f.get("id"))
+            if ev and isinstance(ev.get("failed_checks"), list):
+                model_failed = [str(fc).strip().lower() for fc in ev["failed_checks"] if str(fc).strip()]
+                existing_failed = list(f["quality_flags"].get("failed_checks") or [])
+                f["quality_flags"]["failed_checks"] = sorted(list(set(existing_failed + model_failed)))
+
+        has_failed_checks = any(len(f.get("quality_flags", {}).get("failed_checks", [])) > 0 for f in merged_features)
+        needs_fix = bool(not val1.get("is_valid") or val1.get("flags") or has_failed_checks)
+
+        adjusted_flag = needs_fix
         final_features = merged_features
         fix_pass_failed = False
-        if adjusted_flag:
-            fix_prompt = f"Context:\n{context_str}\n\nCurrent Features:\n{json.dumps(merged_features)}\n\nGroq validation flags:\n{json.dumps(val1.get('flags'))}\n\nFix only the issues identified by those flags and return the complete corrected feature list in the required JSON shape."
+
+        # Step 4: Fix Pass (Gemini targets specific failed checks)
+        if needs_fix:
+            violations_summary = []
+            if val1.get("flags"):
+                violations_summary.append(f"Global validation flags: {json.dumps(val1.get('flags'))}")
+            for f in merged_features:
+                fc = f.get("quality_flags", {}).get("failed_checks", [])
+                if fc:
+                    violations_summary.append(f"- Feature '{f.get('id')}' ({f.get('name')}): failed checks: {', '.join(fc)}")
+
+            violations_text = "\n".join(violations_summary)
+            fix_prompt = f"""Context:
+{context_str}
+
+Current Features (V3.9 Schema):
+{json.dumps(merged_features, indent=2)}
+
+Validation Failures / Quality Flags to Fix:
+{violations_text}
+
+Fix ONLY the identified issues while strictly preserving the V3.9 extended feature schema for every feature (id, name, description, source, business_rules, data_touched, actor_role, acceptance_criteria, exclusions, priority, provenance, reasoning, source_model). Return strictly valid JSON with the corrected 'features' list."""
+
             try:
                 fix_res = await call_gemini_api(system_prompt_draft, fix_prompt, retry=False)
-                final_features = fix_res["features"]
+                raw_fixed = fix_res.get("features", [])
+                if isinstance(raw_fixed, list) and raw_fixed:
+                    final_features = [
+                        normalize_feature_schema(f, default_id=f"feat-{i+1}", source_model="gemini")
+                        for i, f in enumerate(raw_fixed)
+                        if isinstance(f, dict)
+                    ]
+                else:
+                    fix_pass_failed = True
+                    final_features = merged_features
             except Exception as e:
                 print(f"[Step 4 Gemini Fix Error] {e}")
-                # Bug A2 Fix: keep merged_features fallback but record fix_pass_failed = True
                 fix_pass_failed = True
                 final_features = merged_features
 
-        final_validation_prompt = f"Context:\n{context_str}\n\nFeatures after the single fix pass:\n{json.dumps(final_features)}"
-        final_repair_prompt = f"Your previous final validation response was malformed or unparseable. Return only valid JSON with is_valid and flags.\n\n{final_validation_prompt}"
+        # Step 5: Final Validation Pass
+        for f in final_features:
+            f["quality_flags"] = evaluate_code_level_quality(f, fixed_inputs)
+
+        final_validation_prompt = f"Context:\n{context_str}\n\nFeatures after fix pass (V3.9 Schema):\n{json.dumps(final_features)}"
+        final_repair_prompt = f"Your previous final validation response was malformed. Return only valid JSON with is_valid, flags, and feature_evaluations.\n\n{final_validation_prompt}"
+
         try:
             val2 = await call_groq_json(system_prompt_val, final_validation_prompt, retry_user_prompt=final_repair_prompt)
             if "is_valid" not in val2:
-                # Fail-closed retry for final validation pass as well
                 val2 = await call_groq_json(system_prompt_val, final_repair_prompt, retry=False)
                 if "is_valid" not in val2:
                     raise HTTPException(status_code=502, detail="Generation failed: final validation response could not be confirmed.")
@@ -2230,10 +2609,18 @@ Output strictly valid JSON with no markdown formatting:
             raise
         except Exception as e:
             raise HTTPException(status_code=502, detail="Generation failed, please try again.") from e
-        if not val2["is_valid"] and val2.get("flags"):
+
+        eval_map2 = {ev.get("id"): ev for ev in val2.get("feature_evaluations", []) if isinstance(ev, dict)}
+        for f in final_features:
+            ev = eval_map2.get(f.get("id"))
+            if ev and isinstance(ev.get("failed_checks"), list):
+                model_failed = [str(fc).strip().lower() for fc in ev["failed_checks"] if str(fc).strip()]
+                existing_failed = list(f["quality_flags"].get("failed_checks") or [])
+                f["quality_flags"]["failed_checks"] = sorted(list(set(existing_failed + model_failed)))
+
+        if not val2.get("is_valid") or val2.get("flags") or any(len(f.get("quality_flags", {}).get("failed_checks", [])) > 0 for f in final_features):
             adjusted_flag = True
 
-        # Ensure contradiction_unresolved flags adjusted_flag
         if contradiction_unresolved:
             adjusted_flag = True
 
@@ -2312,17 +2699,26 @@ async def process_comment_batch(
         if comment_ids:
             client.table("comments").update({"status": "submitted"}).in_("id", comment_ids).eq("status", "pending").execute()
 
-        # Gemini Batch Fix Pass
-        system_prompt = """You are an AI software architect updating a project feature list based on user review comments.
-Modify, add, or refine the features list according to the user comments.
+        # Gemini Batch Fix Pass conforming to V3.9 schema
+        system_prompt = """You are an AI software architect updating a project feature list based on user review comments, strictly conforming to the V3.9 Requirement Quality Standard.
+Modify, add, or refine the features list according to the user comments while preserving all schema fields.
 Output strictly valid JSON with no markdown formatting:
 {
   "features": [
     {
       "id": "feat-1",
       "name": "<Feature Name>",
-      "description": "<One-sentence technical description>",
-      "source": "user_originated" | "ai_added"
+      "description": "<One-sentence technical summary>",
+      "source": "user_originated",
+      "business_rules": ["<Rule 1>", "<Rule 2>"],
+      "data_touched": ["<data_entity_1>"],
+      "actor_role": ["<actor_1>"],
+      "acceptance_criteria": ["<Criterion 1>"],
+      "exclusions": ["<Exclusion 1>"],
+      "priority": "must_have",
+      "provenance": "user_originated",
+      "reasoning": null,
+      "source_model": "gemini"
     }
   ]
 }"""
@@ -2331,7 +2727,14 @@ Output strictly valid JSON with no markdown formatting:
         
         try:
             fix_res = await call_gemini_api(system_prompt, f"Current Features:\n{json.dumps(current_features)}\n\nUser Comments:\n{comments_text}")
-            updated_features = fix_res["features"]
+            raw_updated = fix_res.get("features", [])
+            updated_features = [
+                normalize_feature_schema(f, default_id=f"feat-{i+1}", source_model="gemini")
+                for i, f in enumerate(raw_updated)
+                if isinstance(f, dict)
+            ]
+            if not updated_features:
+                updated_features = current_features
         except Exception as e:
             print(f"[Batch Fix Gemini Error] {e}")
             raise HTTPException(status_code=502, detail="Failed to process your comments, please try again.") from e
