@@ -10,6 +10,7 @@ import StartTriggerGate from "../StartTriggerGate";
 import ClarifyingQuestionsStage from "../ClarifyingQuestionsStage";
 import PersonaCaptureStage from "../PersonaCaptureStage";
 import NFRCaptureStage from "../NFRCaptureStage";
+import LightweightDraftConfirmStage from "../LightweightDraftConfirmStage";
 
 export default function InterviewScreen() {
   const { session } = useAuth();
@@ -35,6 +36,10 @@ export default function InterviewScreen() {
     nfrStatus,
     submitPersonaAnswer,
     submitNfrData,
+    lightweightDraftData,
+    lightweightDraftStatus,
+    generateLightweightDraft,
+    respondLightweightDraft,
     runIdeaPipeline,
     runRevisionPipeline,
     classifyIdeaStep0,
@@ -53,7 +58,11 @@ export default function InterviewScreen() {
   const [isSubmittingClarifications, setIsSubmittingClarifications] = useState(false);
   const [isSubmittingPersona, setIsSubmittingPersona] = useState(false);
   const [isSubmittingNfr, setIsSubmittingNfr] = useState(false);
+  const [draftAttempt, setDraftAttempt] = useState(1);
+  const [draftError, setDraftError] = useState(null);
+  const [isRespondingDraft, setIsRespondingDraft] = useState(false);
   const messagesEndRef = useRef(null);
+
   const textareaRef = useRef(null);
 
   const isActive = currentScreen === "interview";
@@ -471,46 +480,104 @@ export default function InterviewScreen() {
   };
 
   const handleStartGeneration = async () => {
-    // Phase 8: Explicit start trigger tap
+    // V3.8: Trigger Lightweight Confirm Draft instead of direct jump to full generation
     if (!ideaText) return;
-    const backendStatus = getBackendUrlStatus();
-    if (projectId && backendStatus.configured) {
-      try {
-        const res = await fetch(
-          getBackendApiUrl(`/api/projects/${projectId}/status`),
-          {
+    setDraftError(null);
+    setDraftAttempt(1);
+    const res = await generateLightweightDraft(1, null, session?.access_token || null);
+    if (res?.status === "error") {
+      setDraftError(res.detail || "Draft preview generation failed. Please try again.");
+    }
+  };
+
+  const handleDraftConfirm = async (att) => {
+    setIsRespondingDraft(true);
+    setDraftError(null);
+    try {
+      const res = await respondLightweightDraft("confirmed", null, att, session?.access_token || null);
+      if (res?.status === "error") {
+        setDraftError(res.detail || "Failed to confirm draft.");
+        return;
+      }
+
+      // Proceed to full generation
+      const backendStatus = getBackendUrlStatus();
+      if (projectId && backendStatus.configured) {
+        try {
+          await fetch(getBackendApiUrl(`/api/projects/${projectId}/status`), {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              ...(session?.access_token
-                ? { Authorization: `Bearer ${session.access_token}` }
-                : {}),
+              ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
             },
             body: JSON.stringify({
               status: "generating",
               fixed_inputs: fixedInputs,
             }),
-          },
-        );
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          const errMsg =
-            errData.message ||
-            errData.detail ||
-            `Status update failed with status ${res.status}`;
-          showToast(`Unable to start generation: ${errMsg}`);
-          return;
+          });
+        } catch (err) {
+          console.warn("Status update warning:", err);
         }
-      } catch (err) {
-        console.error("Status update error:", err);
-        showToast(
-          `Unable to start generation: ${err.message || "Network error"}`,
-        );
+      }
+      runIdeaPipeline(ideaText, session?.access_token || null);
+    } finally {
+      setIsRespondingDraft(false);
+    }
+  };
+
+  const handleDraftReject = async (correctionText, att) => {
+    setIsRespondingDraft(true);
+    setDraftError(null);
+    try {
+      const res = await respondLightweightDraft("rejected", correctionText, att, session?.access_token || null);
+      if (res?.status === "error") {
+        setDraftError(res.detail || "Failed to submit correction.");
         return;
       }
+
+      if (res?.status === "retry") {
+        // Attempt 1 rejected -> fetch Attempt 2 with correction text folded in
+        setDraftAttempt(2);
+        const draftRes = await generateLightweightDraft(2, correctionText, session?.access_token || null);
+        if (draftRes?.status === "error") {
+          setDraftError(draftRes.detail || "Failed to generate attempt 2 draft.");
+        }
+      } else if (res?.status === "proceeded_after_cap" || res?.proceed_to_generation) {
+        // Cap reached (Attempt 2 rejected) -> proceed to full generation
+        showToast("Maximum draft revisions reached. Proceeding to full dual-model generation with extra validation.");
+        const backendStatus = getBackendUrlStatus();
+        if (projectId && backendStatus.configured) {
+          try {
+            await fetch(getBackendApiUrl(`/api/projects/${projectId}/status`), {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+              },
+              body: JSON.stringify({
+                status: "generating",
+                fixed_inputs: fixedInputs,
+              }),
+            });
+          } catch (err) {
+            console.warn("Status update warning:", err);
+          }
+        }
+        runIdeaPipeline(ideaText, session?.access_token || null);
+      }
+    } finally {
+      setIsRespondingDraft(false);
     }
-    runIdeaPipeline(ideaText, session?.access_token || null);
   };
+
+  const handleDraftRetry = async () => {
+    setDraftError(null);
+    const res = await generateLightweightDraft(draftAttempt, null, session?.access_token || null);
+    if (res?.status === "error") {
+      setDraftError(res.detail || "Draft generation failed.");
+    }
+  };
+
 
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -747,12 +814,27 @@ export default function InterviewScreen() {
               )}
 
               {/* Phase 8: Explicit Start Trigger Gate */}
-              {step0Status === "ready" && isFixedInputsComplete && (
+              {step0Status === "ready" && isFixedInputsComplete && lightweightDraftStatus === "idle" && (
                 <StartTriggerGate
                   onStartGeneration={handleStartGeneration}
                   isGenerating={operationRunning}
                 />
               )}
+
+              {/* V3.8: Lightweight Confirm Draft Stage */}
+              {step0Status === "ready" && isFixedInputsComplete && lightweightDraftStatus !== "idle" && (
+                <LightweightDraftConfirmStage
+                  draftFeatures={lightweightDraftData?.draft_features || []}
+                  attempt={draftAttempt}
+                  isLoading={lightweightDraftStatus === "generating"}
+                  isResponding={isRespondingDraft || lightweightDraftStatus === "submitting"}
+                  errorMessage={draftError}
+                  onConfirm={handleDraftConfirm}
+                  onReject={handleDraftReject}
+                  onRetry={handleDraftRetry}
+                />
+              )}
+
 
               <div ref={messagesEndRef} />
             </div>

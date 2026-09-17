@@ -188,6 +188,10 @@ const initialMimarState = {
   nfrData: { scale: "", data_sensitivity: "", availability: "" },
   nfrStatus: "idle", // 'idle' | 'ready' | 'completed' | 'skipped'
 
+  // V3.8 Lightweight Confirm Draft State
+  lightweightDraftData: null,
+  lightweightDraftStatus: "idle", // 'idle' | 'generating' | 'reviewing' | 'submitting' | 'error'
+
   // Chat message history
   messages: [
     {
@@ -997,11 +1001,173 @@ export const useMimarStore = create((set, get) => ({
     }
   },
 
+  // V3.8 Lightweight Confirm Draft Actions
+  generateLightweightDraft: async (attempt = 1, correctionText = null, sessionToken = null) => {
+    const s = get();
+    if (!sessionToken) {
+      return {
+        status: "error",
+        detail: "A valid session is required to generate lightweight draft.",
+      };
+    }
+    const currentProjectId = s.projectId;
+    if (!currentProjectId) {
+      return {
+        status: "error",
+        detail: "A persisted project is required before generating draft.",
+      };
+    }
+
+    s.setOperationRunning(true, `GENERATING DRAFT PREVIEW (ATTEMPT ${attempt})`);
+    set({ lightweightDraftStatus: "generating" });
+    const controller = new AbortController();
+    set({ activeController: controller });
+    const signal = controller.signal;
+
+    let backendUrl = "";
+    try {
+      backendUrl = getBackendApiUrl("").replace(/\/$/, "");
+    } catch (err) {
+      get().setOperationRunning(false);
+      set({ activeController: null, lightweightDraftStatus: "error" });
+      return {
+        status: "error",
+        detail: "Backend URL is not configured.",
+      };
+    }
+
+    try {
+      const authHeaders = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${sessionToken}`,
+      };
+
+      const res = await fetch(
+        `${backendUrl}/api/projects/${currentProjectId}/lightweight-draft`,
+        {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({
+            attempt: Number(attempt) || 1,
+            correction_text: correctionText ? correctionText.trim() : null,
+          }),
+          signal,
+        }
+      );
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || errData.message || `HTTP ${res.status}: Draft generation failed`);
+      }
+
+      const result = await res.json();
+      set({
+        lightweightDraftData: result,
+        lightweightDraftStatus: "reviewing",
+      });
+      return result;
+    } catch (err) {
+      if (err.name === "AbortError") {
+        s.showToast("Draft generation stopped by user.");
+        return null;
+      }
+      console.warn("Generate lightweight draft error:", err);
+      set({ lightweightDraftStatus: "error" });
+      return {
+        status: "error",
+        detail: err.message || "Having trouble generating draft preview — try again.",
+      };
+    } finally {
+      get().setOperationRunning(false);
+      set({ activeController: null });
+      get().saveProjectState();
+    }
+  },
+
+  respondLightweightDraft: async (response, correctionText = null, attempt = 1, sessionToken = null) => {
+    const s = get();
+    if (!sessionToken) {
+      return {
+        status: "error",
+        detail: "A valid session is required to respond to draft.",
+      };
+    }
+    const currentProjectId = s.projectId;
+    if (!currentProjectId) {
+      return {
+        status: "error",
+        detail: "A persisted project is required before responding to draft.",
+      };
+    }
+
+    s.setOperationRunning(true, "SAVING DRAFT RESPONSE");
+    set({ lightweightDraftStatus: "submitting" });
+    const controller = new AbortController();
+    set({ activeController: controller });
+    const signal = controller.signal;
+
+    let backendUrl = "";
+    try {
+      backendUrl = getBackendApiUrl("").replace(/\/$/, "");
+    } catch (err) {
+      get().setOperationRunning(false);
+      set({ activeController: null, lightweightDraftStatus: "error" });
+      return {
+        status: "error",
+        detail: "Backend URL is not configured.",
+      };
+    }
+
+    try {
+      const authHeaders = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${sessionToken}`,
+      };
+
+      const res = await fetch(
+        `${backendUrl}/api/projects/${currentProjectId}/lightweight-draft/respond`,
+        {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({
+            response: response,
+            attempt: Number(attempt) || 1,
+            correction_text: correctionText ? correctionText.trim() : null,
+          }),
+          signal,
+        }
+      );
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || errData.message || `HTTP ${res.status}: Failed to submit response`);
+      }
+
+      const result = await res.json();
+      return result;
+    } catch (err) {
+      if (err.name === "AbortError") {
+        s.showToast("Submitting draft response stopped by user.");
+        return null;
+      }
+      console.warn("Respond lightweight draft error:", err);
+      set({ lightweightDraftStatus: "error" });
+      return {
+        status: "error",
+        detail: err.message || "Having trouble saving draft response — try again.",
+      };
+    } finally {
+      get().setOperationRunning(false);
+      set({ activeController: null });
+      get().saveProjectState();
+    }
+  },
 
   generationState: null,
   dependencyOrder: [],
 
   // Pipeline runner: runIdeaPipeline
+
   runIdeaPipeline: async (userText, sessionToken = null) => {
     const s = get();
     const requiredInputs = s.fixedInputs || {};
