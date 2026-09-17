@@ -1017,37 +1017,47 @@ async def call_gemini_api(
     if not gemini_key:
         raise HTTPException(status_code=500, detail="Gemini API unconfigured (GEMINI_API_KEY missing).")
     
-    gemini_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_key}"
-    payload = {
-        "contents": [
-            {"role": "user", "parts": [{"text": f"{system_prompt}\n\n{user_prompt}"}]}
-        ],
-        "generationConfig": {
-            "temperature": 0.2,
-            "responseMimeType": "application/json"
+    configured_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    candidate_models = [configured_model]
+    for m in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-flash"]:
+        if m not in candidate_models:
+            candidate_models.append(m)
+
+    last_error = None
+    for model_name in candidate_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={gemini_key}"
+        payload = {
+            "contents": [
+                {"role": "user", "parts": [{"text": f"{system_prompt}\n\n{user_prompt}"}]}
+            ],
+            "generationConfig": {
+                "temperature": 0.2,
+                "responseMimeType": "application/json"
+            }
         }
-    }
-    
-    for attempt in range(2 if retry else 1):
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as http_client:
-                request_payload = dict(payload)
-                if attempt and retry_user_prompt:
-                    request_payload["contents"] = [
-                        {"role": "user", "parts": [{"text": f"{system_prompt}\n\n{retry_user_prompt}"}]}
-                    ]
-                resp = await http_client.post(url, json=request_payload)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    raw = data["candidates"][0]["content"]["parts"][0]["text"]
-                    return parse_llm_json(raw)
-                print(f"[Gemini API Error Attempt {attempt+1}] Status {resp.status_code}: {resp.text}")
-        except Exception as e:
-            print(f"[Gemini Call Exception Attempt {attempt+1}] {e}")
-            if attempt == (1 if retry else 0):
-                raise
-    raise HTTPException(status_code=502, detail="Gemini API request failed after retry.")
+        
+        for attempt in range(2 if retry else 1):
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as http_client:
+                    request_payload = dict(payload)
+                    if attempt and retry_user_prompt:
+                        request_payload["contents"] = [
+                            {"role": "user", "parts": [{"text": f"{system_prompt}\n\n{retry_user_prompt}"}]}
+                        ]
+                    resp = await http_client.post(url, json=request_payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        raw = data["candidates"][0]["content"]["parts"][0]["text"]
+                        return parse_llm_json(raw)
+                    last_error = f"Status {resp.status_code}: {resp.text}"
+                    print(f"[Gemini API Error Model {model_name} Attempt {attempt+1}] {last_error}")
+            except Exception as e:
+                last_error = str(e)
+                print(f"[Gemini Call Exception Model {model_name} Attempt {attempt+1}] {e}")
+                if attempt == (1 if retry else 0):
+                    break
+
+    raise HTTPException(status_code=502, detail=f"Gemini API request failed: {last_error}")
 
 
 async def call_groq_json(
@@ -1061,39 +1071,50 @@ async def call_groq_json(
     if not groq_key:
         raise HTTPException(status_code=500, detail="Groq API unconfigured (GROQ_API_KEY missing).")
     
-    groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    configured_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    candidate_models = [configured_model]
+    for m in ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]:
+        if m not in candidate_models:
+            candidate_models.append(m)
+
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
-    payload = {
-        "model": groq_model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        "temperature": 0.1,
-        "response_format": {"type": "json_object"}
-    }
     
-    for attempt in range(2 if retry else 1):
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as http_client:
-                request_payload = dict(payload)
-                if attempt and retry_user_prompt:
-                    request_payload["messages"] = [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": retry_user_prompt},
-                    ]
-                resp = await http_client.post(url, headers=headers, json=request_payload)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    raw = data["choices"][0]["message"]["content"]
-                    return parse_llm_json(raw)
-                print(f"[Groq API Error Attempt {attempt+1}] Status {resp.status_code}: {resp.text}")
-        except Exception as e:
-            print(f"[Groq Call Exception Attempt {attempt+1}] {e}")
-            if attempt == (1 if retry else 0):
-                raise
-    raise HTTPException(status_code=502, detail="Groq API request failed after retry.")
+    last_error = None
+    for model_name in candidate_models:
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": 0.1,
+            "response_format": {"type": "json_object"}
+        }
+        
+        for attempt in range(2 if retry else 1):
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as http_client:
+                    request_payload = dict(payload)
+                    if attempt and retry_user_prompt:
+                        request_payload["messages"] = [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": retry_user_prompt},
+                        ]
+                    resp = await http_client.post(url, headers=headers, json=request_payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        raw = data["choices"][0]["message"]["content"]
+                        return parse_llm_json(raw)
+                    last_error = f"Status {resp.status_code}: {resp.text}"
+                    print(f"[Groq API Error Model {model_name} Attempt {attempt+1}] {last_error}")
+            except Exception as e:
+                last_error = str(e)
+                print(f"[Groq Call Exception Model {model_name} Attempt {attempt+1}] {e}")
+                if attempt == (1 if retry else 0):
+                    break
+
+    raise HTTPException(status_code=502, detail=f"Groq API request failed: {last_error}")
 
 
 # --- V3.9 Requirement Quality Standard Definitions & Heuristics ---
