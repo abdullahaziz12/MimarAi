@@ -985,10 +985,31 @@ class ContradictionScanRequest(BaseModel):
     round: int = 1
     resolved_answer: Optional[str] = None
 
+def parse_llm_json(raw: str) -> Dict[str, Any]:
+    """
+    Robust JSON parser for LLM responses that strips markdown code blocks
+    and extracts json payloads safely.
+    """
+    if not isinstance(raw, str):
+        return {}
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    cleaned = cleaned.strip()
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        match = re.search(r"(\{.*\})", cleaned, re.DOTALL)
+        if match:
+            return json.loads(match.group(1))
+        raise
+
+
 async def call_gemini_api(
     system_prompt: str,
     user_prompt: str,
-    timeout: float = 25.0,
+    timeout: float = 30.0,
     retry_user_prompt: Optional[str] = None,
     retry: bool = True,
 ) -> Dict[str, Any]:
@@ -1020,7 +1041,7 @@ async def call_gemini_api(
                 if resp.status_code == 200:
                     data = resp.json()
                     raw = data["candidates"][0]["content"]["parts"][0]["text"]
-                    return json.loads(raw)
+                    return parse_llm_json(raw)
                 print(f"[Gemini API Error Attempt {attempt+1}] Status {resp.status_code}: {resp.text}")
         except Exception as e:
             print(f"[Gemini Call Exception Attempt {attempt+1}] {e}")
@@ -1032,7 +1053,7 @@ async def call_gemini_api(
 async def call_groq_json(
     system_prompt: str,
     user_prompt: str,
-    timeout: float = 20.0,
+    timeout: float = 25.0,
     retry_user_prompt: Optional[str] = None,
     retry: bool = True,
 ) -> Dict[str, Any]:
@@ -1066,7 +1087,7 @@ async def call_groq_json(
                 if resp.status_code == 200:
                     data = resp.json()
                     raw = data["choices"][0]["message"]["content"]
-                    return json.loads(raw)
+                    return parse_llm_json(raw)
                 print(f"[Groq API Error Attempt {attempt+1}] Status {resp.status_code}: {resp.text}")
         except Exception as e:
             print(f"[Groq Call Exception Attempt {attempt+1}] {e}")
