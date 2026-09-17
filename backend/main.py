@@ -587,6 +587,34 @@ class NFRCaptureRequest(BaseModel):
     availability: Optional[str] = None
 
 
+# --- V3.8 Lightweight Confirm Draft Schemas ---
+class LightweightDraftRequest(BaseModel):
+    attempt: int = 1
+    correction_text: Optional[str] = None
+
+    @field_validator("attempt")
+    @classmethod
+    def validate_attempt(cls, v: int) -> int:
+        if v not in (1, 2):
+            raise ValueError("attempt must be 1 or 2.")
+        return v
+
+
+class LightweightDraftRespondRequest(BaseModel):
+    response: str
+    attempt: Optional[int] = None
+    correction_text: Optional[str] = None
+
+    @field_validator("response")
+    @classmethod
+    def validate_response(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if v not in ("confirmed", "rejected"):
+            raise ValueError("response must be 'confirmed' or 'rejected'.")
+        return v
+
+
+
 
 GREETING_WHITELIST = {
     "hi", "hello", "hey", "test", "thanks", "thank you", "ok", "okay",
@@ -1674,12 +1702,13 @@ def assemble_effective_idea_context(
     clarifying_qa: Optional[List[Dict[str, Any]]] = None,
     contradiction_unresolved: bool = False,
     personas_data: Optional[Union[Dict[str, Any], str]] = None,
-    nfrs_data: Optional[Dict[str, Any]] = None
+    nfrs_data: Optional[Dict[str, Any]] = None,
+    lightweight_draft_data: Optional[Union[Dict[str, Any], List[Dict[str, Any]], str, List[str]]] = None
 ) -> str:
     """
     Folds base project idea with persisted contradiction resolution details,
-    answered clarifying questions, persona capture data, and non-functional requirements (NFRs)
-    into a single coherent context string for generation.
+    answered clarifying questions, persona capture data, non-functional requirements (NFRs),
+    and any rejected lightweight draft corrections into a single coherent context string for generation.
     """
     sections = [base_idea_text.strip()]
 
@@ -1744,7 +1773,292 @@ def assemble_effective_idea_context(
                 parts.append(f"availability requirement is {availability}")
             sections.append(f"Non-functional requirements: {', '.join(parts)}.")
 
+    # 5. Fold in Lightweight Draft Corrections (if any)
+    if lightweight_draft_data:
+        corrections = []
+        if isinstance(lightweight_draft_data, dict):
+            attempts = lightweight_draft_data.get("attempts") or []
+            if isinstance(attempts, list):
+                for att in attempts:
+                    if isinstance(att, dict) and att.get("correction_text"):
+                        ct = str(att["correction_text"]).strip()
+                        if ct and ct not in corrections:
+                            corrections.append(ct)
+            direct_ct = (lightweight_draft_data.get("correction_text") or "").strip()
+            if direct_ct and direct_ct not in corrections:
+                corrections.append(direct_ct)
+        elif isinstance(lightweight_draft_data, list):
+            for item in lightweight_draft_data:
+                if isinstance(item, dict) and item.get("correction_text"):
+                    ct = str(item["correction_text"]).strip()
+                    if ct and ct not in corrections:
+                        corrections.append(ct)
+                elif isinstance(item, str) and item.strip() and item.strip() not in corrections:
+                    corrections.append(item.strip())
+        elif isinstance(lightweight_draft_data, str) and lightweight_draft_data.strip():
+            corrections.append(lightweight_draft_data.strip())
+
+        if corrections:
+            correction_str = "; ".join(corrections)
+            sections.append(f"Clarifications on draft features: {correction_str}.")
+
     return "\n\n".join(sections)
+
+
+# --- V3.8 Lightweight Confirm Draft Endpoints ---
+@app.post("/projects/{project_id}/lightweight-draft")
+@app.post("/api/projects/{project_id}/lightweight-draft")
+async def generate_lightweight_draft(
+    project_id: str,
+    req: LightweightDraftRequest,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+
+    attempt_num = req.attempt if req.attempt in (1, 2) else 1
+    incoming_correction = (req.correction_text or "").strip() or None
+
+    idea_text = project.get("idea_text") or "Software application"
+    step0_state = project.get("step0_state") or {}
+    contradiction_unresolved = bool(step0_state.get("contradiction_unresolved", False))
+    contradiction_data = step0_state.get("last_contradiction_result") or {}
+    clarifying_qa = step0_state.get("clarifying_qa") or []
+    personas_data = project.get("personas") or step0_state.get("personas") or {}
+    nfrs_data = project.get("nfrs") or step0_state.get("nfrs") or {}
+    existing_draft_state = project.get("lightweight_draft") or {}
+
+    # Authoritative fetch if real DB client
+    if client and not project_id.startswith("local-draft-"):
+        try:
+            cq_res = client.table("clarifying_questions").select("id, question, answer").eq("project_id", project_id).order("created_at", desc=False).execute()
+            if cq_res and isinstance(cq_res.data, list) and cq_res.data:
+                clarifying_qa = cq_res.data
+        except Exception as e:
+            print(f"[Fetch Clarifying QA Warning in Draft] {e}")
+
+        if not contradiction_data.get("resolved_answer"):
+            try:
+                cc_res = client.table("contradiction_checks").select("round, found, explanation, conflicting_parts, resolved_answer").eq("project_id", project_id).order("created_at", desc=True).limit(5).execute()
+                if cc_res and isinstance(cc_res.data, list) and cc_res.data:
+                    for row in cc_res.data:
+                        if row.get("resolved_answer"):
+                            contradiction_data = row
+                            break
+                    if not contradiction_data and cc_res.data:
+                        contradiction_data = cc_res.data[0]
+            except Exception as e:
+                print(f"[Fetch Contradiction Checks Warning in Draft] {e}")
+
+    # Combine existing draft context with any newly supplied correction
+    draft_context_source = dict(existing_draft_state) if isinstance(existing_draft_state, dict) else {}
+    if incoming_correction:
+        draft_context_source["correction_text"] = incoming_correction
+
+    effective_idea_text = assemble_effective_idea_context(
+        base_idea_text=idea_text,
+        contradiction_data=contradiction_data,
+        clarifying_qa=clarifying_qa,
+        contradiction_unresolved=contradiction_unresolved,
+        personas_data=personas_data,
+        nfrs_data=nfrs_data,
+        lightweight_draft_data=draft_context_source
+    )
+
+    system_prompt_lightweight = """You are an expert AI software architect.
+Given the project context, produce a concise bullet-point list of 4-6 core features and requirements understood from the user's idea.
+Focus on plain-language sanity-check summaries that a human can skim in a few seconds. Do NOT include acceptance criteria, database schema, or complex technical rules.
+Output strictly valid JSON with no markdown formatting:
+{
+  "draft_features": [
+    "Feature summary 1",
+    "Feature summary 2"
+  ]
+}"""
+    user_prompt = f"Project Context:\n{effective_idea_text}"
+    repair_prompt = f"Your previous response was malformed or unparseable. Return strictly valid JSON conforming to the schema with draft_features (list of strings).\n\n{user_prompt}"
+
+    try:
+        draft_res = await call_groq_json(system_prompt_lightweight, user_prompt, retry_user_prompt=repair_prompt)
+        raw_features = draft_res.get("draft_features") if isinstance(draft_res, dict) else None
+        if not isinstance(raw_features, list) or not raw_features:
+            draft_res = await call_groq_json(system_prompt_lightweight, repair_prompt, retry=False)
+            raw_features = draft_res.get("draft_features") if isinstance(draft_res, dict) else None
+            if not isinstance(raw_features, list) or not raw_features:
+                raise HTTPException(status_code=502, detail="Lightweight draft generation failed to return a valid feature list.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[Lightweight Draft Generation Error] {e}")
+        raise HTTPException(status_code=502, detail="Lightweight draft generation service unavailable.") from e
+
+    cleaned_features = [str(f).strip() for f in raw_features if str(f).strip()]
+    if not cleaned_features:
+        raise HTTPException(status_code=502, detail="Lightweight draft generation returned an empty feature list.")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    new_attempt_record = {
+        "attempt": attempt_num,
+        "draft_features": cleaned_features,
+        "user_response": None,
+        "correction_text": incoming_correction,
+        "created_at": now_iso
+    }
+
+    current_draft = dict(existing_draft_state) if isinstance(existing_draft_state, dict) else {}
+    attempts_list = list(current_draft.get("attempts") or [])
+    
+    # Update matching attempt or append
+    replaced = False
+    for idx, att in enumerate(attempts_list):
+        if isinstance(att, dict) and att.get("attempt") == attempt_num:
+            attempts_list[idx] = new_attempt_record
+            replaced = True
+            break
+    if not replaced:
+        attempts_list.append(new_attempt_record)
+
+    current_draft["attempts"] = attempts_list
+    if "final_status" not in current_draft:
+        current_draft["final_status"] = None
+    if "lightweight_draft_flagged" not in current_draft:
+        current_draft["lightweight_draft_flagged"] = False
+
+    if client and not project_id.startswith("local-draft-"):
+        saved = False
+        last_err = None
+        for save_att in range(2):
+            try:
+                client.table("projects").update({
+                    "lightweight_draft": current_draft
+                }).eq("id", project_id).execute()
+                saved = True
+                break
+            except Exception as e:
+                last_err = e
+                print(f"[Persist Lightweight Draft Attempt {save_att+1} Warning] {e}")
+        if not saved:
+            raise HTTPException(status_code=502, detail="Failed to persist lightweight draft data to database.") from last_err
+
+    return {
+        "status": "ok",
+        "draft_features": cleaned_features,
+        "attempt": attempt_num
+    }
+
+
+@app.post("/projects/{project_id}/lightweight-draft/respond")
+@app.post("/api/projects/{project_id}/lightweight-draft/respond")
+async def respond_lightweight_draft(
+    project_id: str,
+    req: LightweightDraftRespondRequest,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+
+    current_draft = project.get("lightweight_draft") or {}
+    if not isinstance(current_draft, dict):
+        current_draft = {}
+
+    attempts_list = list(current_draft.get("attempts") or [])
+
+    # Find the target attempt explicitly by matching attempt number, fallback to last attempt
+    target_attempt = None
+    target_idx = -1
+    if req.attempt is not None:
+        for idx, att in enumerate(attempts_list):
+            if isinstance(att, dict) and att.get("attempt") == req.attempt:
+                target_attempt = att
+                target_idx = idx
+                break
+
+    if target_attempt is None and attempts_list:
+        target_idx = len(attempts_list) - 1
+        target_attempt = attempts_list[target_idx]
+
+    if target_attempt is None:
+        target_attempt = {
+            "attempt": req.attempt or 1,
+            "draft_features": [],
+            "user_response": None,
+            "correction_text": None,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        attempts_list.append(target_attempt)
+        target_idx = len(attempts_list) - 1
+
+    # Update the target attempt
+    target_attempt["user_response"] = req.response
+    if req.correction_text is not None:
+        target_attempt["correction_text"] = req.correction_text.strip() or None
+    attempts_list[target_idx] = target_attempt
+    current_draft["attempts"] = attempts_list
+
+    attempt_num = target_attempt.get("attempt", target_idx + 1)
+
+    if req.response == "confirmed":
+        current_draft["final_status"] = "confirmed"
+        current_draft["lightweight_draft_flagged"] = False
+        proceed_to_gen = True
+        flagged = False
+        status_str = "confirmed"
+    else:  # rejected
+        if attempt_num < 2:
+            current_draft["final_status"] = None
+            current_draft["lightweight_draft_flagged"] = False
+            proceed_to_gen = False
+            flagged = False
+            status_str = "retry"
+        else:
+            # Attempt 2 rejected -> cap reached, proceed with flag
+            current_draft["final_status"] = "proceeded_after_cap"
+            current_draft["lightweight_draft_flagged"] = True
+            proceed_to_gen = True
+            flagged = True
+            status_str = "proceeded_after_cap"
+
+    if client and not project_id.startswith("local-draft-"):
+        saved = False
+        last_err = None
+        for save_att in range(2):
+            try:
+                client.table("projects").update({
+                    "lightweight_draft": current_draft
+                }).eq("id", project_id).execute()
+                saved = True
+                break
+            except Exception as e:
+                last_err = e
+                print(f"[Persist Draft Response Attempt {save_att+1} Warning] {e}")
+        if not saved:
+            raise HTTPException(status_code=502, detail="Failed to persist lightweight draft response to database.") from last_err
+
+    return {
+        "status": status_str,
+        "attempt": attempt_num,
+        "proceed_to_generation": proceed_to_gen,
+        "lightweight_draft_flagged": flagged
+    }
+
+
+@app.get("/projects/{project_id}/lightweight-draft")
+@app.get("/api/projects/{project_id}/lightweight-draft")
+async def get_lightweight_draft(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+
+    draft_data = project.get("lightweight_draft")
+    return {"lightweight_draft": draft_data}
 
 
 @app.post("/projects/{project_id}/generate")
@@ -1776,13 +2090,14 @@ async def generate_feature_pipeline(
 
     generation_succeeded = False
     try:
-        # Retrieve persisted Step 0 context (Contradiction resolution, Clarifying QA, Personas, NFRs)
+        # Retrieve persisted Step 0 context (Contradiction resolution, Clarifying QA, Personas, NFRs, Lightweight Draft)
         step0_state = project.get("step0_state") or {}
         contradiction_unresolved = bool(step0_state.get("contradiction_unresolved", False))
         contradiction_data = step0_state.get("last_contradiction_result") or {}
         clarifying_qa = step0_state.get("clarifying_qa") or []
         personas_data = project.get("personas") or step0_state.get("personas") or {}
         nfrs_data = project.get("nfrs") or step0_state.get("nfrs") or {}
+        lightweight_draft_data = project.get("lightweight_draft") or {}
 
         # If client is connected and real project, query authoritative tables with 1 retry on failure
         if client and not project_id.startswith("local-draft-"):
@@ -1824,8 +2139,10 @@ async def generate_feature_pipeline(
             clarifying_qa=clarifying_qa,
             contradiction_unresolved=contradiction_unresolved,
             personas_data=personas_data,
-            nfrs_data=nfrs_data
+            nfrs_data=nfrs_data,
+            lightweight_draft_data=lightweight_draft_data
         )
+
         context_str = f"Project Idea: {effective_idea_text}\nFixed Inputs: {json.dumps(fixed_inputs)}"
 
         # Step 1: Parallel Independent Drafting (Gemini + Groq)
