@@ -988,7 +988,7 @@ class ContradictionScanRequest(BaseModel):
 async def call_gemini_api(
     system_prompt: str,
     user_prompt: str,
-    timeout: float = 12.0,
+    timeout: float = 25.0,
     retry_user_prompt: Optional[str] = None,
     retry: bool = True,
 ) -> Dict[str, Any]:
@@ -1032,7 +1032,7 @@ async def call_gemini_api(
 async def call_groq_json(
     system_prompt: str,
     user_prompt: str,
-    timeout: float = 10.0,
+    timeout: float = 20.0,
     retry_user_prompt: Optional[str] = None,
     retry: bool = True,
 ) -> Dict[str, Any]:
