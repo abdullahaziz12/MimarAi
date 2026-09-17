@@ -1890,7 +1890,7 @@ def check_generation_rate_limit(client, user_id: str, limit_type: str):
         now = datetime.now(timezone.utc)
         
         if limit_type == "pipeline":
-            max_limit = 10
+            max_limit = 5
             window_hours = 24
             col_count = "pipeline_count"
             col_start = "pipeline_window_start"
