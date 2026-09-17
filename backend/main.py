@@ -996,7 +996,7 @@ async def call_gemini_api(
     if not gemini_key:
         raise HTTPException(status_code=500, detail="Gemini API unconfigured (GEMINI_API_KEY missing).")
     
-    gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    gemini_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_key}"
     payload = {
         "contents": [
