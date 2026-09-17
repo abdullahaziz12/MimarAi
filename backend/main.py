@@ -2114,7 +2114,10 @@ async def generate_lightweight_draft(
 
         if not contradiction_data.get("resolved_answer"):
             try:
-                cc_res = client.table("contradiction_checks").select("round, found, explanation, conflicting_parts, resolved_answer").eq("project_id", project_id).order("created_at", desc=True).limit(5).execute()
+                try:
+                    cc_res = client.table("contradiction_checks").select("round, found, explanation, conflicting_parts, resolved_answer").eq("project_id", project_id).order("checked_at", desc=True).limit(5).execute()
+                except Exception:
+                    cc_res = client.table("contradiction_checks").select("round, found, explanation, conflicting_parts, resolved_answer").eq("project_id", project_id).order("created_at", desc=True).limit(5).execute()
                 if cc_res and isinstance(cc_res.data, list) and cc_res.data:
                     for row in cc_res.data:
                         if row.get("resolved_answer"):
@@ -2395,7 +2398,10 @@ async def generate_feature_pipeline(
             # Check contradiction_checks table for resolved_answer if not in step0_state
             if not contradiction_data.get("resolved_answer"):
                 try:
-                    cc_res = client.table("contradiction_checks").select("round, found, explanation, conflicting_parts, resolved_answer").eq("project_id", project_id).order("created_at", desc=True).limit(5).execute()
+                    try:
+                        cc_res = client.table("contradiction_checks").select("round, found, explanation, conflicting_parts, resolved_answer").eq("project_id", project_id).order("checked_at", desc=True).limit(5).execute()
+                    except Exception:
+                        cc_res = client.table("contradiction_checks").select("round, found, explanation, conflicting_parts, resolved_answer").eq("project_id", project_id).order("created_at", desc=True).limit(5).execute()
                     if cc_res and isinstance(cc_res.data, list) and cc_res.data:
                         for row in cc_res.data:
                             if row.get("resolved_answer"):
