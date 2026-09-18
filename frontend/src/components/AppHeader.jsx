@@ -5,9 +5,11 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMimarStore, STAGE_FOR_SCREEN, STAGE_ORDER } from '../store/mimarStore';
 import HeaderAvatar from './HeaderAvatar';
+import DraftsPanel from './DraftsPanel';
 
 export default function AppHeader() {
   const router = useRouter();
+  const [isDraftsOpen, setIsDraftsOpen] = React.useState(false);
   const {
     currentScreen,
     interviewMode,
@@ -113,7 +115,7 @@ export default function AppHeader() {
         </span>
       </div>
 
-      <div className="header-right" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div className="header-right" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <a
           href="/"
           onClick={handleStopOrLeave}
@@ -124,8 +126,38 @@ export default function AppHeader() {
         >
           {operationRunning ? '⏹ Stop Generation' : 'Stop Generation'}
         </a>
+        <button
+          type="button"
+          id="draftsMenuBtn"
+          onClick={() => setIsDraftsOpen(true)}
+          style={{
+            background: 'rgba(56, 189, 248, 0.08)',
+            border: '1px solid var(--border-line, rgba(56, 189, 248, 0.25))',
+            color: 'var(--ink-primary, #F8FAFC)',
+            borderRadius: '6px',
+            width: '34px',
+            height: '34px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            fontSize: '18px',
+            fontWeight: 'bold',
+            lineHeight: 1,
+            transition: 'all 0.15s ease',
+          }}
+          title="Open saved drafts panel"
+          aria-label="Open saved drafts panel"
+        >
+          ⋮
+        </button>
         <HeaderAvatar />
       </div>
+
+      <DraftsPanel
+        isOpen={isDraftsOpen}
+        onClose={() => setIsDraftsOpen(false)}
+      />
     </header>
   );
 }

@@ -1213,6 +1213,178 @@ export const useMimarStore = create((set, get) => ({
     }
   },
 
+  fetchDraftsList: async (sessionToken = null) => {
+    try {
+      const backendUrl = getBackendApiUrl("").replace(/\/$/, "");
+      const res = await fetch(`${backendUrl}/api/projects/drafts`, {
+        headers: sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {},
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        return { status: "error", detail: errData.detail || errData.message || "Failed to fetch drafts list." };
+      }
+      const data = await res.json();
+      return { status: "ok", drafts: data.drafts || [] };
+    } catch (err) {
+      console.warn("Fetch drafts list error:", err);
+      return { status: "error", detail: err.message || "Unable to connect to server for drafts." };
+    }
+  },
+
+  loadProjectState: async (projectIdToLoad, sessionToken = null) => {
+    if (!projectIdToLoad) return { status: "error", detail: "Project ID is required." };
+    try {
+      const backendUrl = getBackendApiUrl("").replace(/\/$/, "");
+      const res = await fetch(`${backendUrl}/api/projects/${projectIdToLoad}`, {
+        headers: sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {},
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        return { status: "error", detail: errData.detail || errData.message || "Failed to load project state." };
+      }
+      const json = await res.json();
+      const project = json.project || {};
+
+      const step0_state = project.step0_state || {};
+      const density_flags = project.density_flags || { clarifying_questions: "full", personas: "ask", nfrs: "ask" };
+      const clarifying_list = project.clarifying_questions || [];
+      const personas_data = project.personas || step0_state.personas || null;
+      const nfrs_data = project.nfrs || step0_state.nfrs || null;
+      const lightweight_draft = project.lightweight_draft || null;
+      const last_contra = project.last_contradiction_result || step0_state.last_contradiction_result || {};
+      const gen_state = project.generation_state || null;
+
+      // Extract clarifying answers
+      const cqAnswers = {};
+      let allCqAnswered = clarifying_list.length > 0;
+      for (const cq of clarifying_list) {
+        if (cq.answer && cq.answer.trim()) {
+          cqAnswers[cq.id] = cq.answer;
+        } else {
+          allCqAnswered = false;
+        }
+      }
+
+      let clarifyingStatus = "idle";
+      if (density_flags.clarifying_questions === "skip") {
+        clarifyingStatus = "skipped";
+      } else if (clarifying_list.length > 0) {
+        clarifyingStatus = allCqAnswered ? "completed" : "ready";
+      }
+
+      let personaStatus = "idle";
+      if (density_flags.personas === "skip") {
+        personaStatus = "skipped";
+      } else if (personas_data && personas_data.answer && personas_data.answer.trim()) {
+        personaStatus = "completed";
+      }
+
+      let nfrStatus = "idle";
+      if (density_flags.nfrs === "skip") {
+        nfrStatus = "skipped";
+      } else if (nfrs_data && nfrs_data.scale) {
+        nfrStatus = "completed";
+      }
+
+      let lightweightDraftStatus = "idle";
+      if (lightweight_draft && Array.isArray(lightweight_draft.draft_features) && lightweight_draft.draft_features.length > 0) {
+        lightweightDraftStatus = (lightweight_draft.final_status === "accepted") ? "idle" : "reviewing";
+      }
+
+      // Determine step0Status & active screen
+      let step0Status = "idle";
+      let currentScreen = "interview";
+      let interviewDone = false;
+      let planGenerated = false;
+
+      if (gen_state && Array.isArray(gen_state.features) && gen_state.features.length > 0) {
+        step0Status = "ready";
+        interviewDone = true;
+        planGenerated = true;
+        currentScreen = "plan";
+      } else if (step0_state.last_label === "READY") {
+        if (clarifyingStatus === "ready") {
+          step0Status = "clarifying";
+        } else if (personaStatus === "idle" && density_flags.personas !== "skip") {
+          step0Status = "persona_capture";
+          personaStatus = "ready";
+        } else if (nfrStatus === "idle" && density_flags.nfrs !== "skip") {
+          step0Status = "nfr_capture";
+          nfrStatus = "ready";
+        } else {
+          step0Status = "ready";
+        }
+      } else if (step0_state.last_label === "TOO_VAGUE") {
+        step0Status = (step0_state.round_count >= 2) ? "vague_fallback" : "idle";
+      } else if (step0_state.last_label === "OFF_TOPIC") {
+        step0Status = (step0_state.off_topic_streak >= 3) ? "off_topic_fallback" : "idle";
+      }
+
+      // Build intelligent transcript messages
+      const msgs = [
+        {
+          id: "init-ai-1",
+          role: "ai",
+          text: "Tell me about the software you want to build. What problem does it solve and who is it for? Paste raw requirements, user stories, or a rough concept.",
+        },
+      ];
+      if (project.idea_text && project.idea_text.trim()) {
+        msgs.push({
+          id: "user-idea-" + Date.now(),
+          role: "user",
+          text: project.idea_text.trim(),
+        });
+        if (step0Status === "ready") {
+          msgs.push({
+            id: "ai-ready-" + Date.now(),
+            role: "ai",
+            text: "Great! Your project idea looks clear and ready for architecture planning. Please configure your target fixed inputs below to proceed.",
+          });
+        }
+      }
+
+      // Reset store cleanly to prevent state pollution, then hydrate
+      set({
+        ...initialMimarState,
+        projectId: project.id,
+        ideaText: project.idea_text || "",
+        step0State: step0_state,
+        step0Status,
+        currentScreen,
+        interviewDone,
+        planGenerated,
+        fixedInputs: project.fixed_inputs || { stack: null, database: null, deployment: null, apis: null },
+        generationState: gen_state,
+        densityFlags: density_flags,
+        clarifyingQuestions: clarifying_list,
+        clarifyingAnswers: cqAnswers,
+        clarifyingStatus,
+        personaAnswer: personas_data?.answer || "",
+        personaStatus,
+        nfrData: nfrs_data || { scale: "", data_sensitivity: "", availability: "" },
+        nfrStatus,
+        lightweightDraftData: lightweight_draft,
+        lightweightDraftStatus,
+        contradictionState: {
+          round: 1,
+          found: Boolean(last_contra.contradiction),
+          explanation: last_contra.explanation || null,
+          conflicting_parts: last_contra.conflicting_parts || [],
+          unresolved: Boolean(step0_state.contradiction_unresolved),
+        },
+        messages: msgs,
+        operationRunning: false,
+        activeController: null,
+      });
+
+      get().saveProjectState();
+      return { status: "ok", project };
+    } catch (err) {
+      console.warn("Load project state error:", err);
+      return { status: "error", detail: err.message || "Failed to load project state." };
+    }
+  },
+
   generationState: null,
   dependencyOrder: [],
 
