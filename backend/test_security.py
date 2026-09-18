@@ -141,6 +141,11 @@ class SecurityRegressionTests(unittest.TestCase):
                     return Response(200, {})
                 return Response(200, {"data": [{"id": "openai/gpt-oss-120b"}]})
 
+            async def post(self, url, **_kwargs):
+                if "generativelanguage" in url:
+                    return Response(200, {})
+                return Response(200, {})
+
         with patch.dict(
             os.environ,
             {
