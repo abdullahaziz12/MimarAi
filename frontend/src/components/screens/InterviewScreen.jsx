@@ -418,8 +418,13 @@ export default function InterviewScreen() {
     }
   };
 
+  const shouldShowComposer =
+    interviewMode !== "readonly" &&
+    ["idle", "vague_fallback", "off_topic_fallback", "contradiction_resolving"].includes(step0Status);
+
   const handleSend = async (e) => {
     e?.preventDefault();
+    if (!shouldShowComposer) return;
     if (operationRunning) {
       if (activeController) {
         activeController.abort();
@@ -580,6 +585,7 @@ export default function InterviewScreen() {
 
 
   const handleKeyDown = (e) => {
+    if (!shouldShowComposer) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -840,7 +846,29 @@ export default function InterviewScreen() {
             </div>
 
             {/* CHAT COMPOSER */}
-            {interviewMode !== "readonly" ? (
+            {interviewMode === "readonly" ? (
+              <div
+                className="composer-readonly-msg visible"
+                id="composerReadonlyMsg"
+              >
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                <span>
+                  Interview input locked to protect project state integrity.
+                  Navigate using the sidebar shortcuts to review or comment.
+                </span>
+              </div>
+            ) : shouldShowComposer ? (
               <div className="inputbar" id="interviewInputBar">
                 <div
                   className={`input-shell ${operationRunning ? "locked" : ""}`}
@@ -910,29 +938,7 @@ export default function InterviewScreen() {
                   <span>{inputVal.length} / 2,000</span>
                 </div>
               </div>
-            ) : (
-              <div
-                className="composer-readonly-msg visible"
-                id="composerReadonlyMsg"
-              >
-                <svg
-                  width="15"
-                  height="15"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="8" x2="12" />
-                  <line x1="12" y1="16" x2="12.01" y2="16" />
-                </svg>
-                <span>
-                  Interview input locked to protect project state integrity.
-                  Navigate using the sidebar shortcuts to review or comment.
-                </span>
-              </div>
-            )}
+            ) : null}
           </div>
 
           {/* RIGHT SIDE PIPELINE PANEL */}
