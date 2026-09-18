@@ -660,7 +660,7 @@ export default function InterviewScreen() {
                 MIMAR ARCHITECT LINTER ENGINE
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                {projectId && step0Status !== "idle" && (
+                {projectId && interviewMode !== "readonly" && (
                   <button
                     type="button"
                     id="reviewAnswersHeaderBtn"
