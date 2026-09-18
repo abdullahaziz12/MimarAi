@@ -614,6 +614,19 @@ class LightweightDraftRespondRequest(BaseModel):
         return v
 
 
+# --- V3.11 Interview Answers Edit Flow Schemas ---
+class ContradictionResolutionEditRequest(BaseModel):
+    resolved_answer: str
+
+    @field_validator("resolved_answer")
+    @classmethod
+    def validate_resolved_answer(cls, v: str) -> str:
+        cleaned = (v or "").strip()
+        if not cleaned:
+            raise ValueError("resolved_answer cannot be empty.")
+        return cleaned
+
+
 
 
 GREETING_WHITELIST = {
@@ -1732,9 +1745,14 @@ async def submit_clarifying_answers(
             step0_state["clarifying_qa"] = qa_list
             step0_state["clarifying_completed"] = True
 
-            client.table("projects").update({
-                "step0_state": step0_state
-            }).eq("id", project_id).execute()
+            project_update = {"step0_state": step0_state}
+            # V3.11: If a lightweight draft was already confirmed, invalidate it on edit
+            current_draft = project.get("lightweight_draft")
+            if isinstance(current_draft, dict) and current_draft.get("final_status"):
+                current_draft["final_status"] = None
+                project_update["lightweight_draft"] = current_draft
+
+            client.table("projects").update(project_update).eq("id", project_id).execute()
         except Exception as e:
             print(f"[Project Step0 State Clarifying Update Warning] {e}")
 
@@ -1794,14 +1812,21 @@ async def submit_personas(
         step0_state = project.get("step0_state") or {}
         step0_state["personas"] = persona_record
 
+        project_update = {
+            "personas": persona_record,
+            "step0_state": step0_state
+        }
+        # V3.11: If a lightweight draft was already confirmed, invalidate it on edit
+        current_draft = project.get("lightweight_draft")
+        if isinstance(current_draft, dict) and current_draft.get("final_status"):
+            current_draft["final_status"] = None
+            project_update["lightweight_draft"] = current_draft
+
         saved = False
         last_err = None
         for attempt in range(2):
             try:
-                client.table("projects").update({
-                    "personas": persona_record,
-                    "step0_state": step0_state
-                }).eq("id", project_id).execute()
+                client.table("projects").update(project_update).eq("id", project_id).execute()
                 saved = True
                 break
             except Exception as e:
@@ -1881,14 +1906,21 @@ async def submit_nfrs(
         step0_state = project.get("step0_state") or {}
         step0_state["nfrs"] = nfr_record
 
+        project_update = {
+            "nfrs": nfr_record,
+            "step0_state": step0_state
+        }
+        # V3.11: If a lightweight draft was already confirmed, invalidate it on edit
+        current_draft = project.get("lightweight_draft")
+        if isinstance(current_draft, dict) and current_draft.get("final_status"):
+            current_draft["final_status"] = None
+            project_update["lightweight_draft"] = current_draft
+
         saved = False
         last_err = None
         for attempt in range(2):
             try:
-                client.table("projects").update({
-                    "nfrs": nfr_record,
-                    "step0_state": step0_state
-                }).eq("id", project_id).execute()
+                client.table("projects").update(project_update).eq("id", project_id).execute()
                 saved = True
                 break
             except Exception as e:
@@ -1921,6 +1953,110 @@ async def get_nfrs(
 
     nfrs = project.get("nfrs") or (project.get("step0_state") or {}).get("nfrs")
     return {"nfrs": nfrs}
+
+
+# --- V3.11 Interview Answers Edit Flow Endpoints ---
+@app.post("/projects/{project_id}/contradiction-resolution")
+@app.post("/api/projects/{project_id}/contradiction-resolution")
+async def edit_contradiction_resolution(
+    project_id: str,
+    req: ContradictionResolutionEditRequest,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+
+    step0_state = project.get("step0_state") or {}
+    last_contra = step0_state.get("last_contradiction_result") or {}
+    last_contra["resolved_answer"] = req.resolved_answer
+    last_contra["checked_at"] = datetime.now(timezone.utc).isoformat()
+    step0_state["last_contradiction_result"] = last_contra
+
+    update_payload = {"step0_state": step0_state}
+
+    # Reset lightweight draft if it was already confirmed
+    current_draft = project.get("lightweight_draft")
+    if isinstance(current_draft, dict) and current_draft.get("final_status"):
+        current_draft["final_status"] = None
+        update_payload["lightweight_draft"] = current_draft
+
+    if client and not project_id.startswith("local-draft-"):
+        saved = False
+        last_err = None
+        for attempt in range(2):
+            try:
+                client.table("projects").update(update_payload).eq("id", project_id).execute()
+                saved = True
+                break
+            except Exception as e:
+                last_err = e
+                print(f"[Persist Contradiction Edit Attempt {attempt+1} Warning] {e}")
+
+        if not saved:
+            raise HTTPException(
+                status_code=502,
+                detail="Failed to persist edited contradiction resolution to database."
+            ) from last_err
+
+        # Also update latest row in contradiction_checks table if present
+        try:
+            cc_rows = client.table("contradiction_checks").select("id").eq("project_id", project_id).order("checked_at", desc=True).limit(1).execute()
+            if cc_rows and cc_rows.data:
+                latest_cc_id = cc_rows.data[0]["id"]
+                client.table("contradiction_checks").update({"resolved_answer": req.resolved_answer}).eq("id", latest_cc_id).execute()
+        except Exception as e:
+            print(f"[Update contradiction_checks Table Warning] {e}")
+
+    return {
+        "status": "ok",
+        "message": "Contradiction resolution updated successfully.",
+        "last_contradiction_result": last_contra
+    }
+
+
+@app.get("/projects/{project_id}/interview-summary")
+@app.get("/api/projects/{project_id}/interview-summary")
+async def get_interview_summary(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+
+    step0_state = project.get("step0_state") or {}
+    last_contra = step0_state.get("last_contradiction_result") or {}
+
+    # Query clarifying questions from DB
+    clarifying_list = []
+    if client and not project_id.startswith("local-draft-"):
+        try:
+            cq_res = client.table("clarifying_questions").select("id, question, answer").eq("project_id", project_id).order("created_at", desc=False).execute()
+            if cq_res and cq_res.data:
+                clarifying_list = cq_res.data
+        except Exception as e:
+            print(f"[Fetch Clarifying QA in Summary Warning] {e}")
+
+    if not clarifying_list:
+        clarifying_list = step0_state.get("clarifying_qa") or []
+
+    personas_data = project.get("personas") or step0_state.get("personas")
+    nfrs_data = project.get("nfrs") or step0_state.get("nfrs")
+    lightweight_draft_data = project.get("lightweight_draft")
+
+    return {
+        "status": "ok",
+        "project_id": project_id,
+        "idea_text": project.get("idea_text"),
+        "contradiction_resolution": last_contra,
+        "clarifying_questions": clarifying_list,
+        "personas": personas_data,
+        "nfrs": nfrs_data,
+        "lightweight_draft": lightweight_draft_data
+    }
 
 
 
