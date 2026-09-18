@@ -1085,7 +1085,7 @@ export default function InterviewScreen() {
             </div>
 
             {/* CHAT COMPOSER */}
-            {interviewMode !== "readonly" ? (
+            {interviewMode === "readonly" ? (
               <div
                 className="composer-readonly-msg visible"
                 id="composerReadonlyMsg"
