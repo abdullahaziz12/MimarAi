@@ -1969,6 +1969,26 @@ def check_generation_rate_limit(client, user_id: str, limit_type: str):
         print(f"[Generation Rate Limit Warning] {e}")
 
 
+def fetch_contradiction_checks_records(client, project_id: str) -> List[Dict[str, Any]]:
+    """Fetch contradiction check records with resilient ordering across schema variants."""
+    if not client or not project_id or project_id.startswith("local-draft-"):
+        return []
+    for order_col in ["checked_at", "created_at"]:
+        try:
+            res = client.table("contradiction_checks").select("*").eq("project_id", project_id).order(order_col, desc=True).limit(5).execute()
+            if res and isinstance(res.data, list):
+                return res.data
+        except Exception:
+            continue
+    try:
+        res = client.table("contradiction_checks").select("*").eq("project_id", project_id).limit(5).execute()
+        if res and isinstance(res.data, list):
+            return res.data
+    except Exception as e:
+        print(f"[Fetch Contradiction Checks Warning] {e}")
+    return []
+
+
 def assemble_effective_idea_context(
     base_idea_text: str,
     contradiction_data: Optional[Dict[str, Any]] = None,
@@ -2113,20 +2133,13 @@ async def generate_lightweight_draft(
             print(f"[Fetch Clarifying QA Warning in Draft] {e}")
 
         if not contradiction_data.get("resolved_answer"):
-            try:
-                try:
-                    cc_res = client.table("contradiction_checks").select("round, found, explanation, conflicting_parts, resolved_answer").eq("project_id", project_id).order("checked_at", desc=True).limit(5).execute()
-                except Exception:
-                    cc_res = client.table("contradiction_checks").select("round, found, explanation, conflicting_parts, resolved_answer").eq("project_id", project_id).order("created_at", desc=True).limit(5).execute()
-                if cc_res and isinstance(cc_res.data, list) and cc_res.data:
-                    for row in cc_res.data:
-                        if row.get("resolved_answer"):
-                            contradiction_data = row
-                            break
-                    if not contradiction_data and cc_res.data:
-                        contradiction_data = cc_res.data[0]
-            except Exception as e:
-                print(f"[Fetch Contradiction Checks Warning in Draft] {e}")
+            cc_rows = fetch_contradiction_checks_records(client, project_id)
+            for row in cc_rows:
+                if row.get("resolved_answer"):
+                    contradiction_data = row
+                    break
+            if not contradiction_data and cc_rows:
+                contradiction_data = cc_rows[0]
 
     # Combine existing draft context with any newly supplied correction
     draft_context_source = dict(existing_draft_state) if isinstance(existing_draft_state, dict) else {}
@@ -2397,20 +2410,13 @@ async def generate_feature_pipeline(
 
             # Check contradiction_checks table for resolved_answer if not in step0_state
             if not contradiction_data.get("resolved_answer"):
-                try:
-                    try:
-                        cc_res = client.table("contradiction_checks").select("round, found, explanation, conflicting_parts, resolved_answer").eq("project_id", project_id).order("checked_at", desc=True).limit(5).execute()
-                    except Exception:
-                        cc_res = client.table("contradiction_checks").select("round, found, explanation, conflicting_parts, resolved_answer").eq("project_id", project_id).order("created_at", desc=True).limit(5).execute()
-                    if cc_res and isinstance(cc_res.data, list) and cc_res.data:
-                        for row in cc_res.data:
-                            if row.get("resolved_answer"):
-                                contradiction_data = row
-                                break
-                        if not contradiction_data and cc_res.data:
-                            contradiction_data = cc_res.data[0]
-                except Exception as e:
-                    print(f"[Fetch Contradiction Checks Warning] {e}")
+                cc_rows = fetch_contradiction_checks_records(client, project_id)
+                for row in cc_rows:
+                    if row.get("resolved_answer"):
+                        contradiction_data = row
+                        break
+                if not contradiction_data and cc_rows:
+                    contradiction_data = cc_rows[0]
 
         effective_idea_text = assemble_effective_idea_context(
             base_idea_text=idea_text,

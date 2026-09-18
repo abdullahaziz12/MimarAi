@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS contradiction_checks (
     explanation TEXT,
     conflicting_parts JSONB DEFAULT '[]'::jsonb,
     resolved_answer TEXT,
+    checked_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
