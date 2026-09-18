@@ -334,18 +334,28 @@ def health_db_check():
 
 
 async def check_provider_health():
-    """Check provider reachability/model availability without generating tokens."""
-    gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    """Check provider reachability/model availability using minimal lightweight probes."""
+    raw_gemini_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    gemini_model = raw_gemini_model.replace("models/", "").strip()
     groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
     async def check_gemini():
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             return "unavailable"
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent"
+        payload = {
+            "contents": [
+                {"role": "user", "parts": [{"text": "ping"}]}
+            ],
+            "generationConfig": {
+                "maxOutputTokens": 1,
+                "temperature": 0.0
+            }
+        }
         try:
             async with httpx.AsyncClient(timeout=4.0) as client:
-                response = await client.get(url, params={"key": api_key})
+                response = await client.post(url, params={"key": api_key}, json=payload)
             return "connected" if response.status_code == 200 else "unavailable"
         except (httpx.HTTPError, ValueError):
             return "unavailable"
@@ -1078,6 +1088,17 @@ def parse_llm_json(raw: str) -> Dict[str, Any]:
         raise
 
 
+def _sanitize_gemini_error(error_msg: str, key: Optional[str] = None) -> str:
+    """Sanitize any API key or query parameters from error message."""
+    if not error_msg:
+        return ""
+    sanitized = str(error_msg)
+    if key:
+        sanitized = sanitized.replace(key, "[REDACTED]")
+    sanitized = re.sub(r"key=[a-zA-Z0-9_\-]+", "key=[REDACTED]", sanitized)
+    return sanitized
+
+
 async def call_gemini_api(
     system_prompt: str,
     user_prompt: str,
@@ -1089,15 +1110,20 @@ async def call_gemini_api(
     if not gemini_key:
         raise HTTPException(status_code=500, detail="Gemini API unconfigured (GEMINI_API_KEY missing).")
     
-    configured_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-    candidate_models = [configured_model]
-    for m in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-flash"]:
+    raw_configured_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    configured_model = raw_configured_model.replace("models/", "").strip()
+    
+    # Verified public Gemini models supporting generateContent on v1beta
+    VERIFIED_GEMINI_MODELS = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
+    
+    candidate_models = [configured_model] if configured_model in VERIFIED_GEMINI_MODELS else ["gemini-1.5-flash"]
+    for m in VERIFIED_GEMINI_MODELS:
         if m not in candidate_models:
             candidate_models.append(m)
 
     last_error = None
     for model_name in candidate_models:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={gemini_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
         payload = {
             "contents": [
                 {"role": "user", "parts": [{"text": f"{system_prompt}\n\n{user_prompt}"}]}
@@ -1116,16 +1142,17 @@ async def call_gemini_api(
                         request_payload["contents"] = [
                             {"role": "user", "parts": [{"text": f"{system_prompt}\n\n{retry_user_prompt}"}]}
                         ]
-                    resp = await http_client.post(url, json=request_payload)
+                    resp = await http_client.post(url, params={"key": gemini_key}, json=request_payload)
                     if resp.status_code == 200:
                         data = resp.json()
                         raw = data["candidates"][0]["content"]["parts"][0]["text"]
                         return parse_llm_json(raw)
-                    last_error = f"Status {resp.status_code}: {resp.text}"
+                    sanitized_text = _sanitize_gemini_error(resp.text[:500], gemini_key)
+                    last_error = f"Status {resp.status_code}: {sanitized_text}"
                     print(f"[Gemini API Error Model {model_name} Attempt {attempt+1}] {last_error}")
             except Exception as e:
-                last_error = str(e)
-                print(f"[Gemini Call Exception Model {model_name} Attempt {attempt+1}] {e}")
+                last_error = _sanitize_gemini_error(str(e), gemini_key)
+                print(f"[Gemini Call Exception Model {model_name} Attempt {attempt+1}] {last_error}")
                 if attempt == (1 if retry else 0):
                     break
 
