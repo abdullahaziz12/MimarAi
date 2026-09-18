@@ -21,12 +21,13 @@ import '../../styles/auth.css';
 
 export default function BlueprintWizardPage() {
   const router = useRouter();
-  const { user, loading: authLoading } = useAuth();
+  const { user, session, loading: authLoading } = useAuth();
   const {
     currentScreen,
     finalAccepted,
     toastMessage,
     restoreProjectState,
+    loadProjectState,
     showToast
   } = useMimarStore();
 
@@ -39,16 +40,42 @@ export default function BlueprintWizardPage() {
   useEffect(() => {
     if (!user) return;
     document.body.style.overflow = "hidden";
-    const restored = restoreProjectState();
-    if (restored) {
-      showToast("Resumed your Blueprint Wizard session right where you left off.");
+
+    let paramProjectId = null;
+    try {
+      if (typeof window !== "undefined") {
+        const urlParams = new URLSearchParams(window.location.search);
+        paramProjectId = urlParams.get("projectId");
+      }
+    } catch (e) {}
+
+    const store = useMimarStore.getState();
+    const targetProjectId = paramProjectId || store.projectId;
+
+    if (targetProjectId && session?.access_token) {
+      store.loadProjectState(targetProjectId, session.access_token).then((res) => {
+        if (res?.status === "ok") {
+          store.showToast("Resumed your Blueprint Wizard project right where you left off.");
+        } else {
+          const restored = store.restoreProjectState();
+          if (restored) {
+            store.showToast("Resumed your Blueprint Wizard session.");
+          }
+        }
+      });
+    } else {
+      const restored = store.restoreProjectState();
+      if (restored) {
+        store.showToast("Resumed your Blueprint Wizard session right where you left off.");
+      }
     }
+
     return () => {
       document.body.style.overflow = "auto";
       document.body.style.height = "auto";
       document.documentElement.style.overflow = "auto";
     };
-  }, [user]);
+  }, [user, session]);
 
   if (authLoading) {
     return (

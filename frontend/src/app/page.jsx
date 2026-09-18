@@ -214,17 +214,11 @@ export default function LandingPage() {
               {drafts.slice(0, 3).map((draft) => (
                 <div
                   key={draft.id}
-                  onClick={() => {
-                    import("../store/mimarStore").then(({ useMimarStore }) => {
-                      const store = useMimarStore.getState();
-                      store.setProjectId(draft.id);
-                      if (draft.idea_text) store.setIdeaText(draft.idea_text);
-                      if (draft.step0_state)
-                        store.setStep0State(draft.step0_state);
-                      if (draft.fixed_inputs)
-                        store.setFixedInputs(draft.fixed_inputs);
-                      router.push("/app");
-                    });
+                  onClick={async () => {
+                    const { useMimarStore } = await import("../store/mimarStore");
+                    const store = useMimarStore.getState();
+                    await store.loadProjectState(draft.id, session?.access_token || null);
+                    router.push(`/app?projectId=${draft.id}`);
                   }}
                   style={{
                     display: "flex",

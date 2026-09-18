@@ -759,6 +759,65 @@ async def get_draft_projects(
         raise HTTPException(status_code=500, detail="Failed to fetch draft projects.") from e
 
 
+@app.get("/projects/{project_id}")
+@app.get("/api/projects/{project_id}")
+async def get_project_state(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+
+    # Query clarifying questions from DB if real project
+    clarifying_list = []
+    if client and not project_id.startswith("local-draft-"):
+        try:
+            cq_res = (
+                client.table("clarifying_questions")
+                .select("id, question, answer, round, created_at")
+                .eq("project_id", project_id)
+                .order("created_at", desc=False)
+                .execute()
+            )
+            if cq_res and cq_res.data:
+                clarifying_list = cq_res.data
+        except Exception as e:
+            print(f"[Fetch Clarifying QA in Project State Warning] {e}")
+
+    step0_state = project.get("step0_state") or {}
+    if not clarifying_list:
+        clarifying_list = step0_state.get("clarifying_qa") or []
+
+    personas_data = project.get("personas") or step0_state.get("personas")
+    nfrs_data = project.get("nfrs") or step0_state.get("nfrs")
+    lightweight_draft_data = project.get("lightweight_draft")
+    last_contra = step0_state.get("last_contradiction_result") or {}
+
+    return {
+        "status": "ok",
+        "project": {
+            "id": project.get("id"),
+            "owner_id": project.get("owner_id"),
+            "name": project.get("name"),
+            "title": project.get("title"),
+            "idea_text": project.get("idea_text"),
+            "status": project.get("status"),
+            "step0_state": step0_state,
+            "fixed_inputs": project.get("fixed_inputs") or {},
+            "generation_state": project.get("generation_state") or {},
+            "density_flags": project.get("density_flags") or dict(DEFAULT_DENSITY_FLAGS),
+            "personas": personas_data,
+            "nfrs": nfrs_data,
+            "lightweight_draft": lightweight_draft_data,
+            "last_contradiction_result": last_contra,
+            "clarifying_questions": clarifying_list,
+            "created_at": project.get("created_at")
+        }
+    }
+
+
 @app.post("/projects/{project_id}/status")
 @app.post("/api/projects/{project_id}/status")
 async def update_project_status(
