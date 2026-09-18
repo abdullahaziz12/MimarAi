@@ -11,6 +11,7 @@ import ClarifyingQuestionsStage from "../ClarifyingQuestionsStage";
 import PersonaCaptureStage from "../PersonaCaptureStage";
 import NFRCaptureStage from "../NFRCaptureStage";
 import LightweightDraftConfirmStage from "../LightweightDraftConfirmStage";
+import InterviewAnswersReviewModal from "../InterviewAnswersReviewModal";
 
 export default function InterviewScreen() {
   const { session } = useAuth();
@@ -61,6 +62,7 @@ export default function InterviewScreen() {
   const [draftAttempt, setDraftAttempt] = useState(1);
   const [draftError, setDraftError] = useState(null);
   const [isRespondingDraft, setIsRespondingDraft] = useState(false);
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const messagesEndRef = useRef(null);
 
   const textareaRef = useRef(null);
@@ -643,7 +645,7 @@ export default function InterviewScreen() {
         <div className="interview-shell">
           {/* CHAT COLUMN */}
           <div className="chat-engine">
-            <div className="chat-eng-head">
+            <div className="chat-eng-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div className="chat-eng-label">
                 <div
                   className={`hud-dot-live ${interviewMode === "readonly" ? "idle" : ""}`}
@@ -651,13 +653,39 @@ export default function InterviewScreen() {
                 ></div>
                 MIMAR ARCHITECT LINTER ENGINE
               </div>
-              <span className="chat-session-tag" id="chatSessionTag">
-                {interviewMode === "revision"
-                  ? "SESSION: REVISION ACTIVE"
-                  : interviewMode === "readonly"
-                    ? "SESSION: LOCKED / READ-ONLY"
-                    : "SESSION: ACTIVE"}
-              </span>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                {projectId && step0Status !== "idle" && (
+                  <button
+                    type="button"
+                    id="reviewAnswersHeaderBtn"
+                    onClick={() => setIsReviewModalOpen(true)}
+                    style={{
+                      background: "rgba(56, 189, 248, 0.1)",
+                      border: "1px solid rgba(56, 189, 248, 0.3)",
+                      color: "#38BDF8",
+                      borderRadius: "4px",
+                      padding: "3px 8px",
+                      fontSize: "11px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      transition: "all 0.15s ease",
+                    }}
+                    title="Review and edit your interview answers"
+                  >
+                    <span>📋</span> Review Answers
+                  </button>
+                )}
+                <span className="chat-session-tag" id="chatSessionTag">
+                  {interviewMode === "revision"
+                    ? "SESSION: REVISION ACTIVE"
+                    : interviewMode === "readonly"
+                      ? "SESSION: LOCKED / READ-ONLY"
+                      : "SESSION: ACTIVE"}
+                </span>
+              </div>
             </div>
 
             <div className="messages" id="messages" onScroll={handleScroll}>
@@ -803,6 +831,51 @@ export default function InterviewScreen() {
                   isSubmitting={isSubmittingNfr || operationRunning}
                   isCompleted={nfrStatus === "completed"}
                 />
+              )}
+
+              {/* V3.11: Review & Edit Interview Answers Card */}
+              {step0Status === "ready" && (
+                <div
+                  style={{
+                    background: "rgba(30, 41, 59, 0.6)",
+                    border: "1px solid #334155",
+                    borderRadius: "8px",
+                    padding: "12px 16px",
+                    marginTop: "16px",
+                    marginBottom: "8px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "12px",
+                  }}
+                >
+                  <div>
+                    <div style={{ color: "#F8FAFC", fontSize: "13px", fontWeight: 600 }}>
+                      Interview Answers Recorded
+                    </div>
+                    <div style={{ color: "#94A3B8", fontSize: "12px" }}>
+                      You can review or update clarification answers, persona, or NFRs before proceeding.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    id="reviewAnswersStageBtn"
+                    onClick={() => setIsReviewModalOpen(true)}
+                    style={{
+                      background: "#0EA5E9",
+                      color: "#FFFFFF",
+                      border: "none",
+                      borderRadius: "6px",
+                      padding: "6px 14px",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    📋 Review &amp; Edit
+                  </button>
+                </div>
               )}
 
               {/* Phase 7: Fixed Inputs Collection UI (shown when READY) */}
@@ -1001,6 +1074,11 @@ export default function InterviewScreen() {
           </div>
         </div>
       </div>
+
+      <InterviewAnswersReviewModal
+        isOpen={isReviewModalOpen}
+        onClose={() => setIsReviewModalOpen(false)}
+      />
     </div>
   );
 }

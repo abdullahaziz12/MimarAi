@@ -1156,10 +1156,57 @@ export const useMimarStore = create((set, get) => ({
         status: "error",
         detail: err.message || "Having trouble saving draft response — try again.",
       };
-    } finally {
-      get().setOperationRunning(false);
-      set({ activeController: null });
-      get().saveProjectState();
+  fetchInterviewSummary: async (sessionToken = null) => {
+    const s = get();
+    const currentProjectId = s.projectId;
+    if (!currentProjectId || !sessionToken) {
+      return null;
+    }
+    try {
+      const backendUrl = getBackendApiUrl("").replace(/\/$/, "");
+      const res = await fetch(`${backendUrl}/api/projects/${currentProjectId}/interview-summary`, {
+        headers: {
+          Authorization: `Bearer ${sessionToken}`,
+        },
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data;
+    } catch (err) {
+      console.warn("Fetch interview summary error:", err);
+      return null;
+    }
+  },
+
+  editContradictionResolution: async (resolvedAnswer, sessionToken = null) => {
+    const s = get();
+    const currentProjectId = s.projectId;
+    if (!currentProjectId || !sessionToken) {
+      return { status: "error", detail: "Active project and session required." };
+    }
+    try {
+      const backendUrl = getBackendApiUrl("").replace(/\/$/, "");
+      const res = await fetch(`${backendUrl}/api/projects/${currentProjectId}/contradiction-resolution`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionToken}`,
+        },
+        body: JSON.stringify({ resolved_answer: resolvedAnswer }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        return { status: "error", detail: errData.detail || "Failed to update contradiction resolution." };
+      }
+      const data = await res.json();
+      // Update local step0State
+      const step0State = s.step0State || {};
+      step0State.last_contradiction_result = data.last_contradiction_result;
+      set({ step0State });
+      return { status: "ok", data };
+    } catch (err) {
+      console.warn("Edit contradiction resolution error:", err);
+      return { status: "error", detail: err.message || "Failed to save contradiction edit." };
     }
   },
 
