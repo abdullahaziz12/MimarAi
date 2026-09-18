@@ -1156,6 +1156,9 @@ export const useMimarStore = create((set, get) => ({
         status: "error",
         detail: err.message || "Having trouble saving draft response — try again.",
       };
+    }
+  },
+
   fetchInterviewSummary: async (sessionToken = null) => {
     const s = get();
     const currentProjectId = s.projectId;
