@@ -62,6 +62,9 @@ export default function InterviewScreen() {
   const [draftAttempt, setDraftAttempt] = useState(1);
   const [draftError, setDraftError] = useState(null);
   const [isRespondingDraft, setIsRespondingDraft] = useState(false);
+  const [isEditingReadyIdea, setIsEditingReadyIdea] = useState(false);
+  const [readyIdeaInput, setReadyIdeaInput] = useState("");
+  const [isSubmittingReadyIdea, setIsSubmittingReadyIdea] = useState(false);
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const messagesEndRef = useRef(null);
 
@@ -585,13 +588,52 @@ export default function InterviewScreen() {
     }
   };
 
-
   const handleKeyDown = (e) => {
     if (!shouldShowComposer) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
+  };
+
+  const handleStartEditReadyIdea = () => {
+    setReadyIdeaInput(ideaText || "");
+    setIsEditingReadyIdea(true);
+  };
+
+  const handleCancelEditReadyIdea = () => {
+    setIsEditingReadyIdea(false);
+    setReadyIdeaInput("");
+  };
+
+  const handleSaveReadyIdea = async () => {
+    const trimmed = readyIdeaInput.trim();
+    if (!trimmed) {
+      showToast("Project idea cannot be empty.");
+      return;
+    }
+    if (trimmed.length > 2000) {
+      showToast("Idea description exceeds 2,000 characters limit.");
+      return;
+    }
+
+    setIsSubmittingReadyIdea(true);
+    setIdeaText(trimmed);
+    setIsEditingReadyIdea(false);
+
+    // Invalidate pending lightweight draft / start gate per Locked Plan Section 1.5.4
+    useMimarStore.setState((state) => ({
+      lightweightDraftStatus: "idle",
+      lightweightDraftData: null,
+      messages: [
+        ...state.messages,
+        { id: "user-edit-idea-" + Date.now(), role: "user", text: trimmed },
+        { id: "ai-edit-idea-status-" + Date.now(), role: "status", text: "Idea updated. Re-confirming project scope..." }
+      ]
+    }));
+
+    await executeClassification(trimmed);
+    setIsSubmittingReadyIdea(false);
   };
 
   const isFixedInputsComplete =
@@ -839,6 +881,130 @@ export default function InterviewScreen() {
                 />
               )}
 
+              {/* Ready State Idea Edit Affordance (Locked Plan 1.5.4) */}
+              {step0Status === "ready" && (
+                <div
+                  style={{
+                    background: "rgba(15, 23, 42, 0.6)",
+                    border: "1px solid #334155",
+                    borderRadius: "8px",
+                    padding: "12px 16px",
+                    marginTop: "16px",
+                    marginBottom: "12px",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: "#38BDF8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                          Project Idea
+                        </span>
+                        <span style={{ fontSize: "10px", color: "#10B981", background: "rgba(16, 185, 129, 0.1)", padding: "1px 6px", borderRadius: "3px", border: "1px solid rgba(16, 185, 129, 0.3)" }}>
+                          READY
+                        </span>
+                      </div>
+                      {!isEditingReadyIdea && (
+                        <p style={{ margin: 0, fontSize: "13px", color: "#E2E8F0", lineHeight: "1.5" }}>
+                          {ideaText || "No project description provided."}
+                        </p>
+                      )}
+                    </div>
+                    {!isEditingReadyIdea && interviewMode !== "readonly" && (
+                      <button
+                        type="button"
+                        id="editReadyIdeaBtn"
+                        onClick={handleStartEditReadyIdea}
+                        disabled={operationRunning || isSubmittingReadyIdea}
+                        style={{
+                          background: "rgba(56, 189, 248, 0.1)",
+                          border: "1px solid rgba(56, 189, 248, 0.3)",
+                          color: "#38BDF8",
+                          borderRadius: "4px",
+                          padding: "4px 10px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        ✏️ Edit idea
+                      </button>
+                    )}
+                  </div>
+
+                  {isEditingReadyIdea && (
+                    <div style={{ marginTop: "10px" }}>
+                      <textarea
+                        id="readyIdeaTextarea"
+                        value={readyIdeaInput}
+                        onChange={(e) => setReadyIdeaInput(e.target.value)}
+                        disabled={isSubmittingReadyIdea || operationRunning}
+                        rows={3}
+                        style={{
+                          width: "100%",
+                          background: "#0B1120",
+                          border: "1px solid #38BDF8",
+                          borderRadius: "6px",
+                          padding: "8px 10px",
+                          color: "#F8FAFC",
+                          fontSize: "13px",
+                          fontFamily: "inherit",
+                          resize: "vertical",
+                          outline: "none",
+                          boxSizing: "border-box",
+                        }}
+                        placeholder="Update your project idea..."
+                      />
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px" }}>
+                        <span style={{ fontSize: "11px", color: readyIdeaInput.length > 2000 ? "#EF4444" : "#94A3B8" }}>
+                          {readyIdeaInput.length} / 2,000
+                        </span>
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <button
+                            type="button"
+                            id="cancelEditReadyIdeaBtn"
+                            onClick={handleCancelEditReadyIdea}
+                            disabled={isSubmittingReadyIdea}
+                            style={{
+                              background: "transparent",
+                              border: "1px solid #475569",
+                              color: "#94A3B8",
+                              borderRadius: "4px",
+                              padding: "4px 10px",
+                              fontSize: "12px",
+                              cursor: "pointer",
+                            }}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            id="saveReadyIdeaBtn"
+                            onClick={handleSaveReadyIdea}
+                            disabled={isSubmittingReadyIdea || operationRunning || !readyIdeaInput.trim() || readyIdeaInput.length > 2000}
+                            style={{
+                              background: "#0284C7",
+                              border: "none",
+                              color: "#FFFFFF",
+                              borderRadius: "4px",
+                              padding: "4px 12px",
+                              fontSize: "12px",
+                              fontWeight: 600,
+                              cursor: "pointer",
+                            }}
+                          >
+                            {isSubmittingReadyIdea ? "Re-confirming..." : "Save & Re-confirm"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* V3.11: Review & Edit Interview Answers Card */}
               {step0Status === "ready" && (
                 <div
@@ -919,7 +1085,7 @@ export default function InterviewScreen() {
             </div>
 
             {/* CHAT COMPOSER */}
-            {interviewMode === "readonly" ? (
+            {interviewMode !== "readonly" ? (
               <div
                 className="composer-readonly-msg visible"
                 id="composerReadonlyMsg"
