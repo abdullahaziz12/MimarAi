@@ -1485,6 +1485,11 @@ PERSONA_PATTERNS = [
     r"\bvendor\b", r"\bvendors\b"
 ]
 
+PERSONA_ACTION_PATTERN = (
+    r"\b(?:access|approve|assign|book|create|dispatch|manage|manag\w*|monitor|"
+    r"organize|review|scan|schedule|submit|track|upload|view)\w*\b"
+)
+
 SCALE_PATTERNS = [
     r"\bconcurrent\b", r"\bthroughput\b", r"\bqps\b", r"\btps\b", r"\blatency\b", r"\bload\s*balanced\b",
     r"\bscale\b", r"\bscalable\b", r"\bscalability\b", r"\btraffic\b",
@@ -1529,7 +1534,20 @@ def compute_density_flags(idea_text: str, resolved_answer: Optional[str] = None)
         clauses = [c.strip() for c in re.split(r'[.!?;,]+', combined_text) if c.strip()]
         clause_count = len(clauses)
 
-        has_personas = any(bool(re.search(pat, text_lower)) for pat in PERSONA_PATTERNS)
+        persona_matches = []
+        for pattern in PERSONA_PATTERNS:
+            match = re.search(pattern, text_lower)
+            if match:
+                persona_matches.append(match)
+
+        distinct_personas = {match.group(0) for match in persona_matches}
+        action_matches = list(re.finditer(PERSONA_ACTION_PATTERN, text_lower))
+        has_nearby_persona_action = any(
+            abs(persona_match.start() - action_match.start()) <= 45
+            for persona_match in persona_matches
+            for action_match in action_matches
+        )
+        has_personas = len(distinct_personas) >= 2 or has_nearby_persona_action
         has_scale = any(bool(re.search(pat, text_lower)) for pat in SCALE_PATTERNS)
         has_sensitivity = any(bool(re.search(pat, text_lower)) for pat in SENSITIVITY_PATTERNS)
 
