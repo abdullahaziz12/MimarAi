@@ -12,20 +12,32 @@ export default function DraftsPanel({ isOpen, onClose }) {
   const [error, setError] = useState(null);
   const [resumingId, setResumingId] = useState(null);
 
+  // Separate effect for Escape key listener to avoid re-triggering data fetch
   useEffect(() => {
     if (!isOpen) return;
 
-    // Handle Escape key to close
     const handleKeyDown = (e) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", handleKeyDown);
 
-    // Fetch active drafts
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, onClose]);
+
+  // Data fetch effect: runs strictly when panel opens or session token becomes available
+  const sessionToken = session?.access_token || null;
+  useEffect(() => {
+    if (!isOpen) return;
+
+    let isMounted = true;
     setLoading(true);
     setError(null);
-    fetchDraftsList(session?.access_token || null)
+
+    fetchDraftsList(sessionToken)
       .then((res) => {
+        if (!isMounted) return;
         if (res.status === "ok") {
           setDrafts(res.drafts || []);
         } else {
@@ -33,16 +45,17 @@ export default function DraftsPanel({ isOpen, onClose }) {
         }
       })
       .catch((err) => {
+        if (!isMounted) return;
         setError(err.message || "Failed to connect to drafts service.");
       })
       .finally(() => {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       });
 
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
+      isMounted = false;
     };
-  }, [isOpen, session, fetchDraftsList, onClose]);
+  }, [isOpen, sessionToken, fetchDraftsList]);
 
   if (!isOpen) return null;
 
@@ -150,7 +163,9 @@ export default function DraftsPanel({ isOpen, onClose }) {
                   marginTop: "2px",
                 }}
               >
-                {drafts.length} {drafts.length === 1 ? "draft" : "drafts"} available
+                {loading
+                  ? "Loading drafts…"
+                  : `${drafts.length} ${drafts.length === 1 ? "draft" : "drafts"} available`}
               </div>
             </div>
           </div>
