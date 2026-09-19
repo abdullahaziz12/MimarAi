@@ -721,7 +721,10 @@ def _update_project_step0_state(client, project_id, classification_result, curre
 
         client.table("projects").update({"step0_state": new_state}).eq("id", project_id).execute()
     except Exception as e:
-        print(f"[DB Step0 State Update Warning] {e}")
+        raise HTTPException(
+            status_code=502,
+            detail="Failed to persist Step 0 classification state."
+        ) from e
 
 
 @app.post("/projects/draft")
@@ -1646,7 +1649,10 @@ If a genuine contradiction is found:
                 "resolved_answer": resolved_answer
             }).execute()
         except Exception as e:
-            print(f"[Contradiction Checks DB Warning] {e}")
+            raise HTTPException(
+                status_code=502,
+                detail="Failed to persist contradiction scan results."
+            ) from e
 
         # Update project step0_state and density_flags with contradiction resolution outcome
         try:
@@ -1669,7 +1675,10 @@ If a genuine contradiction is found:
                 "density_flags": density_flags
             }).eq("id", project_id).execute()
         except Exception as e:
-            print(f"[Step0 State Contradiction & Density Update Warning] {e}")
+            raise HTTPException(
+                status_code=502,
+                detail="Failed to persist contradiction and density state."
+            ) from e
 
     unresolved = bool(round_num >= 2 and found)
     return {
@@ -1783,16 +1792,17 @@ You MUST respond strictly with a valid JSON object matching this schema:
                         "question": q_text
                     })
                 else:
-                    inserted_questions.append({
-                        "id": str(uuid.uuid4()),
-                        "question": q_text
-                    })
+                    raise HTTPException(
+                        status_code=502,
+                        detail="Failed to persist clarifying question."
+                    )
+            except HTTPException:
+                raise
             except Exception as e:
-                print(f"[Clarifying Questions DB Insert Warning] {e}")
-                inserted_questions.append({
-                    "id": str(uuid.uuid4()),
-                    "question": q_text
-                })
+                raise HTTPException(
+                    status_code=502,
+                    detail="Failed to persist clarifying question."
+                ) from e
     else:
         for q_text in questions:
             inserted_questions.append({
@@ -1834,7 +1844,10 @@ async def submit_clarifying_answers(
                 client.table("clarifying_questions").update({"answer": ans}).eq("id", q_id).eq("project_id", project_id).execute()
                 updated_count += 1
             except Exception as e:
-                print(f"[Clarifying Questions Answer Update Warning] {e}")
+                raise HTTPException(
+                    status_code=502,
+                    detail="Failed to persist clarifying answer."
+                ) from e
 
     # Fold answers into project step0_state for downstream generation
     if client and not project_id.startswith("local-draft-"):
@@ -2513,15 +2526,10 @@ async def respond_lightweight_draft(
         target_attempt = attempts_list[target_idx]
 
     if target_attempt is None:
-        target_attempt = {
-            "attempt": req.attempt or 1,
-            "draft_features": [],
-            "user_response": None,
-            "correction_text": None,
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        attempts_list.append(target_attempt)
-        target_idx = len(attempts_list) - 1
+        raise HTTPException(
+            status_code=409,
+            detail="A generated lightweight draft attempt is required before confirmation."
+        )
 
     # Update the target attempt
     target_attempt["user_response"] = req.response
@@ -3219,12 +3227,7 @@ async def require_admin(user: Dict[str, Any] = Depends(get_current_user)) -> Dic
     if not email:
         raise HTTPException(status_code=403, detail="Forbidden: Admin access required.")
     
-    # Check environment variable allowlist or known primary admin
-    admin_env = os.getenv("ADMIN_EMAILS", "abdullahazizgujjar009@gmail.com")
-    allowed_env = [e.strip().lower() for e in admin_env.split(",") if e.strip()]
-    if email in allowed_env or email == "abdullahazizgujjar009@gmail.com":
-        return user
-
+    # The admin_allowlist table is the single source of truth.
     client = get_supabase()
     if not client:
         raise HTTPException(status_code=403, detail="Forbidden: Admin access required.")
@@ -3293,6 +3296,8 @@ async def admin_me(user: Dict[str, Any] = Depends(require_admin)):
 async def admin_users(user: Dict[str, Any] = Depends(require_admin)):
     """Total users and new-user trend over 7d and 30d (derived from auth.users/projects)."""
     client = get_supabase()
+    if not client:
+        raise HTTPException(status_code=503, detail="Admin analytics storage is unavailable.")
     now = datetime.now(timezone.utc)
     t7d = (now - timedelta(days=7)).isoformat()
     t30d = (now - timedelta(days=30)).isoformat()
@@ -3348,6 +3353,7 @@ async def admin_users(user: Dict[str, Any] = Depends(require_admin)):
         total_users = max(len(owners), 1)
     except Exception as e:
         print(f"[Admin Users Project Fallback Error] {e}")
+        raise HTTPException(status_code=503, detail="Failed to load admin user analytics.") from e
 
     return {
         "status": "ok",
@@ -3383,6 +3389,9 @@ async def admin_success_rate(
             events = res.data or []
         except Exception as e:
             print(f"[Admin Success Rate Query Error] {e}")
+            raise HTTPException(status_code=503, detail="Failed to load admin success-rate analytics.") from e
+    else:
+        raise HTTPException(status_code=503, detail="Admin analytics storage is unavailable.")
 
     total_attempts = len(events)
     successes = sum(1 for e in events if e.get("status") == "success")
@@ -3430,6 +3439,9 @@ async def admin_sessions(
             sessions = res.data or []
         except Exception as e:
             print(f"[Admin Sessions Query Error] {e}")
+            raise HTTPException(status_code=503, detail="Failed to load admin session analytics.") from e
+    else:
+        raise HTTPException(status_code=503, detail="Admin analytics storage is unavailable.")
 
     total_sessions = len(sessions)
     active_now = 0
@@ -3484,6 +3496,9 @@ async def admin_ai_usage(
             logs = res.data or []
         except Exception as e:
             print(f"[Admin AI Usage Query Error] {e}")
+            raise HTTPException(status_code=503, detail="Failed to load admin AI usage analytics.") from e
+    else:
+        raise HTTPException(status_code=503, detail="Admin analytics storage is unavailable.")
 
     total_calls = len(logs)
     provider_counts: Dict[str, int] = {"groq": 0, "gemini": 0}
