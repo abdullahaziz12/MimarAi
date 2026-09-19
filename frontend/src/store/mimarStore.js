@@ -1215,9 +1215,19 @@ export const useMimarStore = create((set, get) => ({
 
   fetchDraftsList: async (sessionToken = null) => {
     try {
-      const backendUrl = getBackendApiUrl("").replace(/\/$/, "");
-      const res = await fetch(`${backendUrl}/api/projects/drafts`, {
-        headers: sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {},
+      let token = sessionToken;
+      if (!token) {
+        try {
+          const { supabase } = await import("../lib/supabaseClient");
+          const sessRes = await supabase.auth.getSession();
+          token = sessRes?.data?.session?.access_token || null;
+        } catch (authErr) {
+          console.warn("Failed to resolve active auth token for drafts:", authErr);
+        }
+      }
+
+      const res = await fetch(getBackendApiUrl("/api/projects/drafts"), {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));

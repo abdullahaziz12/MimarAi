@@ -1,6 +1,6 @@
 "use client";
 
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMimarStore, STAGE_FOR_SCREEN, STAGE_ORDER } from '../store/mimarStore';
@@ -9,7 +9,9 @@ import DraftsPanel from './DraftsPanel';
 
 export default function AppHeader() {
   const router = useRouter();
-  const [isDraftsOpen, setIsDraftsOpen] = React.useState(false);
+  const [isDraftsOpen, setIsDraftsOpen] = useState(false);
+  const handleOpenDrafts = useCallback(() => setIsDraftsOpen(true), []);
+  const handleCloseDrafts = useCallback(() => setIsDraftsOpen(false), []);
   const {
     currentScreen,
     interviewMode,
@@ -129,7 +131,7 @@ export default function AppHeader() {
         <button
           type="button"
           id="draftsMenuBtn"
-          onClick={() => setIsDraftsOpen(true)}
+          onClick={handleOpenDrafts}
           style={{
             background: 'rgba(56, 189, 248, 0.08)',
             border: '1px solid var(--border-line, rgba(56, 189, 248, 0.25))',
@@ -156,7 +158,7 @@ export default function AppHeader() {
 
       <DraftsPanel
         isOpen={isDraftsOpen}
-        onClose={() => setIsDraftsOpen(false)}
+        onClose={handleCloseDrafts}
       />
     </header>
   );
