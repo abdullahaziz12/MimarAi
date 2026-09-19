@@ -1,4 +1,5 @@
 import os
+import time
 import asyncio
 import json
 import re
@@ -1099,12 +1100,60 @@ def _sanitize_gemini_error(error_msg: str, key: Optional[str] = None) -> str:
     return sanitized
 
 
+async def log_ai_call(
+    provider: str,
+    stage: str,
+    success: bool,
+    latency_ms: int,
+    user_id: Optional[str] = None,
+    project_id: Optional[str] = None,
+):
+    """Additive audit log for provider calls."""
+    try:
+        client = get_supabase()
+        if client:
+            client.table("ai_call_log").insert({
+                "provider": provider,
+                "stage": stage or "general",
+                "success": bool(success),
+                "latency_ms": int(latency_ms),
+                "user_id": user_id,
+                "project_id": project_id,
+            }).execute()
+    except Exception as e:
+        # Never break primary generation flow on logging error
+        print(f"[AI Call Log Error] {e}")
+
+
+async def log_generation_event(
+    user_id: str,
+    project_id: Optional[str],
+    status: str,
+    failure_reason: Optional[str] = None,
+):
+    """Additive audit log for generation success-rate tracking."""
+    try:
+        client = get_supabase()
+        if client:
+            client.table("generation_events").insert({
+                "user_id": user_id,
+                "project_id": project_id,
+                "status": status,
+                "failure_reason": failure_reason,
+            }).execute()
+    except Exception as e:
+        print(f"[Generation Event Log Error] {e}")
+
+
 async def call_gemini_api(
     system_prompt: str,
     user_prompt: str,
     timeout: float = 30.0,
     retry_user_prompt: Optional[str] = None,
     retry: bool = True,
+    stage: str = "general",
+    user_id: Optional[str] = None,
+    project_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     gemini_key = os.getenv("GEMINI_API_KEY")
     if not gemini_key:
@@ -1122,6 +1171,7 @@ async def call_gemini_api(
             candidate_models.append(m)
 
     last_error = None
+    start_time = time.time()
     for model_name in candidate_models:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
         payload = {
@@ -1146,6 +1196,8 @@ async def call_gemini_api(
                     if resp.status_code == 200:
                         data = resp.json()
                         raw = data["candidates"][0]["content"]["parts"][0]["text"]
+                        latency_ms = int((time.time() - start_time) * 1000)
+                        asyncio.create_task(log_ai_call("gemini", stage, True, latency_ms, user_id, project_id))
                         return parse_llm_json(raw)
                     sanitized_text = _sanitize_gemini_error(resp.text[:500], gemini_key)
                     last_error = f"Status {resp.status_code}: {sanitized_text}"
@@ -1156,6 +1208,8 @@ async def call_gemini_api(
                 if attempt == (1 if retry else 0):
                     break
 
+    latency_ms = int((time.time() - start_time) * 1000)
+    asyncio.create_task(log_ai_call("gemini", stage, False, latency_ms, user_id, project_id))
     raise HTTPException(status_code=502, detail=f"Gemini API request failed: {last_error}")
 
 
@@ -1165,6 +1219,9 @@ async def call_groq_json(
     timeout: float = 25.0,
     retry_user_prompt: Optional[str] = None,
     retry: bool = True,
+    stage: str = "general",
+    user_id: Optional[str] = None,
+    project_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     groq_key = os.getenv("GROQ_API_KEY")
     if not groq_key:
@@ -1180,6 +1237,7 @@ async def call_groq_json(
     headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
     
     last_error = None
+    start_time = time.time()
     for model_name in candidate_models:
         payload = {
             "model": model_name,
@@ -1204,6 +1262,8 @@ async def call_groq_json(
                     if resp.status_code == 200:
                         data = resp.json()
                         raw = data["choices"][0]["message"]["content"]
+                        latency_ms = int((time.time() - start_time) * 1000)
+                        asyncio.create_task(log_ai_call("groq", stage, True, latency_ms, user_id, project_id))
                         return parse_llm_json(raw)
                     last_error = f"Status {resp.status_code}: {resp.text}"
                     print(f"[Groq API Error Model {model_name} Attempt {attempt+1}] {last_error}")
@@ -1213,6 +1273,8 @@ async def call_groq_json(
                 if attempt == (1 if retry else 0):
                     break
 
+    latency_ms = int((time.time() - start_time) * 1000)
+    asyncio.create_task(log_ai_call("groq", stage, False, latency_ms, user_id, project_id))
     raise HTTPException(status_code=502, detail=f"Groq API request failed: {last_error}")
 
 
@@ -2909,8 +2971,12 @@ Fix ONLY the identified issues while strictly preserving the V3.9 extended featu
             "generation_state": generation_payload
         }
     finally:
-        if client and not project_id.startswith("local-draft-") and not generation_succeeded:
-            client.table("projects").update({"status": "generation_failed"}).eq("id", project_id).execute()
+        if client and not project_id.startswith("local-draft-"):
+            if not generation_succeeded:
+                client.table("projects").update({"status": "generation_failed"}).eq("id", project_id).execute()
+                await log_generation_event(user_id=user_id, project_id=project_id, status="failure", failure_reason="pipeline_error")
+            else:
+                await log_generation_event(user_id=user_id, project_id=project_id, status="success")
 
 
 @app.post("/projects/{project_id}/comments/batch-fix")
@@ -3137,6 +3203,305 @@ async def add_project_comment(
     }).execute()
 
     return res.data[0] if res.data else {"status": "created"}
+
+
+# ============================================================================
+# V3.10 Admin Portal — Security, Instrumentation, and Analytics Endpoints
+# ============================================================================
+
+async def require_admin(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    """Admin authorization dependency: verifies authenticated user is in admin_allowlist."""
+    email = user.get("email")
+    if not email:
+        raise HTTPException(status_code=403, detail="Forbidden: Admin access required.")
+    
+    client = get_supabase(user.get("token")) or get_supabase()
+    if not client:
+        raise HTTPException(status_code=500, detail="Database client unavailable.")
+        
+    try:
+        res = client.table("admin_allowlist").select("email").eq("email", email.lower().strip()).execute()
+        if not res.data:
+            raise HTTPException(status_code=403, detail="Forbidden: Admin access required.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[Admin Verification Error] {e}")
+        raise HTTPException(status_code=403, detail="Forbidden: Admin verification failed.")
+    
+    return user
+
+
+class HeartbeatRequest(BaseModel):
+    session_id: Optional[str] = None
+
+
+@app.post("/session/heartbeat")
+@app.post("/api/session/heartbeat")
+async def session_heartbeat(
+    req: HeartbeatRequest = HeartbeatRequest(),
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Records or updates user activity heartbeat in user_sessions."""
+    client = get_supabase(user.get("token")) or get_supabase()
+    user_id = user.get("user_id")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    session_id = req.session_id
+    
+    if not client or not user_id:
+        return {"status": "ok", "session_id": session_id}
+        
+    try:
+        if session_id:
+            res = client.table("user_sessions").select("id").eq("id", session_id).eq("user_id", user_id).execute()
+            if res.data:
+                client.table("user_sessions").update({"last_seen_at": now_iso}).eq("id", session_id).execute()
+                return {"status": "ok", "session_id": session_id}
+        
+        ins = client.table("user_sessions").insert({
+            "user_id": user_id,
+            "started_at": now_iso,
+            "last_seen_at": now_iso,
+        }).execute()
+        new_id = ins.data[0]["id"] if ins.data else session_id
+        return {"status": "ok", "session_id": new_id}
+    except Exception as e:
+        print(f"[Session Heartbeat Error] {e}")
+        return {"status": "ok", "session_id": session_id}
+
+
+@app.get("/admin/me")
+@app.get("/api/admin/me")
+async def admin_me(user: Dict[str, Any] = Depends(require_admin)):
+    """Returns admin identity for frontend route guard."""
+    return {"status": "ok", "admin": True, "email": user.get("email")}
+
+
+@app.get("/admin/users")
+@app.get("/api/admin/users")
+async def admin_users(user: Dict[str, Any] = Depends(require_admin)):
+    """Total users and new-user trend over 7d and 30d (derived from auth.users/projects)."""
+    client = get_supabase(user.get("token")) or get_supabase()
+    now = datetime.now(timezone.utc)
+    t7d = (now - timedelta(days=7)).isoformat()
+    t30d = (now - timedelta(days=30)).isoformat()
+    
+    total_users = 0
+    new_7d = 0
+    new_30d = 0
+    
+    # 1. Try listing from auth.admin
+    try:
+        auth_users = client.auth.admin.list_users()
+        users_list = []
+        if auth_users and hasattr(auth_users, "users"):
+            users_list = auth_users.users
+        elif isinstance(auth_users, list):
+            users_list = auth_users
+        elif isinstance(auth_users, dict) and "users" in auth_users:
+            users_list = auth_users["users"]
+            
+        if users_list:
+            total_users = len(users_list)
+            for u in users_list:
+                c_at = getattr(u, "created_at", None) or (u.get("created_at") if isinstance(u, dict) else None)
+                if c_at:
+                    if str(c_at) >= t7d:
+                        new_7d += 1
+                    if str(c_at) >= t30d:
+                        new_30d += 1
+            return {
+                "status": "ok",
+                "total_users": total_users,
+                "new_users_7d": new_7d,
+                "new_users_30d": new_30d,
+                "source": "auth.users",
+                "maturity": "high",
+            }
+    except Exception as e:
+        print(f"[Admin Users Auth Query Notice] {e}")
+
+    # 2. Fallback to distinct user count from projects table
+    try:
+        proj_res = client.table("projects").select("owner_id, created_at").execute()
+        owners = set()
+        for p in proj_res.data or []:
+            oid = p.get("owner_id")
+            if oid:
+                owners.add(oid)
+            c_at = p.get("created_at")
+            if c_at and str(c_at) >= t7d:
+                new_7d += 1
+            if c_at and str(c_at) >= t30d:
+                new_30d += 1
+        total_users = max(len(owners), 1)
+    except Exception as e:
+        print(f"[Admin Users Project Fallback Error] {e}")
+
+    return {
+        "status": "ok",
+        "total_users": total_users,
+        "new_users_7d": new_7d,
+        "new_users_30d": new_30d,
+        "source": "projects.owner_id",
+        "maturity": "high",
+    }
+
+
+@app.get("/admin/success-rate")
+@app.get("/api/admin/success-rate")
+async def admin_success_rate(
+    window: str = "7d",
+    user: Dict[str, Any] = Depends(require_admin),
+):
+    """Aggregate generation success rate and failure reasons from generation_events."""
+    client = get_supabase(user.get("token")) or get_supabase()
+    days = 7
+    if window == "24h":
+        days = 1
+    elif window == "30d":
+        days = 30
+    elif window == "all":
+        days = 3650
+        
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    events = []
+    if client:
+        try:
+            res = client.table("generation_events").select("*").gte("created_at", cutoff).order("created_at", desc=True).execute()
+            events = res.data or []
+        except Exception as e:
+            print(f"[Admin Success Rate Query Error] {e}")
+
+    total_attempts = len(events)
+    successes = sum(1 for e in events if e.get("status") == "success")
+    failures = sum(1 for e in events if e.get("status") == "failure")
+    success_rate = round((successes / total_attempts * 100), 1) if total_attempts > 0 else 100.0
+
+    failure_reasons: Dict[str, int] = {}
+    for e in events:
+        if e.get("status") == "failure":
+            reason = e.get("failure_reason") or "unknown_error"
+            reason_key = reason[:40]
+            failure_reasons[reason_key] = failure_reasons.get(reason_key, 0) + 1
+
+    return {
+        "status": "ok",
+        "window": window,
+        "total_attempts": total_attempts,
+        "successful_runs": successes,
+        "failed_runs": failures,
+        "success_rate_pct": success_rate,
+        "failure_reasons": failure_reasons,
+        "recent_events": events[:20],
+        "maturity": "high_for_new_data",
+    }
+
+
+@app.get("/admin/sessions")
+@app.get("/api/admin/sessions")
+async def admin_sessions(
+    window: str = "7d",
+    user: Dict[str, Any] = Depends(require_admin),
+):
+    """Aggregate active sessions and time-spent stats from user_sessions."""
+    client = get_supabase(user.get("token")) or get_supabase()
+    days = 7 if window != "30d" else 30
+    if window == "24h":
+        days = 1
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    active_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    
+    sessions = []
+    if client:
+        try:
+            res = client.table("user_sessions").select("*").gte("last_seen_at", cutoff).execute()
+            sessions = res.data or []
+        except Exception as e:
+            print(f"[Admin Sessions Query Error] {e}")
+
+    total_sessions = len(sessions)
+    active_now = 0
+    total_duration_sec = 0
+    
+    for s in sessions:
+        last_seen = s.get("last_seen_at")
+        started = s.get("started_at")
+        if last_seen and last_seen >= active_cutoff:
+            active_now += 1
+        if last_seen and started:
+            try:
+                dt_start = datetime.fromisoformat(started.replace("Z", "+00:00"))
+                dt_last = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
+                diff = max(0, int((dt_last - dt_start).total_seconds()))
+                total_duration_sec += diff
+            except Exception:
+                pass
+
+    total_duration_min = round(total_duration_sec / 60, 1)
+    avg_session_min = round((total_duration_sec / total_sessions / 60), 1) if total_sessions > 0 else 0.0
+
+    return {
+        "status": "ok",
+        "window": window,
+        "active_sessions_now": active_now,
+        "total_sessions": total_sessions,
+        "total_time_spent_minutes": total_duration_min,
+        "avg_session_duration_minutes": avg_session_min,
+        "note": "Session duration is an approximation based on active client heartbeats.",
+        "maturity": "approximation",
+    }
+
+
+@app.get("/admin/ai-usage")
+@app.get("/api/admin/ai-usage")
+async def admin_ai_usage(
+    window: str = "7d",
+    user: Dict[str, Any] = Depends(require_admin),
+):
+    """Aggregate provider call counts, stage distribution, and latency from ai_call_log."""
+    client = get_supabase(user.get("token")) or get_supabase()
+    days = 7 if window != "30d" else 30
+    if window == "24h":
+        days = 1
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    
+    logs = []
+    if client:
+        try:
+            res = client.table("ai_call_log").select("*").gte("created_at", cutoff).execute()
+            logs = res.data or []
+        except Exception as e:
+            print(f"[Admin AI Usage Query Error] {e}")
+
+    total_calls = len(logs)
+    provider_counts: Dict[str, int] = {"groq": 0, "gemini": 0}
+    stage_counts: Dict[str, int] = {}
+    latencies: List[int] = []
+
+    for l in logs:
+        prov = l.get("provider", "other")
+        provider_counts[prov] = provider_counts.get(prov, 0) + 1
+        
+        stg = l.get("stage", "other")
+        stage_counts[stg] = stage_counts.get(stg, 0) + 1
+        
+        lat = l.get("latency_ms")
+        if isinstance(lat, (int, float)):
+            latencies.append(int(lat))
+
+    avg_latency = round(sum(latencies) / len(latencies), 0) if latencies else 0
+
+    return {
+        "status": "ok",
+        "window": window,
+        "total_calls": total_calls,
+        "provider_breakdown": provider_counts,
+        "stage_breakdown": stage_counts,
+        "avg_latency_ms": avg_latency,
+        "note": "AI usage reflects provider call counts and latencies. Dollar cost estimation is unavailable without configured pricing.",
+        "maturity": "call_counts_only",
+    }
 
 
 if __name__ == "__main__":

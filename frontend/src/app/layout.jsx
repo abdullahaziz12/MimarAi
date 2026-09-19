@@ -1,5 +1,6 @@
 import './globals.css';
 import { AuthProvider } from '../context/AuthContext';
+import SessionHeartbeat from '../components/SessionHeartbeat';
 
 export const metadata = {
   title: 'MimarAi — Precision Architecture & Planning Layer for AI Coding Agents',
@@ -20,6 +21,7 @@ export default function RootLayout({ children }) {
       </head>
       <body>
         <AuthProvider>
+          <SessionHeartbeat />
           {children}
         </AuthProvider>
       </body>
