@@ -143,7 +143,7 @@ class SecurityRegressionTests(unittest.TestCase):
 
             async def post(self, url, **_kwargs):
                 if "generativelanguage" in url:
-                    return Response(200, {})
+                    return Response(200, {"candidates": [{"content": {"parts": [{"text": "pong"}]}}]})
                 return Response(200, {})
 
         with patch.dict(

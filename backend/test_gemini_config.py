@@ -30,7 +30,7 @@ class TestGeminiConfigurationAndHealth:
                     # Verify probe called generateContent
                     call_url = mock_post.call_args[0][0]
                     assert ":generateContent" in call_url
-                    assert "gemini-1.5-flash" in call_url
+                    assert "gemini-2.5-flash" in call_url
 
     @pytest.mark.asyncio
     async def test_check_provider_health_gemini_404_reports_unavailable(self):
@@ -67,7 +67,7 @@ class TestGeminiConfigurationAndHealth:
             ]
         }
 
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "test_key", "GEMINI_MODEL": "models/gemini-2.0-flash"}):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test_key", "GEMINI_MODEL": "models/gemini-2.5-flash"}):
             with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
                 mock_post.return_value = mock_resp
                 res = await main.call_gemini_api("System prompt", "User prompt")
@@ -75,7 +75,7 @@ class TestGeminiConfigurationAndHealth:
                 
                 # Check URL called: should NOT contain models/models/
                 called_url = mock_post.call_args[0][0]
-                assert "models/gemini-2.0-flash:generateContent" in called_url
+                assert "models/gemini-2.5-flash:generateContent" in called_url
                 assert "models/models" not in called_url
 
     @pytest.mark.asyncio
@@ -95,6 +95,6 @@ class TestGeminiConfigurationAndHealth:
                 res = await main.call_gemini_api("System", "User")
                 assert res == {"features": []}
                 
-                # First tried candidate should be default verified model gemini-1.5-flash
+                # First tried candidate should be default verified model gemini-2.5-flash
                 called_url = mock_post.call_args[0][0]
-                assert "models/gemini-1.5-flash:generateContent" in called_url
+                assert "models/gemini-2.5-flash:generateContent" in called_url

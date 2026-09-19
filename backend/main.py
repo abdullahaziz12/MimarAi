@@ -336,7 +336,7 @@ def health_db_check():
 
 async def check_provider_health():
     """Check provider reachability/model availability using minimal lightweight probes."""
-    raw_gemini_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    raw_gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     gemini_model = raw_gemini_model.replace("models/", "").strip()
     groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
@@ -357,7 +357,10 @@ async def check_provider_health():
         try:
             async with httpx.AsyncClient(timeout=4.0) as client:
                 response = await client.post(url, params={"key": api_key}, json=payload)
-            return "connected" if response.status_code == 200 else "unavailable"
+            if response.status_code != 200:
+                return "unavailable"
+            response_data = response.json()
+            return "connected" if response_data.get("candidates") else "unavailable"
         except (httpx.HTTPError, ValueError):
             return "unavailable"
 
@@ -1114,13 +1117,13 @@ async def call_gemini_api(
     if not gemini_key:
         raise HTTPException(status_code=500, detail="Gemini API unconfigured (GEMINI_API_KEY missing).")
     
-    raw_configured_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    raw_configured_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     configured_model = raw_configured_model.replace("models/", "").strip()
     
     # Verified public Gemini models supporting generateContent on v1beta
-    VERIFIED_GEMINI_MODELS = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
+    VERIFIED_GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-flash-latest"]
     
-    candidate_models = [configured_model] if configured_model in VERIFIED_GEMINI_MODELS else ["gemini-1.5-flash"]
+    candidate_models = [configured_model] if configured_model in VERIFIED_GEMINI_MODELS else ["gemini-2.5-flash"]
     for m in VERIFIED_GEMINI_MODELS:
         if m not in candidate_models:
             candidate_models.append(m)
