@@ -2,8 +2,9 @@
 
 import { useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
+import { getConfiguredBackendUrl } from "../lib/backendConfig";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://mimaraibackend-bxs0vr37.b4a.run";
+const API_BASE = getConfiguredBackendUrl() || "https://mimaraibackend-p65ccvlk.b4a.run";
 
 export default function SessionHeartbeat() {
   const { session } = useAuth();
