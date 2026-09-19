@@ -29,6 +29,12 @@ class TestV32DensityCheck(unittest.TestCase):
             "nfrs": "ask"
         })
 
+    def test_short_idea_with_one_generic_role_still_asks_for_personas(self):
+        """A single generic role mention without an action is not a persona description."""
+        idea = "A banking app for employees."
+        flags = main.compute_density_flags(idea)
+        self.assertEqual(flags["personas"], "ask")
+
     def test_moderate_idea_with_personas(self):
         """Moderate idea (20-45 words) with personas -> partial/skip/ask"""
         idea = (
