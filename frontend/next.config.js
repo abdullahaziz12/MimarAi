@@ -1,19 +1,27 @@
 /** @type {import('next').NextConfig} */
-const backendOrigin = process.env.NEXT_PUBLIC_BACKEND_URL
-  ? new URL(process.env.NEXT_PUBLIC_BACKEND_URL).origin
-  : "";
+const defaultBackendUrl = "https://mimaraibackend-p65ccvlk.b4a.run";
+const rawBackendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || defaultBackendUrl;
+
+let backendOrigin = "";
+try {
+  backendOrigin = new URL(rawBackendUrl).origin;
+} catch {
+  backendOrigin = defaultBackendUrl;
+}
 
 const nextConfig = {
   reactStrictMode: false,
   async headers() {
     const connectSources = [
       "'self'",
+      "https://mimaraibackend-p65ccvlk.b4a.run",
       "https://tgyupsejfuvglbwjneob.supabase.co",
       "https://fonts.googleapis.com",
       "https://fonts.gstatic.com",
+      "https://vercel.live",
     ];
 
-    if (backendOrigin) {
+    if (backendOrigin && !connectSources.includes(backendOrigin)) {
       connectSources.push(backendOrigin);
     }
 
@@ -41,11 +49,12 @@ const nextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://vercel.live",
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' data: https://fonts.gstatic.com",
               "img-src 'self' data: blob: https:",
               `connect-src ${connectSources.join(" ")}`,
+              "frame-src 'self' https://vercel.live",
               "frame-ancestors 'none'",
             ].join("; "),
           },
