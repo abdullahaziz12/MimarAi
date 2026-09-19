@@ -1100,51 +1100,6 @@ def _sanitize_gemini_error(error_msg: str, key: Optional[str] = None) -> str:
     return sanitized
 
 
-async def log_ai_call(
-    provider: str,
-    stage: str,
-    success: bool,
-    latency_ms: int,
-    user_id: Optional[str] = None,
-    project_id: Optional[str] = None,
-):
-    """Additive audit log for provider calls."""
-    try:
-        client = get_supabase()
-        if client:
-            client.table("ai_call_log").insert({
-                "provider": provider,
-                "stage": stage or "general",
-                "success": bool(success),
-                "latency_ms": int(latency_ms),
-                "user_id": user_id,
-                "project_id": project_id,
-            }).execute()
-    except Exception as e:
-        # Never break primary generation flow on logging error
-        print(f"[AI Call Log Error] {e}")
-
-
-async def log_generation_event(
-    user_id: str,
-    project_id: Optional[str],
-    status: str,
-    failure_reason: Optional[str] = None,
-):
-    """Additive audit log for generation success-rate tracking."""
-    try:
-        client = get_supabase()
-        if client:
-            client.table("generation_events").insert({
-                "user_id": user_id,
-                "project_id": project_id,
-                "status": status,
-                "failure_reason": failure_reason,
-            }).execute()
-    except Exception as e:
-        print(f"[Generation Event Log Error] {e}")
-
-
 async def call_gemini_api(
     system_prompt: str,
     user_prompt: str,
