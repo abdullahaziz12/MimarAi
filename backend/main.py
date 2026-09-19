@@ -3164,19 +3164,72 @@ async def add_project_comment(
 # V3.10 Admin Portal — Security, Instrumentation, and Analytics Endpoints
 # ============================================================================
 
+async def log_ai_call(
+    provider: str,
+    stage: str,
+    success: bool,
+    latency_ms: int,
+    user_id: Optional[str] = None,
+    project_id: Optional[str] = None,
+):
+    """Fire-and-forget helper to log AI provider call metrics into ai_call_log."""
+    client = get_supabase()
+    if not client:
+        return
+    try:
+        client.table("ai_call_log").insert({
+            "provider": provider,
+            "stage": stage,
+            "success": success,
+            "latency_ms": max(0, int(latency_ms)),
+            "user_id": user_id,
+            "project_id": project_id,
+        }).execute()
+    except Exception as e:
+        print(f"[AI Call Log Warning] {e}")
+
+
+async def log_generation_event(
+    user_id: Optional[str],
+    project_id: Optional[str],
+    status: str,
+    failure_reason: Optional[str] = None,
+):
+    """Fire-and-forget helper to log generation lifecycle events into generation_events."""
+    client = get_supabase()
+    if not client or not user_id:
+        return
+    try:
+        client.table("generation_events").insert({
+            "user_id": user_id,
+            "project_id": project_id,
+            "status": status,
+            "failure_reason": failure_reason,
+        }).execute()
+    except Exception as e:
+        print(f"[Generation Event Log Warning] {e}")
+
+
 async def require_admin(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     """Admin authorization dependency: verifies authenticated user is in admin_allowlist."""
-    email = user.get("email")
+    email = (user.get("email") or "").strip().lower()
     if not email:
         raise HTTPException(status_code=403, detail="Forbidden: Admin access required.")
     
-    client = get_supabase(user.get("token")) or get_supabase()
+    # Check environment variable allowlist or known primary admin
+    admin_env = os.getenv("ADMIN_EMAILS", "abdullahazizgujjar009@gmail.com")
+    allowed_env = [e.strip().lower() for e in admin_env.split(",") if e.strip()]
+    if email in allowed_env or email == "abdullahazizgujjar009@gmail.com":
+        return user
+
+    client = get_supabase()
     if not client:
-        raise HTTPException(status_code=500, detail="Database client unavailable.")
+        raise HTTPException(status_code=403, detail="Forbidden: Admin access required.")
         
     try:
-        res = client.table("admin_allowlist").select("email").eq("email", email.lower().strip()).execute()
-        if not res.data:
+        res = client.table("admin_allowlist").select("email").eq("email", email).execute()
+        rows = getattr(res, "data", None)
+        if not rows or not isinstance(rows, list) or len(rows) == 0:
             raise HTTPException(status_code=403, detail="Forbidden: Admin access required.")
     except HTTPException:
         raise
@@ -3198,7 +3251,7 @@ async def session_heartbeat(
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     """Records or updates user activity heartbeat in user_sessions."""
-    client = get_supabase(user.get("token")) or get_supabase()
+    client = get_supabase()
     user_id = user.get("user_id")
     now_iso = datetime.now(timezone.utc).isoformat()
     session_id = req.session_id
@@ -3236,7 +3289,7 @@ async def admin_me(user: Dict[str, Any] = Depends(require_admin)):
 @app.get("/api/admin/users")
 async def admin_users(user: Dict[str, Any] = Depends(require_admin)):
     """Total users and new-user trend over 7d and 30d (derived from auth.users/projects)."""
-    client = get_supabase(user.get("token")) or get_supabase()
+    client = get_supabase()
     now = datetime.now(timezone.utc)
     t7d = (now - timedelta(days=7)).isoformat()
     t30d = (now - timedelta(days=30)).isoformat()
@@ -3310,7 +3363,7 @@ async def admin_success_rate(
     user: Dict[str, Any] = Depends(require_admin),
 ):
     """Aggregate generation success rate and failure reasons from generation_events."""
-    client = get_supabase(user.get("token")) or get_supabase()
+    client = get_supabase()
     days = 7
     if window == "24h":
         days = 1
@@ -3360,7 +3413,7 @@ async def admin_sessions(
     user: Dict[str, Any] = Depends(require_admin),
 ):
     """Aggregate active sessions and time-spent stats from user_sessions."""
-    client = get_supabase(user.get("token")) or get_supabase()
+    client = get_supabase()
     days = 7 if window != "30d" else 30
     if window == "24h":
         days = 1
@@ -3415,7 +3468,7 @@ async def admin_ai_usage(
     user: Dict[str, Any] = Depends(require_admin),
 ):
     """Aggregate provider call counts, stage distribution, and latency from ai_call_log."""
-    client = get_supabase(user.get("token")) or get_supabase()
+    client = get_supabase()
     days = 7 if window != "30d" else 30
     if window == "24h":
         days = 1
