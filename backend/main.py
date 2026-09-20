@@ -113,18 +113,19 @@ service_health_cache = {"expires_at": 0.0, "data": None}
 
 def get_supabase(token: Optional[str] = None):
     url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_KEY")
-    if url and key and "your-project" not in url:
+    service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
+    anon_key = os.getenv("SUPABASE_KEY") or service_key
+    if url and (service_key or anon_key) and "your-project" not in url:
         try:
             from supabase import create_client
             if token:
-                client = create_client(url, key)
+                client = create_client(url, anon_key)
                 client.postgrest.auth(token)
                 return client
             
             global supabase_client
-            if supabase_client is None:
-                supabase_client = create_client(url, key)
+            if supabase_client is None and service_key:
+                supabase_client = create_client(url, service_key)
             return supabase_client
         except Exception as e:
             print(f"Supabase client initialization warning: {e}")
@@ -336,7 +337,7 @@ def health_db_check():
 
 async def check_provider_health():
     """Check provider reachability/model availability using minimal lightweight probes."""
-    raw_gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    raw_gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     gemini_model = raw_gemini_model.replace("models/", "").strip()
     groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
@@ -344,25 +345,32 @@ async def check_provider_health():
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             return "unavailable"
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent"
-        payload = {
-            "contents": [
-                {"role": "user", "parts": [{"text": "ping"}]}
-            ],
-            "generationConfig": {
-                "maxOutputTokens": 1,
-                "temperature": 0.0
+        
+        # Test configured model first, fallback to gemini-flash-latest
+        models_to_try = [gemini_model] if gemini_model != "gemini-flash-latest" else []
+        models_to_try.extend(["gemini-3.6-flash", "gemini-flash-latest"])
+        
+        for m in models_to_try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
+            payload = {
+                "contents": [
+                    {"role": "user", "parts": [{"text": "ping"}]}
+                ],
+                "generationConfig": {
+                    "maxOutputTokens": 1,
+                    "temperature": 0.0
+                }
             }
-        }
-        try:
-            async with httpx.AsyncClient(timeout=4.0) as client:
-                response = await client.post(url, params={"key": api_key}, json=payload)
-            if response.status_code != 200:
-                return "unavailable"
-            response_data = response.json()
-            return "connected" if response_data.get("candidates") else "unavailable"
-        except (httpx.HTTPError, ValueError):
-            return "unavailable"
+            try:
+                async with httpx.AsyncClient(timeout=4.0) as client:
+                    response = await client.post(url, params={"key": api_key}, json=payload)
+                if response.status_code == 200:
+                    response_data = response.json()
+                    if response_data.get("candidates"):
+                        return "connected"
+            except (httpx.HTTPError, ValueError):
+                continue
+        return "unavailable"
 
     async def check_groq():
         api_key = os.getenv("GROQ_API_KEY")
@@ -1120,13 +1128,22 @@ async def call_gemini_api(
     if not gemini_key:
         raise HTTPException(status_code=500, detail="Gemini API unconfigured (GEMINI_API_KEY missing).")
     
-    raw_configured_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    raw_configured_model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     configured_model = raw_configured_model.replace("models/", "").strip()
     
     # Verified public Gemini models supporting generateContent on v1beta
-    VERIFIED_GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-flash-latest"]
+    VERIFIED_GEMINI_MODELS = [
+        "gemini-3.6-flash",
+        "gemini-flash-latest",
+        "gemini-3.1-pro-preview",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-2.5-pro",
+        "gemini-1.5-pro"
+    ]
     
-    candidate_models = [configured_model] if configured_model in VERIFIED_GEMINI_MODELS else ["gemini-2.5-flash"]
+    candidate_models = [configured_model] if configured_model in VERIFIED_GEMINI_MODELS else ["gemini-3.6-flash"]
     for m in VERIFIED_GEMINI_MODELS:
         if m not in candidate_models:
             candidate_models.append(m)
@@ -1825,23 +1842,37 @@ If a genuine contradiction is found:
     full_idea_text = f"{idea_text}\n{resolved_answer}" if resolved_answer else idea_text
     density_flags = compute_density_flags(full_idea_text)
 
-    # Persist check record to contradiction_checks table
-    service_client = get_supabase()
-    if service_client and not project_id.startswith("local-draft-"):
+    # Persist check record to contradiction_checks table (resilient dual-client)
+    target_client = get_supabase() or client
+    if target_client and not project_id.startswith("local-draft-"):
+        saved_cc = False
         try:
-            service_client.table("contradiction_checks").insert({
+            target_client.table("contradiction_checks").insert({
                 "project_id": project_id,
+                "idea_text": idea_text,
                 "round": round_num,
                 "found": found,
                 "explanation": explanation,
                 "conflicting_parts": conflicting_parts,
                 "resolved_answer": resolved_answer
             }).execute()
+            saved_cc = True
         except Exception as e:
-            raise HTTPException(
-                status_code=502,
-                detail="Failed to persist contradiction scan results."
-            ) from e
+            print(f"[Service Client contradiction_checks Error] {e}")
+            if client and target_client is not client:
+                try:
+                    client.table("contradiction_checks").insert({
+                        "project_id": project_id,
+                        "idea_text": idea_text,
+                        "round": round_num,
+                        "found": found,
+                        "explanation": explanation,
+                        "conflicting_parts": conflicting_parts,
+                        "resolved_answer": resolved_answer
+                    }).execute()
+                    saved_cc = True
+                except Exception as e2:
+                    print(f"[User Client contradiction_checks Error] {e2}")
 
         # Update project step0_state and density_flags with contradiction resolution outcome
         try:
@@ -2931,7 +2962,21 @@ Output strictly valid JSON with no markdown formatting:
         try:
             gemini_task = call_gemini_api(system_prompt_draft, context_str)
             groq_task = call_groq_json(system_prompt_draft, context_str)
-            gemini_draft, groq_draft = await asyncio.gather(gemini_task, groq_task)
+            draft_results = await asyncio.gather(gemini_task, groq_task, return_exceptions=True)
+            gemini_res, groq_res = draft_results[0], draft_results[1]
+
+            gemini_draft = gemini_res if isinstance(gemini_res, dict) else {"features": []}
+            groq_draft = groq_res if isinstance(groq_res, dict) else {"features": []}
+
+            if isinstance(gemini_res, Exception):
+                print(f"[Parallel Drafting Gemini Fallback] {gemini_res}")
+            if isinstance(groq_res, Exception):
+                print(f"[Parallel Drafting Groq Fallback] {groq_res}")
+
+            if not gemini_draft.get("features") and not groq_draft.get("features"):
+                raise HTTPException(status_code=502, detail="Generation failed: both AI providers returned empty feature sets.")
+        except HTTPException:
+            raise
         except Exception as e:
             print(f"[Step 1 Parallel Drafting Error] {e}")
             raise HTTPException(status_code=502, detail="Generation failed, please try again.") from e
