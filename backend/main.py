@@ -1160,6 +1160,18 @@ async def call_gemini_api(
                         latency_ms = int((time.time() - start_time) * 1000)
                         asyncio.create_task(log_ai_call("gemini", stage, True, latency_ms, user_id, project_id))
                         return parse_llm_json(raw)
+                    
+                    # Status-specific handling: 404 (skip model), 503 (wait 1.5s before retry)
+                    if resp.status_code == 404:
+                        last_error = f"Status 404: Model {model_name} not available"
+                        print(f"[Gemini 404 Model {model_name}] Skipping — model not available")
+                        break
+                    
+                    if resp.status_code == 503 and attempt == 0:
+                        print(f"[Gemini 503 Model {model_name}] Waiting 1.5s before retry")
+                        await asyncio.sleep(1.5)
+                        continue
+                    
                     sanitized_text = _sanitize_gemini_error(resp.text[:500], gemini_key)
                     last_error = f"Status {resp.status_code}: {sanitized_text}"
                     print(f"[Gemini API Error Model {model_name} Attempt {attempt+1}] {last_error}")
@@ -1226,6 +1238,13 @@ async def call_groq_json(
                         latency_ms = int((time.time() - start_time) * 1000)
                         asyncio.create_task(log_ai_call("groq", stage, True, latency_ms, user_id, project_id))
                         return parse_llm_json(raw)
+                    
+                    # Status-specific handling: 429 TPM rate limit (wait 2.0s before retry)
+                    if resp.status_code == 429 and attempt == 0:
+                        print(f"[Groq 429 Model {model_name}] TPM limit — waiting 2s before retry")
+                        await asyncio.sleep(2.0)
+                        continue
+                    
                     last_error = f"Status {resp.status_code}: {resp.text}"
                     print(f"[Groq API Error Model {model_name} Attempt {attempt+1}] {last_error}")
             except Exception as e:
