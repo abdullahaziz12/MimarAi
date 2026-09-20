@@ -491,6 +491,26 @@ export default function PlanScreen() {
               const isAiAdded = feat.source === "ai_added";
               const isCommented = !!planComments[feat.id];
 
+              const rawFailed = feat.quality_flags?.failed_checks || [];
+              const failedChecks = rawFailed.map((item) => {
+                if (!item) return null;
+                if (typeof item === "string") {
+                  return {
+                    check: item,
+                    reason: `Failed '${item}' quality standard check.`,
+                    fields_involved: [],
+                    survived_fix_pass: false,
+                  };
+                }
+                return {
+                  check: item.check || "Quality Check",
+                  reason: item.reason || `Failed '${item.check || "quality"}' check.`,
+                  fields_involved: Array.isArray(item.fields_involved) ? item.fields_involved : [],
+                  survived_fix_pass: !!item.survived_fix_pass,
+                };
+              }).filter(Boolean);
+              const hasSurvived = failedChecks.some((fc) => fc.survived_fix_pass);
+
               return (
                 <React.Fragment key={feat.id}>
                   <div
@@ -500,6 +520,26 @@ export default function PlanScreen() {
                     <div className="feature-row">
                       <span className="feature-name">{feat.name}</span>
                       {isAiAdded && <span className="ai-tag">AI-added</span>}
+                      {failedChecks.length > 0 && (
+                        <span
+                          className="quality-flag-chip"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            fontSize: "11px",
+                            fontWeight: "600",
+                            padding: "2px 8px",
+                            borderRadius: "12px",
+                            backgroundColor: hasSurvived ? "rgba(239, 68, 68, 0.15)" : "rgba(245, 158, 11, 0.15)",
+                            color: hasSurvived ? "#EF4444" : "#F59E0B",
+                            border: `1px solid ${hasSurvived ? "#EF4444" : "#F59E0B"}`,
+                            marginLeft: "8px",
+                          }}
+                        >
+                          {hasSurvived ? "⚠ Persistent Flag" : "⚠ Quality Flag"}
+                        </span>
+                      )}
                       {isRejected && (
                         <span className="rejected-chip">REJECTED</span>
                       )}
@@ -522,6 +562,49 @@ export default function PlanScreen() {
                       )}
                     </div>
                     <span className="kv">{feat.description}</span>
+                    {failedChecks.length > 0 && (
+                      <div
+                        className="quality-issues-container"
+                        style={{
+                          marginTop: "8px",
+                          padding: "8px 12px",
+                          borderRadius: "6px",
+                          backgroundColor: hasSurvived ? "rgba(239, 68, 68, 0.08)" : "rgba(245, 158, 11, 0.08)",
+                          border: `1px solid ${hasSurvived ? "rgba(239, 68, 68, 0.3)" : "rgba(245, 158, 11, 0.3)"}`,
+                          fontSize: "12px",
+                        }}
+                      >
+                        <div style={{ fontWeight: "600", color: hasSurvived ? "#EF4444" : "#F59E0B", marginBottom: "4px", display: "flex", alignItems: "center", gap: "6px" }}>
+                          <span>{hasSurvived ? "⚠ Unresolved Quality Check (Survived Fix Pass)" : "⚠ Quality Standard Notice"}</span>
+                        </div>
+                        {failedChecks.map((fc, idx) => (
+                          <div key={idx} style={{ marginTop: idx > 0 ? "6px" : "2px", color: "#cbd5e1" }}>
+                            <span style={{ fontWeight: "600", color: "#f8fafc", textTransform: "capitalize" }}>
+                              {fc.check}:
+                            </span>{" "}
+                            <span>{fc.reason}</span>
+                            {fc.fields_involved.length > 0 && (
+                              <span style={{ display: "inline-flex", gap: "4px", marginLeft: "6px" }}>
+                                {fc.fields_involved.map((fld, fIdx) => (
+                                  <span
+                                    key={fIdx}
+                                    style={{
+                                      fontSize: "10px",
+                                      padding: "1px 6px",
+                                      borderRadius: "4px",
+                                      background: "rgba(255, 255, 255, 0.1)",
+                                      color: "#94a3b8",
+                                    }}
+                                  >
+                                    {fld}
+                                  </span>
+                                ))}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <div
                       className="rejected-msg"
                       style={{ display: isRejected ? "flex" : "none" }}
