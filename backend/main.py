@@ -1656,9 +1656,10 @@ If a genuine contradiction is found:
     density_flags = compute_density_flags(full_idea_text)
 
     # Persist check record to contradiction_checks table
-    if client and not project_id.startswith("local-draft-"):
+    service_client = get_supabase()
+    if service_client and not project_id.startswith("local-draft-"):
         try:
-            client.table("contradiction_checks").insert({
+            service_client.table("contradiction_checks").insert({
                 "project_id": project_id,
                 "round": round_num,
                 "found": found,
@@ -2139,10 +2140,12 @@ async def edit_contradiction_resolution(
 
         # Also update latest row in contradiction_checks table if present
         try:
-            cc_rows = client.table("contradiction_checks").select("id").eq("project_id", project_id).order("checked_at", desc=True).limit(1).execute()
-            if cc_rows and cc_rows.data:
-                latest_cc_id = cc_rows.data[0]["id"]
-                client.table("contradiction_checks").update({"resolved_answer": req.resolved_answer}).eq("id", latest_cc_id).execute()
+            service_client = get_supabase()
+            if service_client:
+                cc_rows = service_client.table("contradiction_checks").select("id").eq("project_id", project_id).order("checked_at", desc=True).limit(1).execute()
+                if cc_rows and cc_rows.data:
+                    latest_cc_id = cc_rows.data[0]["id"]
+                    service_client.table("contradiction_checks").update({"resolved_answer": req.resolved_answer}).eq("id", latest_cc_id).execute()
         except Exception as e:
             print(f"[Update contradiction_checks Table Warning] {e}")
 
@@ -2242,19 +2245,20 @@ def check_generation_rate_limit(client, user_id: str, limit_type: str):
         print(f"[Generation Rate Limit Warning] {e}")
 
 
-def fetch_contradiction_checks_records(client, project_id: str) -> List[Dict[str, Any]]:
+def fetch_contradiction_checks_records(client=None, project_id: str = "") -> List[Dict[str, Any]]:
     """Fetch contradiction check records with resilient ordering across schema variants."""
-    if not client or not project_id or project_id.startswith("local-draft-"):
+    target_client = get_supabase() or client
+    if not target_client or not project_id or project_id.startswith("local-draft-"):
         return []
     for order_col in ["checked_at", "created_at"]:
         try:
-            res = client.table("contradiction_checks").select("*").eq("project_id", project_id).order(order_col, desc=True).limit(5).execute()
+            res = target_client.table("contradiction_checks").select("*").eq("project_id", project_id).order(order_col, desc=True).limit(5).execute()
             if res and isinstance(res.data, list):
                 return res.data
         except Exception:
             continue
     try:
-        res = client.table("contradiction_checks").select("*").eq("project_id", project_id).limit(5).execute()
+        res = target_client.table("contradiction_checks").select("*").eq("project_id", project_id).limit(5).execute()
         if res and isinstance(res.data, list):
             return res.data
     except Exception as e:

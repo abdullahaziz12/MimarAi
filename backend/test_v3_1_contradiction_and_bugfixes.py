@@ -328,3 +328,60 @@ class TestBugFixesAndContradictionScan(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["status"], "error")
         self.assertEqual(data["error_type"], "provider_error")
 
+    @patch.object(main, "get_supabase")
+    @patch.object(main, "get_owned_project")
+    @patch.object(main, "call_groq_json")
+    async def test_contradiction_scan_uses_service_role_for_contradiction_checks(
+        self, mock_groq, mock_get_project, mock_supabase
+    ):
+        mock_get_project.return_value = dict(self.mock_project)
+        user_client = MagicMock(name="user_client")
+        service_client = MagicMock(name="service_client")
+
+        def supabase_side_effect(token=None):
+            if token:
+                return user_client
+            return service_client
+
+        mock_supabase.side_effect = supabase_side_effect
+        mock_groq.return_value = {"contradiction": False}
+
+        resp = self.client.post(
+            f"/api/projects/{self.mock_project['id']}/contradiction-scan",
+            headers=self.auth_headers,
+            json={
+                "idea_text": "A personal finance tracking tool with visual budgeting",
+                "round": 1
+            }
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        # Service client must be used for contradiction_checks insert (bypasses RLS)
+        service_client.table.assert_called_with("contradiction_checks")
+        service_client.table("contradiction_checks").insert.assert_called_once()
+        insert_payload = service_client.table("contradiction_checks").insert.call_args[0][0]
+        self.assertEqual(insert_payload["project_id"], self.mock_project["id"])
+        self.assertEqual(insert_payload["round"], 1)
+        self.assertFalse(insert_payload["found"])
+
+        # User client is used for project step0_state update (projects table has user RLS)
+        user_client.table.assert_called_with("projects")
+        user_client.table("projects").update.assert_called_once()
+
+    @patch.object(main, "get_supabase")
+    def test_fetch_contradiction_checks_records_uses_service_role(
+        self, mock_supabase
+    ):
+        service_client = MagicMock(name="service_client")
+        mock_supabase.return_value = service_client
+        mock_res = MagicMock()
+        mock_res.data = [{"id": "cc-1", "found": False}]
+        service_client.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = mock_res
+
+        records = main.fetch_contradiction_checks_records(project_id="test-proj-id")
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["id"], "cc-1")
+        # Confirms get_supabase() called without token
+        mock_supabase.assert_called_with()
+
+
