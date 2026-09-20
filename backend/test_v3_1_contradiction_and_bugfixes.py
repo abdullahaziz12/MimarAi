@@ -99,7 +99,11 @@ class TestBugFixesAndContradictionScan(unittest.IsolatedAsyncioTestCase):
                 "name": "Loan Desk",
                 "description": "Desk for loan officers to review applications.",
                 "source": "user_originated",
-                "acceptance_criteria": ["Loan officer can approve or reject application."]
+                "business_rules": ["Review within 48 hours."],
+                "data_touched": ["loan_applications"],
+                "actor_role": ["loan_officer"],
+                "acceptance_criteria": ["Loan officer can approve or reject application."],
+                "exclusions": ["Does not handle wire disbursements."]
             }]
         }
 
