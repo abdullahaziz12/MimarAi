@@ -63,7 +63,12 @@ class TestV39RequirementQualityStandard(unittest.TestCase):
         }
         flags = main.evaluate_code_level_quality(non_atomic_feature)
         self.assertFalse(flags["atomic"], "Compound action feature must fail atomic check")
-        self.assertIn("atomic", flags["failed_checks"])
+        failed_names = [fc["check"] if isinstance(fc, dict) else fc for fc in flags["failed_checks"]]
+        self.assertIn("atomic", failed_names)
+        fc_obj = next(fc for fc in flags["failed_checks"] if isinstance(fc, dict) and fc["check"] == "atomic")
+        self.assertIn("Combines multiple distinct behaviors", fc_obj["reason"])
+        self.assertEqual(fc_obj["fields_involved"], ["description"])
+        self.assertFalse(fc_obj["survived_fix_pass"])
 
     def test_code_level_check_atomic_success(self):
         """Atomic check passes for single atomic behavior."""
@@ -83,7 +88,8 @@ class TestV39RequirementQualityStandard(unittest.TestCase):
         }
         flags = main.evaluate_code_level_quality(atomic_feature)
         self.assertTrue(flags["atomic"], "Single behavior feature must pass atomic check")
-        self.assertNotIn("atomic", flags["failed_checks"])
+        failed_names = [fc["check"] if isinstance(fc, dict) else fc for fc in flags["failed_checks"]]
+        self.assertNotIn("atomic", failed_names)
 
     def test_code_level_check_complete_failure(self):
         """Complete check flags features with missing or empty acceptance_criteria."""
@@ -103,7 +109,11 @@ class TestV39RequirementQualityStandard(unittest.TestCase):
         }
         flags = main.evaluate_code_level_quality(incomplete_feature)
         self.assertFalse(flags["complete"], "Feature with empty acceptance_criteria must fail complete check")
-        self.assertIn("complete", flags["failed_checks"])
+        failed_names = [fc["check"] if isinstance(fc, dict) else fc for fc in flags["failed_checks"]]
+        self.assertIn("complete", failed_names)
+        fc_obj = next(fc for fc in flags["failed_checks"] if isinstance(fc, dict) and fc["check"] == "complete")
+        self.assertIn("acceptance criteria", fc_obj["reason"])
+        self.assertEqual(fc_obj["fields_involved"], ["acceptance_criteria"])
 
     def test_code_level_check_traceable_failure_for_ai_inferred_missing_reasoning(self):
         """Traceable check flags ai_inferred features that lack a non-null reasoning field."""
@@ -123,7 +133,11 @@ class TestV39RequirementQualityStandard(unittest.TestCase):
         }
         flags = main.evaluate_code_level_quality(untraceable_feature)
         self.assertFalse(flags["traceable"], "AI-inferred feature without reasoning must fail traceable check")
-        self.assertIn("traceable", flags["failed_checks"])
+        failed_names = [fc["check"] if isinstance(fc, dict) else fc for fc in flags["failed_checks"]]
+        self.assertIn("traceable", failed_names)
+        fc_obj = next(fc for fc in flags["failed_checks"] if isinstance(fc, dict) and fc["check"] == "traceable")
+        self.assertIn("reasoning", fc_obj["reason"])
+        self.assertIn("reasoning", fc_obj["fields_involved"])
 
     def test_code_level_check_traceable_success_for_ai_inferred_with_reasoning(self):
         """Traceable check passes for ai_inferred features with non-null reasoning."""
@@ -143,7 +157,8 @@ class TestV39RequirementQualityStandard(unittest.TestCase):
         }
         flags = main.evaluate_code_level_quality(traceable_feature)
         self.assertTrue(flags["traceable"], "AI-inferred feature with reasoning must pass traceable check")
-        self.assertNotIn("traceable", flags["failed_checks"])
+        failed_names = [fc["check"] if isinstance(fc, dict) else fc for fc in flags["failed_checks"]]
+        self.assertNotIn("traceable", failed_names)
 
     def test_code_level_check_independent_failure(self):
         """Independent check flags descriptions referencing another feature by ID/name without standalone context."""
@@ -163,7 +178,11 @@ class TestV39RequirementQualityStandard(unittest.TestCase):
         }
         flags = main.evaluate_code_level_quality(dependent_feature)
         self.assertFalse(flags["independent"], "Feature cross-referencing feat-1 in description must fail independent check")
-        self.assertIn("independent", flags["failed_checks"])
+        failed_names = [fc["check"] if isinstance(fc, dict) else fc for fc in flags["failed_checks"]]
+        self.assertIn("independent", failed_names)
+        fc_obj = next(fc for fc in flags["failed_checks"] if isinstance(fc, dict) and fc["check"] == "independent")
+        self.assertIn("couples with another feature", fc_obj["reason"])
+        self.assertEqual(fc_obj["fields_involved"], ["description"])
 
     def test_code_level_check_feasible_failure(self):
         """Feasible check flags known-impossible absolute claims."""
@@ -183,7 +202,11 @@ class TestV39RequirementQualityStandard(unittest.TestCase):
         }
         flags = main.evaluate_code_level_quality(infeasible_feature)
         self.assertFalse(flags["feasible"], "Feature claiming zero downtime / 100% uptime must fail feasible check")
-        self.assertIn("feasible", flags["failed_checks"])
+        failed_names = [fc["check"] if isinstance(fc, dict) else fc for fc in flags["failed_checks"]]
+        self.assertIn("feasible", failed_names)
+        fc_obj = next(fc for fc in flags["failed_checks"] if isinstance(fc, dict) and fc["check"] == "feasible")
+        self.assertIn("impossible", fc_obj["reason"])
+        self.assertIn("description", fc_obj["fields_involved"])
 
     # =========================================================================
     # 2. DIFF / MERGE OVERLAP MATCHING (data_touched + actor_role)
@@ -606,6 +629,207 @@ class TestV39RequirementQualityStandard(unittest.TestCase):
         self.assertIn("quality_flags", f)
         self.assertTrue(f["quality_flags"]["complete"])
 
+    # =========================================================================
+    # 6. FIX 2: CONSISTENT CHECK (CROSS-FIELD NUMERIC CONTRADICTION) & SURVIVED_FIX_PASS
+    # =========================================================================
+
+    @patch.object(main, "get_supabase")
+    @patch.object(main, "get_owned_project")
+    @patch.object(main, "check_generation_rate_limit")
+    @patch.object(main, "call_gemini_api")
+    @patch.object(main, "call_groq_json")
+    def test_consistent_check_flags_cross_field_numeric_mismatch(
+        self, mock_groq, mock_gemini, mock_rate_limit, mock_get_project, mock_supabase
+    ):
+        """
+        Step 3 Groq validation flags a within-feature numeric contradiction between
+        business_rules (250MB limit) and acceptance_criteria (300MB upload test) as consistent: false with a reason.
+        """
+        mock_get_project.return_value = dict(self.mock_project)
+        mock_supabase_client = MagicMock()
+        mock_supabase.return_value = mock_supabase_client
+
+        contradictory_feature = {
+            "id": "feat-1",
+            "name": "Medical Imaging Upload",
+            "description": "Allows radiologist to upload high resolution CT scan DICOM archives.",
+            "source": "user_originated",
+            "business_rules": ["Maximum single file upload size is 250MB."],
+            "data_touched": ["dicom_scans"],
+            "actor_role": ["radiologist"],
+            "acceptance_criteria": ["System accepts a 300MB DICOM image and stores it successfully."],
+            "exclusions": [],
+            "priority": "must_have",
+            "provenance": "user_originated",
+            "reasoning": None,
+            "source_model": "gemini"
+        }
+
+        fixed_feature = {
+            "id": "feat-1",
+            "name": "Medical Imaging Upload",
+            "description": "Allows radiologist to upload high resolution CT scan DICOM archives.",
+            "source": "user_originated",
+            "business_rules": ["Maximum single file upload size is 300MB."],
+            "data_touched": ["dicom_scans"],
+            "actor_role": ["radiologist"],
+            "acceptance_criteria": ["System accepts a 300MB DICOM image and stores it successfully."],
+            "exclusions": [],
+            "priority": "must_have",
+            "provenance": "user_originated",
+            "reasoning": None,
+            "source_model": "gemini"
+        }
+
+        mock_gemini.side_effect = [
+            {"idea_objective": "Telehealth", "features": [contradictory_feature]},
+            {"features": [fixed_feature]}
+        ]
+
+        # Step 3 Groq validation returns consistent: false with rich reason
+        mock_groq.side_effect = [
+            {"features": []},  # Step 1 Groq draft
+            {
+                "is_valid": False,
+                "flags": ["Cross-field numeric inconsistency"],
+                "feature_evaluations": [
+                    {
+                        "id": "feat-1",
+                        "is_valid": False,
+                        "failed_checks": [
+                            {
+                                "check": "consistent",
+                                "reason": "business_rules states max file size 250MB, but acceptance_criteria tests a 300MB file — these conflict.",
+                                "fields_involved": ["business_rules", "acceptance_criteria"]
+                            }
+                        ]
+                    }
+                ]
+            },  # Step 3 Val
+            {
+                "is_valid": True,
+                "flags": [],
+                "feature_evaluations": [
+                    {"id": "feat-1", "is_valid": True, "failed_checks": []}
+                ]
+            }   # Step 5 Val
+        ]
+
+        resp = self.client.post(
+            f"/api/projects/{self.mock_project['id']}/generate",
+            headers=self.auth_headers,
+            json={
+                "idea_text": self.mock_project["idea_text"],
+                "fixed_inputs": self.mock_project["fixed_inputs"]
+            }
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        gen_state = data["generation_state"]
+        self.assertTrue(gen_state["adjusted_flag"])
+        features = gen_state["features"]
+        self.assertEqual(len(features), 1)
+        self.assertEqual(features[0]["quality_flags"]["failed_checks"], [])
+        self.assertTrue(features[0]["quality_flags"]["consistent"])
+
+    @patch.object(main, "get_supabase")
+    @patch.object(main, "get_owned_project")
+    @patch.object(main, "check_generation_rate_limit")
+    @patch.object(main, "call_gemini_api")
+    @patch.object(main, "call_groq_json")
+    def test_survived_fix_pass_flag_set_on_persistent_failures(
+        self, mock_groq, mock_gemini, mock_rate_limit, mock_get_project, mock_supabase
+    ):
+        """
+        When a quality check failure persists through Step 4 and remains in Step 5,
+        it receives survived_fix_pass: True without failing the generation.
+        """
+        mock_get_project.return_value = dict(self.mock_project)
+        mock_supabase_client = MagicMock()
+        mock_supabase.return_value = mock_supabase_client
+
+        infeasible_feature = {
+            "id": "feat-1",
+            "name": "Live Telemetry",
+            "description": "Zero downtime architecture.",
+            "source": "user_originated",
+            "business_rules": [],
+            "data_touched": ["telemetry"],
+            "actor_role": ["doctor"],
+            "acceptance_criteria": ["Uptime is measured."],
+            "exclusions": [],
+            "priority": "must_have",
+            "provenance": "user_originated",
+            "reasoning": None,
+            "source_model": "gemini"
+        }
+
+        mock_gemini.side_effect = [
+            {"idea_objective": "Telehealth", "features": [infeasible_feature]},
+            {"features": [infeasible_feature]}  # Fix pass fails to resolve the issue
+        ]
+
+        mock_groq.side_effect = [
+            {"features": []},  # Step 1 Groq draft
+            {
+                "is_valid": False,
+                "flags": ["Vague terms"],
+                "feature_evaluations": [
+                    {
+                        "id": "feat-1",
+                        "is_valid": False,
+                        "failed_checks": [
+                            {
+                                "check": "unambiguous",
+                                "reason": "Uses vague term 'zero downtime' without concrete metric.",
+                                "fields_involved": ["description"]
+                            }
+                        ]
+                    }
+                ]
+            },  # Step 3 Val
+            {
+                "is_valid": False,
+                "flags": ["Vague terms still present"],
+                "feature_evaluations": [
+                    {
+                        "id": "feat-1",
+                        "is_valid": False,
+                        "failed_checks": [
+                            {
+                                "check": "unambiguous",
+                                "reason": "Uses vague term 'zero downtime' without concrete metric.",
+                                "fields_involved": ["description"]
+                            }
+                        ]
+                    }
+                ]
+            }   # Step 5 Val (still failing)
+        ]
+
+        resp = self.client.post(
+            f"/api/projects/{self.mock_project['id']}/generate",
+            headers=self.auth_headers,
+            json={
+                "idea_text": self.mock_project["idea_text"],
+                "fixed_inputs": self.mock_project["fixed_inputs"]
+            }
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        gen_state = data["generation_state"]
+        self.assertTrue(gen_state["adjusted_flag"])
+        features = gen_state["features"]
+        self.assertEqual(len(features), 1)
+        failed_checks = features[0]["quality_flags"]["failed_checks"]
+        self.assertTrue(len(failed_checks) > 0)
+        fc_unambig = next(fc for fc in failed_checks if fc["check"] == "unambiguous")
+        self.assertTrue(fc_unambig["survived_fix_pass"])
+        self.assertIn("zero downtime", fc_unambig["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
