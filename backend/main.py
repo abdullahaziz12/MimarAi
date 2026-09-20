@@ -1270,16 +1270,84 @@ INDEPENDENCE_VIOLATION_PATTERNS = [
 ]
 
 
+def normalize_failed_check(item: Any) -> Dict[str, Any]:
+    """Normalize a string or dict into a valid failed_check object."""
+    if isinstance(item, dict):
+        check = str(item.get("check") or "unknown").strip().lower()
+        reason = str(item.get("reason") or f"Check '{check}' failed validation.").strip()
+        fields = item.get("fields_involved")
+        if not isinstance(fields, list):
+            fields = [str(fields)] if fields else []
+        else:
+            fields = [str(f).strip() for f in fields if str(f).strip()]
+        survived = bool(item.get("survived_fix_pass", False))
+        return {
+            "check": check,
+            "reason": reason,
+            "fields_involved": fields,
+            "survived_fix_pass": survived
+        }
+    check = str(item).strip().lower()
+    default_reasons = {
+        "atomic": ("Combines multiple distinct actions or behaviors joined by conjunctions in description.", ["description"]),
+        "complete": ("Feature lacks required testable acceptance criteria.", ["acceptance_criteria"]),
+        "traceable": ("AI-inferred feature is missing architectural reasoning explaining why it is required.", ["reasoning", "provenance"]),
+        "independent": ("Explicitly references another feature by name or ID instead of maintaining standalone context.", ["description"]),
+        "feasible": ("Contains absolute or mathematically unfeasible claims (e.g. 100% uptime, zero latency).", ["description", "business_rules", "acceptance_criteria"]),
+        "consistent": ("Conflicting constraints or parameters between business rules and acceptance criteria.", ["business_rules", "acceptance_criteria"]),
+        "correct": ("Feature does not map directly to stated system actors or objectives.", ["description"]),
+        "necessary": ("Feature contains domain-irrelevant bloat.", ["description"]),
+        "unambiguous": ("Contains vague terms without concrete technical definitions.", ["description"]),
+        "understandable": ("Contains unexplained domain jargon.", ["description"]),
+        "clear_and_concise": ("Contains filler adjectives without concrete specifications.", ["description"])
+    }
+    reason, fields = default_reasons.get(check, (f"Feature failed the '{check}' quality standard check.", []))
+    return {
+        "check": check,
+        "reason": reason,
+        "fields_involved": fields,
+        "survived_fix_pass": False
+    }
+
+
+def merge_failed_checks(list1: List[Any], list2: List[Any]) -> List[Dict[str, Any]]:
+    """Merge and deduplicate failed check objects deterministically by check name."""
+    checks_map = {}
+    for raw_item in (list1 or []) + (list2 or []):
+        is_explicit_dict = isinstance(raw_item, dict)
+        norm = normalize_failed_check(raw_item)
+        chk = norm["check"]
+        if chk not in checks_map:
+            checks_map[chk] = (norm, is_explicit_dict)
+        else:
+            curr_norm, curr_is_dict = checks_map[chk]
+            # If incoming is an explicit dict and previous was just a string, prefer the explicit dict
+            if is_explicit_dict and not curr_is_dict:
+                curr_norm["reason"] = norm["reason"]
+                curr_norm["fields_involved"] = norm["fields_involved"]
+                curr_norm["survived_fix_pass"] = norm["survived_fix_pass"]
+                checks_map[chk] = (curr_norm, True)
+            else:
+                if len(norm.get("fields_involved", [])) > len(curr_norm.get("fields_involved", [])):
+                    curr_norm["fields_involved"] = norm["fields_involved"]
+                if len(norm.get("reason", "")) > len(curr_norm.get("reason", "")):
+                    curr_norm["reason"] = norm["reason"]
+                if norm.get("survived_fix_pass"):
+                    curr_norm["survived_fix_pass"] = True
+    return [checks_map[k][0] for k in sorted(checks_map.keys())]
+
+
 def evaluate_code_level_quality(feature: Dict[str, Any], fixed_inputs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Evaluates the 5 code-level quality characteristics in pure Python (NO AI call):
+    Evaluates code-level quality characteristics in pure Python (NO AI call):
     1. Atomic: single behavior, not multiple distinct verbs/actions joined by 'and'
     2. Complete: acceptance_criteria is non-empty list of non-empty strings
     3. Traceable: reasoning is non-null & non-empty when provenance == 'ai_inferred'
     4. Independent: does not reference another feature by ID/name without standalone context
     5. Feasible: no impossible absolute claims (100% accuracy, zero downtime, etc.)
+    6. Consistent: preserved from prior model evaluations or defaults to True (model-judged in Step 3)
     """
-    failed_checks = []
+    failed_checks: List[Dict[str, Any]] = []
 
     name = str(feature.get("name") or "").strip()
     description = str(feature.get("description") or "").strip()
@@ -1294,12 +1362,20 @@ def evaluate_code_level_quality(feature: Dict[str, Any], fixed_inputs: Optional[
     # 1. Atomic Check
     is_atomic = True
     desc_lower = description.lower()
+    matched_atomic_pattern = None
     for pat in ATOMIC_VIOLATION_PATTERNS:
-        if re.search(pat, desc_lower):
+        m = re.search(pat, desc_lower)
+        if m:
             is_atomic = False
+            matched_atomic_pattern = m.group(0)
             break
     if not is_atomic:
-        failed_checks.append("atomic")
+        failed_checks.append({
+            "check": "atomic",
+            "reason": f"Combines multiple distinct behaviors ('{matched_atomic_pattern}') in the feature description instead of a single atomic capability.",
+            "fields_involved": ["description"],
+            "survived_fix_pass": False
+        })
 
     # 2. Complete Check
     is_complete = True
@@ -1310,7 +1386,12 @@ def evaluate_code_level_quality(feature: Dict[str, Any], fixed_inputs: Optional[
         if len(non_empty_criteria) == 0:
             is_complete = False
     if not is_complete:
-        failed_checks.append("complete")
+        failed_checks.append({
+            "check": "complete",
+            "reason": "Feature lacks required testable acceptance criteria.",
+            "fields_involved": ["acceptance_criteria"],
+            "survived_fix_pass": False
+        })
 
     # 3. Traceable Check
     provenance = str(feature.get("provenance") or feature.get("source") or "").strip().lower()
@@ -1320,29 +1401,55 @@ def evaluate_code_level_quality(feature: Dict[str, Any], fixed_inputs: Optional[
         if reasoning is None or not str(reasoning).strip():
             is_traceable = False
     if not is_traceable:
-        failed_checks.append("traceable")
+        failed_checks.append({
+            "check": "traceable",
+            "reason": "AI-inferred feature is missing architectural reasoning explaining why it is required.",
+            "fields_involved": ["reasoning", "provenance"],
+            "survived_fix_pass": False
+        })
 
     # 4. Independent Check
     is_independent = True
+    matched_indep_pattern = None
     for pat in INDEPENDENCE_VIOLATION_PATTERNS:
-        if re.search(pat, desc_lower):
+        m = re.search(pat, desc_lower)
+        if m:
             is_independent = False
+            matched_indep_pattern = m.group(0)
             break
     if not is_independent:
-        failed_checks.append("independent")
+        failed_checks.append({
+            "check": "independent",
+            "reason": f"Feature description explicitly couples with another feature ('{matched_indep_pattern}') rather than stating self-contained technical requirements.",
+            "fields_involved": ["description"],
+            "survived_fix_pass": False
+        })
 
     # 5. Feasible Check
     is_feasible = True
+    matched_feas_pattern = None
     for pat in ABSOLUTE_IMPOSSIBLE_PATTERNS:
-        if re.search(pat, all_text):
+        m = re.search(pat, all_text)
+        if m:
             is_feasible = False
+            matched_feas_pattern = m.group(0)
             break
     if not is_feasible:
-        failed_checks.append("feasible")
+        failed_checks.append({
+            "check": "feasible",
+            "reason": f"Feature asserts an impossible or unachievable absolute requirement ('{matched_feas_pattern}').",
+            "fields_involved": ["description", "business_rules", "acceptance_criteria"],
+            "survived_fix_pass": False
+        })
 
     existing_flags = feature.get("quality_flags") or {}
     existing_failed = list(existing_flags.get("failed_checks") or [])
-    combined_failed = sorted(list(set(existing_failed + failed_checks)))
+    combined_failed = merge_failed_checks(existing_failed, failed_checks)
+
+    # Consistent check boolean (model-judged in Step 3, preserved from existing flags or defaults to True)
+    is_consistent = existing_flags.get("consistent", True)
+    if any(fc.get("check") == "consistent" for fc in combined_failed):
+        is_consistent = False
 
     return {
         "atomic": is_atomic,
@@ -1350,6 +1457,7 @@ def evaluate_code_level_quality(feature: Dict[str, Any], fixed_inputs: Optional[
         "traceable": is_traceable,
         "independent": is_independent,
         "feasible": is_feasible,
+        "consistent": is_consistent,
         "failed_checks": combined_failed
     }
 
@@ -1416,6 +1524,7 @@ def normalize_feature_schema(
             "traceable": True,
             "independent": True,
             "feasible": True,
+            "consistent": True,
             "failed_checks": []
         }
     }
@@ -2810,12 +2919,13 @@ Output strictly valid JSON with no markdown formatting:
             f["quality_flags"] = evaluate_code_level_quality(f, fixed_inputs)
 
         system_prompt_val = """You are an architectural validator checking a project feature plan against fixed inputs and the V3.9 Requirement Quality Standard.
-Validate each feature against system constraints and the 5 model-judged quality characteristics:
+Validate each feature against system constraints and the 6 model-judged quality characteristics:
 1. "correct": Feature genuinely maps to stated idea/actors (not a detached assumption).
 2. "necessary": Feature is domain-relevant (not irrelevant bloat).
 3. "unambiguous": No vague terms ("fast", "efficient", "modern") without concrete definition.
 4. "understandable": Plain language without unexplained jargon.
 5. "clear_and_concise": No filler adjectives ("robust", "seamless") without concrete meaning.
+6. "consistent": Cross-field numeric or logical consistency within the same feature (specifically comparing business_rules vs acceptance_criteria for conflicting numbers, limits, durations, or mutually exclusive requirements).
 
 Output strictly valid JSON with no markdown:
 {
@@ -2825,7 +2935,13 @@ Output strictly valid JSON with no markdown:
     {
       "id": "feat-1",
       "is_valid": true,
-      "failed_checks": []
+      "failed_checks": [
+        {
+          "check": "consistent",
+          "reason": "business_rules specifies max file size 250MB, but acceptance_criteria tests a 300MB file.",
+          "fields_involved": ["business_rules", "acceptance_criteria"]
+        }
+      ]
     }
   ]
 }"""
@@ -2847,9 +2963,25 @@ Output strictly valid JSON with no markdown:
         for f in merged_features:
             ev = eval_map.get(f.get("id"))
             if ev and isinstance(ev.get("failed_checks"), list):
-                model_failed = [str(fc).strip().lower() for fc in ev["failed_checks"] if str(fc).strip()]
+                model_failed = []
+                for fc in ev["failed_checks"]:
+                    if isinstance(fc, dict):
+                        chk_name = str(fc.get("check") or "unknown").strip().lower()
+                        reason = str(fc.get("reason") or f"Check '{chk_name}' failed validation.").strip()
+                        fields = fc.get("fields_involved") or []
+                        model_failed.append({
+                            "check": chk_name,
+                            "reason": reason,
+                            "fields_involved": fields if isinstance(fields, list) else [str(fields)],
+                            "survived_fix_pass": False
+                        })
+                    elif isinstance(fc, str) and fc.strip():
+                        model_failed.append(normalize_failed_check(fc))
+
                 existing_failed = list(f["quality_flags"].get("failed_checks") or [])
-                f["quality_flags"]["failed_checks"] = sorted(list(set(existing_failed + model_failed)))
+                f["quality_flags"]["failed_checks"] = merge_failed_checks(existing_failed, model_failed)
+                if any(item["check"] == "consistent" for item in f["quality_flags"]["failed_checks"]):
+                    f["quality_flags"]["consistent"] = False
 
         has_failed_checks = any(len(f.get("quality_flags", {}).get("failed_checks", [])) > 0 for f in merged_features)
         needs_fix = bool(not val1.get("is_valid") or val1.get("flags") or has_failed_checks)
@@ -2866,7 +2998,14 @@ Output strictly valid JSON with no markdown:
             for f in merged_features:
                 fc = f.get("quality_flags", {}).get("failed_checks", [])
                 if fc:
-                    violations_summary.append(f"- Feature '{f.get('id')}' ({f.get('name')}): failed checks: {', '.join(fc)}")
+                    fc_desc = []
+                    for item in fc:
+                        if isinstance(item, dict):
+                            fields_str = f" (Fields: {', '.join(item.get('fields_involved', []))})" if item.get("fields_involved") else ""
+                            fc_desc.append(f"[{item.get('check')}]: {item.get('reason')}{fields_str}")
+                        else:
+                            fc_desc.append(str(item))
+                    violations_summary.append(f"- Feature '{f.get('id')}' ({f.get('name')}):\n  * " + "\n  * ".join(fc_desc))
 
             violations_text = "\n".join(violations_summary)
             fix_prompt = f"""Context:
@@ -2878,7 +3017,7 @@ Current Features (V3.9 Schema):
 Validation Failures / Quality Flags to Fix:
 {violations_text}
 
-Fix ONLY the identified issues while strictly preserving the V3.9 extended feature schema for every feature (id, name, description, source, business_rules, data_touched, actor_role, acceptance_criteria, exclusions, priority, provenance, reasoning, source_model). Return strictly valid JSON with the corrected 'features' list."""
+Fix ONLY the identified issues while strictly preserving the V3.9 extended feature schema for every feature (id, name, description, source, business_rules, data_touched, actor_role, acceptance_criteria, exclusions, priority, provenance, reasoning, source_model). Ensure cross-field consistency between business_rules and acceptance_criteria (e.g., matching numeric limits, file sizes, timeouts). Return strictly valid JSON with the corrected 'features' list."""
 
             try:
                 fix_res = await call_gemini_api(system_prompt_draft, fix_prompt, retry=False)
@@ -2919,9 +3058,30 @@ Fix ONLY the identified issues while strictly preserving the V3.9 extended featu
         for f in final_features:
             ev = eval_map2.get(f.get("id"))
             if ev and isinstance(ev.get("failed_checks"), list):
-                model_failed = [str(fc).strip().lower() for fc in ev["failed_checks"] if str(fc).strip()]
+                model_failed = []
+                for fc in ev["failed_checks"]:
+                    if isinstance(fc, dict):
+                        chk_name = str(fc.get("check") or "unknown").strip().lower()
+                        reason = str(fc.get("reason") or f"Check '{chk_name}' failed validation.").strip()
+                        fields = fc.get("fields_involved") or []
+                        model_failed.append({
+                            "check": chk_name,
+                            "reason": reason,
+                            "fields_involved": fields if isinstance(fields, list) else [str(fields)],
+                            "survived_fix_pass": False
+                        })
+                    elif isinstance(fc, str) and fc.strip():
+                        model_failed.append(normalize_failed_check(fc))
+
                 existing_failed = list(f["quality_flags"].get("failed_checks") or [])
-                f["quality_flags"]["failed_checks"] = sorted(list(set(existing_failed + model_failed)))
+                f["quality_flags"]["failed_checks"] = merge_failed_checks(existing_failed, model_failed)
+                if any(item["check"] == "consistent" for item in f["quality_flags"]["failed_checks"]):
+                    f["quality_flags"]["consistent"] = False
+
+            # If a fix pass was attempted and failed_checks still exist, mark survived_fix_pass = True
+            if needs_fix:
+                for fc in f["quality_flags"].get("failed_checks", []):
+                    fc["survived_fix_pass"] = True
 
         if not val2.get("is_valid") or val2.get("flags") or any(len(f.get("quality_flags", {}).get("failed_checks", [])) > 0 for f in final_features):
             adjusted_flag = True
