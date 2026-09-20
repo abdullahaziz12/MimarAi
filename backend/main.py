@@ -1490,9 +1490,18 @@ def normalize_feature_schema(
     """
     Ensures a feature dictionary conforms strictly to the V3.9 Requirement Quality Standard schema.
     """
+    defaulted_fields: List[str] = []
+
+    raw_name = raw_feature.get("name")
+    if not raw_name or not str(raw_name).strip():
+        defaulted_fields.append("name")
     feat_id = str(raw_feature.get("id") or default_id).strip()
-    name = str(raw_feature.get("name") or "Unnamed Feature").strip()
-    description = str(raw_feature.get("description") or "").strip()
+    name = str(raw_name or "Unnamed Feature").strip()
+
+    raw_desc = raw_feature.get("description")
+    if not raw_desc or not str(raw_desc).strip():
+        defaulted_fields.append("description")
+    description = str(raw_desc or "").strip()
 
     raw_prov = str(raw_feature.get("provenance") or raw_feature.get("source") or default_provenance).strip().lower()
     provenance = "ai_inferred" if raw_prov in ("ai_inferred", "ai_added", "inferred") else "user_originated"
@@ -1505,11 +1514,29 @@ def normalize_feature_schema(
             return [val.strip()]
         return []
 
-    business_rules = _to_str_list(raw_feature.get("business_rules"))
-    data_touched = _to_str_list(raw_feature.get("data_touched"))
-    actor_role = _to_str_list(raw_feature.get("actor_role"))
+    # Track business_rules, data_touched, actor_role, exclusions
+    # BUT NOT acceptance_criteria (already caught by the `complete` check)
+    raw_rules = raw_feature.get("business_rules")
+    if not raw_rules or (isinstance(raw_rules, list) and len(_to_str_list(raw_rules)) == 0):
+        defaulted_fields.append("business_rules")
+    business_rules = _to_str_list(raw_rules)
+
+    raw_data = raw_feature.get("data_touched")
+    if not raw_data or (isinstance(raw_data, list) and len(_to_str_list(raw_data)) == 0):
+        defaulted_fields.append("data_touched")
+    data_touched = _to_str_list(raw_data)
+
+    raw_actors = raw_feature.get("actor_role")
+    if not raw_actors or (isinstance(raw_actors, list) and len(_to_str_list(raw_actors)) == 0):
+        defaulted_fields.append("actor_role")
+    actor_role = _to_str_list(raw_actors)
+
     acceptance_criteria = _to_str_list(raw_feature.get("acceptance_criteria"))
-    exclusions = _to_str_list(raw_feature.get("exclusions"))
+
+    raw_excl = raw_feature.get("exclusions")
+    if not raw_excl or (isinstance(raw_excl, list) and len(_to_str_list(raw_excl)) == 0):
+        defaulted_fields.append("exclusions")
+    exclusions = _to_str_list(raw_excl)
 
     raw_priority = str(raw_feature.get("priority") or "must_have").strip().lower()
     if raw_priority not in ("must_have", "should_have", "nice_to_have"):
@@ -1549,6 +1576,21 @@ def normalize_feature_schema(
     }
 
     normalized["quality_flags"] = evaluate_code_level_quality(normalized)
+
+    if defaulted_fields:
+        normalized["quality_flags"]["defaulted_fields"] = defaulted_fields
+        existing_checks = normalized["quality_flags"].get("failed_checks") or []
+        if not any(
+            (fc == "incomplete_model_output" if isinstance(fc, str) else fc.get("check") == "incomplete_model_output")
+            for fc in existing_checks
+        ):
+            normalized["quality_flags"]["failed_checks"].append({
+                "check": "incomplete_model_output",
+                "reason": f"Fields defaulted by normalizer: {', '.join(defaulted_fields)}",
+                "fields_involved": list(defaulted_fields),
+                "survived_fix_pass": False
+            })
+
     return normalized
 
 
@@ -3102,11 +3144,22 @@ Fix ONLY the identified issues while strictly preserving the V3.9 extended featu
                 for fc in f["quality_flags"].get("failed_checks", []):
                     fc["survived_fix_pass"] = True
 
-        if not val2.get("is_valid") or val2.get("flags") or any(len(f.get("quality_flags", {}).get("failed_checks", [])) > 0 for f in final_features):
+        adjustment_reasons = []
+
+        if not val2.get("is_valid") or val2.get("flags"):
             adjusted_flag = True
+            adjustment_reasons.append("final_validation_failed")
+
+        if any(len(f.get("quality_flags", {}).get("failed_checks", [])) > 0 for f in final_features):
+            adjusted_flag = True
+            adjustment_reasons.append("quality_checks_unresolved")
 
         if contradiction_unresolved:
             adjusted_flag = True
+            adjustment_reasons.append("contradiction_unresolved")
+
+        if fix_pass_failed:
+            adjustment_reasons.append("fix_pass_failed")
 
         generation_payload = {
             "idea_objective": gemini_draft.get("idea_objective") or effective_idea_text,
@@ -3115,6 +3168,7 @@ Fix ONLY the identified issues while strictly preserving the V3.9 extended featu
             "rejected_feature_ids": [],
             "dependency_order": [f.get("id") for f in final_features if f.get("id")],
             "adjusted_flag": adjusted_flag,
+            "adjustment_reasons": adjustment_reasons,
             "fix_pass_failed": fix_pass_failed,
             "generated_at": datetime.now(timezone.utc).isoformat()
         }
@@ -3227,11 +3281,6 @@ Output strictly valid JSON with no markdown formatting:
             print(f"[Batch Fix Gemini Error] {e}")
             raise HTTPException(status_code=502, detail="Failed to process your comments, please try again.") from e
 
-        generation_payload = {
-            "features": updated_features,
-            "adjusted_flag": False
-        }
-
         curr_state = project.get("generation_state") or {}
         curr_state["features"] = updated_features
         generation_payload = curr_state
@@ -3319,6 +3368,7 @@ Output strictly valid JSON:
             fix_res = await call_gemini_api(system_prompt, f"Fix circular dependencies for Features:\n{json.dumps(active_features)}")
             proposed_order = fix_res.get("dependency_order") or [f.get("id") for f in active_features]
             gen_state["adjusted_flag"] = True
+            gen_state.setdefault("adjustment_reasons", []).append("dependency_reordered")
 
         gen_state["dependency_order"] = proposed_order
         client.table("projects").update({"generation_state": gen_state, "status": "accepted"}).eq("id", project_id).execute()
@@ -3330,6 +3380,7 @@ Output strictly valid JSON:
         default_order = [f.get("id") for f in active_features if f.get("id")]
         gen_state["dependency_order"] = default_order
         gen_state["adjusted_flag"] = True
+        gen_state.setdefault("adjustment_reasons", []).append("dependency_reordered")
         client.table("projects").update({"generation_state": gen_state, "status": "accepted"}).eq("id", project_id).execute()
         return {"status": "ok", "dependency_order": default_order}
 
