@@ -1181,9 +1181,6 @@ export default function InterviewScreen() {
                   <span>
                     MIMAR DRAFTS WITH TWO MODELS (LLAMA-VERSATILE + GROQ) IN PARALLEL
                     BEFORE SHOWING YOU ANYTHING
-                    {rateLimits?.classification?.remaining !== undefined
-                      ? ` • ${rateLimits.classification.remaining}/10 submissions left this hour`
-                      : ""}
                   </span>
                   <span>{inputVal.length} / 2,000</span>
                 </div>
