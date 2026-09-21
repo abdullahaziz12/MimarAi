@@ -1,27 +1,42 @@
 import asyncio
 import os
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import main
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 
 class Query:
     def __init__(self, result):
         self.result = result
+        self._filters = []
 
     def select(self, *_args):
         return self
 
-    def eq(self, *_args):
+    def eq(self, key, value):
+        self._filters.append((key, value))
+        return self
+
+    def in_(self, *_args):
+        return self
+
+    def update(self, *_args, **_kwargs):
         return self
 
     def order(self, *_args, **_kwargs):
         return self
 
     def execute(self):
-        return self.result
+        rows = list(getattr(self.result, "data", []) or [])
+        for key, value in self._filters:
+            rows = [
+                row for row in rows if row.get(key, row) == value or key not in row
+            ]
+        self._filters = []
+        return type("Result", (), {"data": rows})()
 
 
 class Client:
@@ -109,6 +124,74 @@ class SecurityRegressionTests(unittest.TestCase):
                 )
             )
         self.assertEqual(result, {"comments": [{"id": "comment-1"}]})
+
+    def test_invalid_comment_stage_is_rejected_with_422(self):
+        project = {"id": "11111111-1111-4111-8111-111111111111", "owner_id": "user-1"}
+        client = TestClient(main.app)
+
+        with patch.object(main, "get_current_user", return_value={"user_id": "user-1", "token": "token"}), patch.object(main, "get_supabase", return_value=MagicMock()), patch.object(main, "get_owned_project", return_value=project):
+            response = client.post(
+                f"/api/projects/{project['id']}/comments",
+                headers={"Authorization": "Bearer token"},
+                json={"text": "bad stage", "stage": "structrue"},
+            )
+
+        self.assertEqual(response.status_code, 422)
+
+    @patch.object(main, "check_generation_rate_limit")
+    @patch.object(main, "call_groq_json", new_callable=AsyncMock)
+    @patch.object(main, "call_gemini_api", new_callable=AsyncMock)
+    def test_batch_fix_only_processes_comments_for_requested_stage(self, mock_gemini, mock_groq, mock_rate_limit):
+        project = {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "owner_id": "user-1",
+            "generation_state": {
+                "features": [{"id": "feat-1", "name": "Feature 1", "description": "Base feature", "source": "user_originated"}],
+            },
+        }
+        comment_result = type(
+            "Result",
+            (),
+            {
+                "data": [
+                    {"id": "comment-features", "project_id": project["id"], "stage": "features", "status": "pending", "text": "feature comment"},
+                    {"id": "comment-structure", "project_id": project["id"], "stage": "structure", "status": "pending", "text": "structure comment"},
+                ]
+            },
+        )()
+        client = Client(type("Result", (), {"data": [project]})(), comment_result)
+
+        mock_gemini.return_value = {
+            "features": [{
+                "id": "feat-1",
+                "name": "Feature 1",
+                "description": "Updated feature",
+                "source": "user_originated",
+                "business_rules": [],
+                "data_touched": [],
+                "actor_role": [],
+                "acceptance_criteria": [],
+                "exclusions": [],
+                "priority": "must_have",
+                "provenance": "user_originated",
+                "reasoning": None,
+                "source_model": "gemini",
+            }]
+        }
+
+        with patch.object(main, "get_supabase", return_value=client), patch.object(main, "get_owned_project", return_value=project):
+            result = asyncio.run(
+                main.process_comment_batch(
+                    project["id"],
+                    main.BatchFixRequest(stage="features"),
+                    {"user_id": "user-1", "token": "token"},
+                )
+            )
+
+        self.assertEqual(result["status"], "ok")
+        prompt = mock_gemini.await_args.args[1]
+        self.assertIn("feature comment", prompt)
+        self.assertNotIn("structure comment", prompt)
 
     def test_service_health_hides_unconfigured_providers(self):
         with patch.dict(os.environ, {"GEMINI_API_KEY": "", "GROQ_API_KEY": ""}):

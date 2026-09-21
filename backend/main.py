@@ -6,7 +6,7 @@ import re
 import unicodedata
 import httpx
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any, List, Union
+from typing import Optional, Dict, Any, List, Union, Literal
 import uuid
 from uuid import UUID
 from fastapi import FastAPI, HTTPException, Depends, Header, Request
@@ -1104,12 +1104,14 @@ Output strictly valid JSON with no markdown formatting:
 
 # --- V3 Feature Generation Pipeline & Comment System ---
 
+CommentStage = Literal["features", "structure", "diagram", "final"]
+
 class GenerateRequest(BaseModel):
     idea_text: Optional[str] = None
     fixed_inputs: Optional[Dict[str, Any]] = None
 
 class BatchFixRequest(BaseModel):
-    stage: Optional[str] = "features"
+    stage: CommentStage = "features"
     comments: Optional[List[Dict[str, Any]]] = None
     current_features: Optional[List[Dict[str, Any]]] = None
 
@@ -1119,7 +1121,7 @@ class FeatureRejectRequest(BaseModel):
 class CommentCreateRequest(BaseModel):
     target_feature_id: Optional[str] = None
     text: str
-    stage: Optional[str] = "features"
+    stage: CommentStage = "features"
 
 class CommentUpdateRequest(BaseModel):
     text: str
@@ -3309,9 +3311,24 @@ async def process_comment_batch(
     client = get_supabase(token)
     project = get_owned_project(client, user_id, project_id)
     
+    requested_stage: CommentStage = req.stage or "features"
     submitted_comments = req.comments or []
     current_features = req.current_features or []
     original_state = None
+
+    if submitted_comments:
+        for idx, comment in enumerate(submitted_comments):
+            if not isinstance(comment, dict):
+                raise HTTPException(status_code=422, detail=f"Comment at index {idx} must be an object.")
+            observed_stage = comment.get("stage")
+            if observed_stage not in (None, requested_stage):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Comment batch contains stage mismatch: expected '{requested_stage}', "
+                        f"found '{observed_stage}' for comment index {idx}."
+                    ),
+                )
 
     if project.get("status") == "locked_generating":
         raise HTTPException(status_code=429, detail="A generation or comment batch is already in progress.")
@@ -3327,7 +3344,7 @@ async def process_comment_batch(
 
     # Fetch pending DB comments if not passed in req
     if not submitted_comments:
-        comm_res = client.table("comments").select("*").eq("project_id", project_id).eq("status", "pending").execute()
+        comm_res = client.table("comments").select("*").eq("project_id", project_id).eq("stage", requested_stage).eq("status", "pending").execute()
         submitted_comments = comm_res.data or []
 
     try:
@@ -3362,7 +3379,10 @@ Output strictly valid JSON with no markdown formatting:
   ]
 }"""
 
-        comments_text = "\n".join([f"- Comment on {c.get('target_feature_id', 'general')}: {c.get('text')}" for c in submitted_comments])
+        comments_text = "\n".join([
+            f"- Comment on stage {c.get('stage', requested_stage)} / target {c.get('target_feature_id', 'general')}: {c.get('text')}"
+            for c in submitted_comments
+        ])
         
         try:
             try:
