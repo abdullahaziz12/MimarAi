@@ -23,7 +23,7 @@ load_dotenv()
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "backend", ".env"))
 
 TOKEN = os.getenv("MIMARAI_TEST_TOKEN")
-BACKEND_URL = (os.getenv("BACKEND_URL") or os.getenv("NEXT_PUBLIC_BACKEND_URL") or "https://mimaraibackend-oggafjvo.b4a.run").rstrip("/")
+BACKEND_URL = (os.getenv("BACKEND_URL") or os.getenv("NEXT_PUBLIC_BACKEND_URL") or "https://mimaraibackend-5r8r0io9.b4a.run").rstrip("/")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
 

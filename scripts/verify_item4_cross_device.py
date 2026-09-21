@@ -24,7 +24,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", "backend", ".env"))
 
 TOKEN_A = os.getenv("MIMARAI_TEST_TOKEN")
 TOKEN_B = os.getenv("MIMARAI_TEST_TOKEN_B") or TOKEN_A
-BACKEND_URL = (os.getenv("BACKEND_URL") or os.getenv("NEXT_PUBLIC_BACKEND_URL") or "https://mimaraibackend-oggafjvo.b4a.run").rstrip("/")
+BACKEND_URL = (os.getenv("BACKEND_URL") or os.getenv("NEXT_PUBLIC_BACKEND_URL") or "https://mimaraibackend-5r8r0io9.b4a.run").rstrip("/")
 
 def main():
     print("=" * 80)
