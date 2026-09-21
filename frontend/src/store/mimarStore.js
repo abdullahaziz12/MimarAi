@@ -129,6 +129,12 @@ const initialMimarState = {
   structureGenerated: false,
   structureAccepted: false,
   structureComments: {},
+  structureData: null,
+  structureAttempts: [],
+  structureDiffConflicts: [],
+  structureValidationResult: null,
+  structureSurvivedFixPass: false,
+  structureGenerating: false,
 
   diagramJsonGenerated: false,
   diagramJsonAccepted: false,
@@ -1347,13 +1353,29 @@ export const useMimarStore = create((set, get) => ({
         lightweightDraftStatus = (lightweight_draft.final_status === "accepted") ? "idle" : "reviewing";
       }
 
+      // Extract structure state
+      const struct_state = project.structure_state || {};
+      const structData = struct_state.accepted_structure?.structure || struct_state.candidate_structure?.structure || null;
+      const isStructureAccepted = project.status === "structure_accepted" || struct_state.status === "accepted";
+      const isPlanAccepted = project.status === "features_accepted" || isStructureAccepted || Boolean(gen_state?.features_locked);
+
       // Determine step0Status & active screen
       let step0Status = "idle";
       let currentScreen = "interview";
       let interviewDone = false;
       let planGenerated = false;
 
-      if (gen_state && Array.isArray(gen_state.features) && gen_state.features.length > 0) {
+      if (isStructureAccepted) {
+        step0Status = "ready";
+        interviewDone = true;
+        planGenerated = true;
+        currentScreen = "diagram";
+      } else if (isPlanAccepted) {
+        step0Status = "ready";
+        interviewDone = true;
+        planGenerated = true;
+        currentScreen = "structure";
+      } else if (gen_state && Array.isArray(gen_state.features) && gen_state.features.length > 0) {
         step0Status = "ready";
         interviewDone = true;
         planGenerated = true;
@@ -1409,6 +1431,14 @@ export const useMimarStore = create((set, get) => ({
         currentScreen,
         interviewDone,
         planGenerated,
+        planAccepted: isPlanAccepted,
+        structureData: structData,
+        structureGenerated: Boolean(structData),
+        structureAccepted: isStructureAccepted,
+        structureAttempts: struct_state.attempts || [],
+        structureDiffConflicts: struct_state.diff_conflicts || [],
+        structureValidationResult: struct_state.validation_result || null,
+        structureSurvivedFixPass: Boolean(struct_state.survived_fix_pass),
         fixedInputs: project.fixed_inputs || { stack: null, database: null, deployment: null, apis: null },
         generationState: gen_state,
         densityFlags: density_flags,
@@ -1785,7 +1815,7 @@ export const useMimarStore = create((set, get) => ({
 
     set({
       operationRunning: true,
-      operationLabel: "Generating Dependency Order…",
+      operationLabel: "Locking Features & Preparing Structure…",
     });
 
     let backendUrl = "";
@@ -1805,6 +1835,16 @@ export const useMimarStore = create((set, get) => ({
     };
 
     try {
+      // 1. Prerequisite: Accept features on backend
+      await fetch(
+        `${backendUrl}/api/projects/${s.projectId}/accept-features`,
+        {
+          method: "POST",
+          headers: authHeaders,
+        },
+      ).catch((e) => console.warn("Accept features call warning:", e));
+
+      // 2. Generate dependency order
       const res = await fetch(
         `${backendUrl}/api/projects/${s.projectId}/dependency-order`,
         {
@@ -1826,9 +1866,77 @@ export const useMimarStore = create((set, get) => ({
       "Implementation Plan locked as accepted. Moving to Step 03 (Project Structure).",
     );
     s.showScreen("structure");
+
+    // Automatically trigger structure generation if not already generated
+    if (!get().structureData && !get().structureGenerated) {
+      get().generateStructure(sessionToken);
+    }
   },
 
-  acceptStructure: async () => {
+  generateStructure: async (sessionToken = null) => {
+    const s = get();
+    if (s.structureGenerating || s.operationRunning) return;
+    if (!s.projectId) {
+      s.showToast("No active project ID found.");
+      return;
+    }
+
+    let backendUrl = "";
+    try {
+      backendUrl = getBackendApiUrl("").replace(/\/$/, "");
+    } catch (err) {
+      s.showToast("Backend not configured. Set NEXT_PUBLIC_BACKEND_URL before continuing.");
+      return;
+    }
+
+    set({
+      structureGenerating: true,
+      operationRunning: true,
+      operationLabel: "Generating Project Structure (Gemini + Groq)…",
+    });
+
+    const authHeaders = {
+      "Content-Type": "application/json",
+      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+    };
+
+    try {
+      const res = await fetch(`${backendUrl}/api/projects/${s.projectId}/structure/generate`, {
+        method: "POST",
+        headers: authHeaders,
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || errData.message || "Failed to generate structure.");
+      }
+
+      const data = await res.json();
+      const rawStruct = data.candidate_structure?.structure || data.candidate_structure || {};
+
+      set({
+        structureData: rawStruct,
+        structureGenerated: true,
+        structureDiffConflicts: data.diff_conflicts || [],
+        structureValidationResult: data.validation_result || null,
+        structureSurvivedFixPass: Boolean(data.survived_fix_pass),
+        structureGenerating: false,
+        operationRunning: false,
+      });
+
+      s.showToast("Project Structure generated and validated successfully.");
+      get().saveProjectState();
+    } catch (err) {
+      console.error("Structure generation error:", err);
+      set({
+        structureGenerating: false,
+        operationRunning: false,
+      });
+      s.showToast(`Structure generation failed: ${err.message}`);
+    }
+  },
+
+  acceptStructure: async (sessionToken = null) => {
     const s = get();
     if (s.structureAccepted) return;
     const commentCount = Object.keys(s.structureComments).length;
@@ -1839,12 +1947,39 @@ export const useMimarStore = create((set, get) => ({
       return;
     }
     set({ operationRunning: true, operationLabel: "Locking Structure…" });
-    await sleep(500);
+
+    let backendUrl = "";
+    try {
+      backendUrl = getBackendApiUrl("").replace(/\/$/, "");
+    } catch (err) {
+      // Offline fallback
+    }
+
+    if (backendUrl && s.projectId) {
+      try {
+        const authHeaders = {
+          "Content-Type": "application/json",
+          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+        };
+        await fetch(`${backendUrl}/api/projects/${s.projectId}/structure/accept`, {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({
+            structure: s.structureData || {},
+          }),
+        });
+      } catch (err) {
+        console.warn("Structure accept backend sync warning:", err);
+      }
+    }
+
+    await sleep(400);
     set({ structureAccepted: true, operationRunning: false });
     s.showToast(
       "Project Structure locked as accepted. Moving to Step 04 (Schema & Architecture JSON).",
     );
     s.showScreen("diagram");
+    get().saveProjectState();
   },
 
   acceptDiagramJson: async () => {
