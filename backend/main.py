@@ -343,33 +343,46 @@ async def check_provider_health():
 
     async def check_gemini():
         api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            return "unavailable"
-        
-        # Test configured model first, fallback to gemini-flash-latest
-        models_to_try = [gemini_model] if gemini_model != "gemini-flash-latest" else []
-        models_to_try.extend(["gemini-3.6-flash", "gemini-flash-latest"])
-        
-        for m in models_to_try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
-            payload = {
-                "contents": [
-                    {"role": "user", "parts": [{"text": "ping"}]}
-                ],
-                "generationConfig": {
-                    "maxOutputTokens": 1,
-                    "temperature": 0.0
+        if api_key:
+            models_to_try = [gemini_model] if gemini_model else []
+            for cand in ["gemini-1.5-flash", "gemini-flash-latest", "gemini-2.0-flash", "gemini-3.6-flash", "gemini-1.5-pro"]:
+                if cand not in models_to_try:
+                    models_to_try.append(cand)
+            
+            for m in models_to_try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
+                payload = {
+                    "contents": [
+                        {"role": "user", "parts": [{"text": "ping"}]}
+                    ],
+                    "generationConfig": {
+                        "maxOutputTokens": 1,
+                        "temperature": 0.0
+                    }
                 }
-            }
+                try:
+                    async with httpx.AsyncClient(timeout=4.0) as client:
+                        response = await client.post(url, params={"key": api_key}, json=payload)
+                    if response.status_code == 200:
+                        response_data = response.json()
+                        if response_data.get("candidates"):
+                            return "connected"
+                except (httpx.HTTPError, ValueError):
+                    continue
+
+        # If Gemini is not set or replaced by Llama-Versatile, verify Llama model connectivity on Groq
+        groq_api_key = os.getenv("GROQ_API_KEY")
+        if groq_api_key:
             try:
                 async with httpx.AsyncClient(timeout=4.0) as client:
-                    response = await client.post(url, params={"key": api_key}, json=payload)
+                    response = await client.get(
+                        "https://api.groq.com/openai/v1/models",
+                        headers={"Authorization": f"Bearer {groq_api_key}"},
+                    )
                 if response.status_code == 200:
-                    response_data = response.json()
-                    if response_data.get("candidates"):
-                        return "connected"
-            except (httpx.HTTPError, ValueError):
-                continue
+                    return "connected"
+            except Exception:
+                pass
         return "unavailable"
 
     async def check_groq():
