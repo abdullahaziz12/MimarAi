@@ -3139,7 +3139,12 @@ Validation Failures / Quality Flags to Fix:
 Fix ONLY the identified issues while strictly preserving the V3.9 extended feature schema for every feature (id, name, description, source, business_rules, data_touched, actor_role, acceptance_criteria, exclusions, priority, provenance, reasoning, source_model). Ensure cross-field consistency between business_rules and acceptance_criteria (e.g., matching numeric limits, file sizes, timeouts). Return strictly valid JSON with the corrected 'features' list."""
 
             try:
-                fix_res = await call_gemini_api(system_prompt_draft, fix_prompt, retry=False)
+                try:
+                    fix_res = await call_gemini_api(system_prompt_draft, fix_prompt, retry=False)
+                except Exception as e_gem:
+                    print(f"[Step 4 Quality Fix Groq Fallback] {e_gem}")
+                    fix_res = await call_groq_json(system_prompt_draft, fix_prompt)
+                
                 raw_fixed = fix_res.get("features", [])
                 if isinstance(raw_fixed, list) and raw_fixed:
                     final_features = [
@@ -3151,7 +3156,7 @@ Fix ONLY the identified issues while strictly preserving the V3.9 extended featu
                     fix_pass_failed = True
                     final_features = merged_features
             except Exception as e:
-                print(f"[Step 4 Gemini Fix Error] {e}")
+                print(f"[Step 4 Quality Fix Error] {e}")
                 fix_pass_failed = True
                 final_features = merged_features
 
@@ -3326,17 +3331,22 @@ Output strictly valid JSON with no markdown formatting:
         comments_text = "\n".join([f"- Comment on {c.get('target_feature_id', 'general')}: {c.get('text')}" for c in submitted_comments])
         
         try:
-            fix_res = await call_gemini_api(system_prompt, f"Current Features:\n{json.dumps(current_features)}\n\nUser Comments:\n{comments_text}")
+            try:
+                fix_res = await call_gemini_api(system_prompt, f"Current Features:\n{json.dumps(current_features)}\n\nUser Comments:\n{comments_text}")
+            except Exception as e_gemini:
+                print(f"[Batch Fix Groq Fallback] {e_gemini}")
+                fix_res = await call_groq_json(system_prompt, f"Current Features:\n{json.dumps(current_features)}\n\nUser Comments:\n{comments_text}")
+
             raw_updated = fix_res.get("features", [])
             updated_features = [
-                normalize_feature_schema(f, default_id=f"feat-{i+1}", source_model="gemini")
+                normalize_feature_schema(f, default_id=f"feat-{i+1}", source_model="groq")
                 for i, f in enumerate(raw_updated)
                 if isinstance(f, dict)
             ]
             if not updated_features:
                 updated_features = current_features
         except Exception as e:
-            print(f"[Batch Fix Gemini Error] {e}")
+            print(f"[Batch Fix Error] {e}")
             raise HTTPException(status_code=502, detail="Failed to process your comments, please try again.") from e
 
         curr_state = project.get("generation_state") or {}
@@ -3414,7 +3424,12 @@ Output strictly valid JSON:
 }"""
 
     try:
-        order_res = await call_gemini_api(system_prompt, f"Active Features:\n{json.dumps(active_features)}")
+        try:
+            order_res = await call_gemini_api(system_prompt, f"Active Features:\n{json.dumps(active_features)}")
+        except Exception as e_ord:
+            print(f"[Dependency Order Groq Fallback] {e_ord}")
+            order_res = await call_groq_json(system_prompt, f"Active Features:\n{json.dumps(active_features)}")
+        
         proposed_order = order_res.get("dependency_order", [])
 
         # Validate with Groq
@@ -3423,7 +3438,10 @@ Output strictly valid JSON:
 
         if not val_res.get("is_valid", True):
             # Single Fix Pass for circular dependencies
-            fix_res = await call_gemini_api(system_prompt, f"Fix circular dependencies for Features:\n{json.dumps(active_features)}")
+            try:
+                fix_res = await call_gemini_api(system_prompt, f"Fix circular dependencies for Features:\n{json.dumps(active_features)}")
+            except Exception:
+                fix_res = await call_groq_json(system_prompt, f"Fix circular dependencies for Features:\n{json.dumps(active_features)}")
             proposed_order = fix_res.get("dependency_order") or [f.get("id") for f in active_features]
             gen_state["adjusted_flag"] = True
             gen_state.setdefault("adjustment_reasons", []).append("dependency_reordered")
