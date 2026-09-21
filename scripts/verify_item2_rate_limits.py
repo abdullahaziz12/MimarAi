@@ -73,15 +73,22 @@ def main():
         # 3. Create Draft and Execute 1 Classification Call
         print("\n[3/4] Creating a project draft and making 1 live classification call...")
         proj_res = client.post(
-            f"{BACKEND_URL}/api/projects",
+            f"{BACKEND_URL}/api/projects/draft",
             headers=headers,
             json={"idea_text": "Live test for rate limit decrement"}
         )
-        if proj_res.status_code != 200:
+        if proj_res.status_code not in (200, 201):
+            proj_res = client.post(
+                f"{BACKEND_URL}/projects/draft",
+                headers=headers,
+                json={"idea_text": "Live test for rate limit decrement"}
+            )
+        if proj_res.status_code not in (200, 201):
             print(f"  [FAIL] Could not create test project: {proj_res.status_code} - {proj_res.text}")
             sys.exit(1)
         
-        project_id = proj_res.json()["project"]["id"]
+        pdata = proj_res.json()
+        project_id = pdata.get("id") or pdata.get("project", {}).get("id")
 
         classify_res = client.post(
             f"{BACKEND_URL}/api/interview/classify",

@@ -59,15 +59,22 @@ def main():
         # 2. Create Old Draft
         print("\n[2/5] Creating Project 1 (Target for Cleanup)...")
         create_res = client.post(
-            f"{BACKEND_URL}/api/projects",
+            f"{BACKEND_URL}/api/projects/draft",
             headers=headers,
             json={"idea_text": "V3.12 Abandoned Draft Verification Target"}
         )
-        if create_res.status_code != 200:
+        if create_res.status_code not in (200, 201):
+            create_res = client.post(
+                f"{BACKEND_URL}/projects/draft",
+                headers=headers,
+                json={"idea_text": "V3.12 Abandoned Draft Verification Target"}
+            )
+        if create_res.status_code not in (200, 201):
             print(f"  [FAIL] Failed to create Project 1: {create_res.status_code} - {create_res.text}")
             sys.exit(1)
         
-        project1_id = create_res.json()["project"]["id"]
+        cdata1 = create_res.json()
+        project1_id = cdata1.get("id") or cdata1.get("project", {}).get("id")
         print(f"  --> Project 1 created successfully: {project1_id} (Status: draft)")
 
         # 3. Backdate Project 1
@@ -97,15 +104,22 @@ def main():
         # 4. Create Project 2 (Fresh draft that must NOT be archived)
         print("\n[4/5] Creating Project 2 (Fresh draft created just now)...")
         create_res2 = client.post(
-            f"{BACKEND_URL}/api/projects",
+            f"{BACKEND_URL}/api/projects/draft",
             headers=headers,
             json={"idea_text": "V3.12 Fresh Active Draft that MUST NOT be archived"}
         )
-        if create_res2.status_code != 200:
+        if create_res2.status_code not in (200, 201):
+            create_res2 = client.post(
+                f"{BACKEND_URL}/projects/draft",
+                headers=headers,
+                json={"idea_text": "V3.12 Fresh Active Draft that MUST NOT be archived"}
+            )
+        if create_res2.status_code not in (200, 201):
             print(f"  [FAIL] Failed to create Project 2: {create_res2.status_code} - {create_res2.text}")
             sys.exit(1)
 
-        project2_id = create_res2.json()["project"]["id"]
+        cdata2 = create_res2.json()
+        project2_id = cdata2.get("id") or cdata2.get("project", {}).get("id")
         print(f"  --> Project 2 created successfully: {project2_id} (Status: draft)")
 
         # 5. Trigger Cleanup Endpoint

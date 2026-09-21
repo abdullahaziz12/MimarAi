@@ -65,15 +65,22 @@ def main():
     print("\n[2/4] [Session A / Device 1] Creating draft and saving initial state...")
     with httpx.Client(timeout=30.0) as client_a:
         create_res = client_a.post(
-            f"{BACKEND_URL}/api/projects",
+            f"{BACKEND_URL}/api/projects/draft",
             headers=headers_session_a,
             json={"idea_text": test_idea}
         )
-        if create_res.status_code != 200:
+        if create_res.status_code not in (200, 201):
+            create_res = client_a.post(
+                f"{BACKEND_URL}/projects/draft",
+                headers=headers_session_a,
+                json={"idea_text": test_idea}
+            )
+        if create_res.status_code not in (200, 201):
             print(f"  [FAIL] Session A failed to create draft ({create_res.status_code}): {create_res.text}")
             sys.exit(1)
 
-        project_id = create_res.json()["project"]["id"]
+        cdata = create_res.json()
+        project_id = cdata.get("id") or cdata.get("project", {}).get("id")
         print(f"  --> Session A created Project ID: {project_id}")
 
     # 3. Session B (Simulating Device 2) - Listing Drafts
