@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { getBackendUrlStatus, getBackendApiUrl } from "../lib/backendConfig";
+import { useMimarStore } from "../store/mimarStore";
 
 function BackendIcon() {
   return (
@@ -32,7 +33,18 @@ function GroqIcon() {
   );
 }
 
+function QuotaIcon() {
+  return (
+    <svg className="service-health-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2.5 12.5a6 6 0 1 1 11 0" />
+      <path d="M8 8.5L10.5 5.5" />
+      <circle cx="8" cy="8.5" r="1.2" fill="currentColor" />
+    </svg>
+  );
+}
+
 export default function DiagnosticBadge() {
+  const { rateLimits, fetchRateLimits } = useMimarStore();
   const [serviceStatus, setServiceStatus] = useState({
     backend: "checking",
     gemini: "checking",
@@ -82,12 +94,13 @@ export default function DiagnosticBadge() {
     };
 
     checkServices();
+    fetchRateLimits().catch(() => {});
     const intervalId = window.setInterval(checkServices, 30000);
     return () => {
       mounted = false;
       window.clearInterval(intervalId);
     };
-  }, []);
+  }, [fetchRateLimits]);
 
   const serviceIcon = {
     backend: <BackendIcon />,
@@ -101,12 +114,20 @@ export default function DiagnosticBadge() {
     { key: "groq", label: "Groq" },
   ];
 
+  // Rate Limit Status (Classification 10/hr)
+  const remaining = rateLimits?.classification?.remaining ?? 10;
+  const limit = rateLimits?.classification?.limit ?? 10;
+  const resetSeconds = rateLimits?.classification?.reset_in_seconds ?? 0;
+  const isQuotaDepleted = remaining <= 0;
+  const quotaStateClass = isQuotaDepleted ? "disconnected" : "connected";
+  const quotaText = isQuotaDepleted ? `0/${limit} Used` : `${remaining}/${limit} Left`;
+
   return (
     <div
       className="service-health"
       role="status"
       aria-live="polite"
-      aria-label="Service connectivity status"
+      aria-label="Service connectivity and rate limit status"
     >
       {ordered.map((service) => {
         const state = serviceStatus[service.key];
@@ -138,6 +159,21 @@ export default function DiagnosticBadge() {
           </div>
         );
       })}
+
+      {/* Sleek Rate Limit Quota Badge next to Groq */}
+      <div
+        className={`service-health-item ${quotaStateClass}`}
+        key="rate-limit"
+        title={`Idea Submissions Limit: ${remaining}/${limit} remaining this hour.${resetSeconds > 0 ? ` Resets in ${Math.ceil(resetSeconds / 60)} min.` : ""}`}
+      >
+        <span className="service-health-icon-wrap">
+          <QuotaIcon />
+        </span>
+        <span className="service-health-name">Rate Limit</span>
+        <span className="service-health-dot" aria-hidden="true" />
+        <span className="service-health-status">{quotaText}</span>
+      </div>
     </div>
   );
 }
+

@@ -130,7 +130,14 @@ def main():
             headers=headers,
             json={"days_threshold": days_param}
         )
-        if cleanup_res.status_code != 200:
+        if cleanup_res.status_code == 403:
+            print(f"  [FAIL] Cleanup endpoint returned 403 Forbidden: Admin access required.")
+            print("\n  [HOW TO RESOLVE]")
+            print("  The cleanup endpoint is an admin-only endpoint protected by `admin_allowlist`.")
+            print("  Please insert your user's email into the `admin_allowlist` table in Supabase SQL Editor:")
+            print("    INSERT INTO admin_allowlist (email) VALUES ('your-email@example.com') ON CONFLICT DO NOTHING;")
+            sys.exit(1)
+        elif cleanup_res.status_code != 200:
             print(f"  [FAIL] Cleanup endpoint call failed ({cleanup_res.status_code}): {cleanup_res.text}")
             sys.exit(1)
 
