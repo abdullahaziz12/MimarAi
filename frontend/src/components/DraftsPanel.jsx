@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMimarStore } from "../store/mimarStore";
 import { useAuth } from "../context/AuthContext";
 
@@ -11,6 +12,11 @@ export default function DraftsPanel({ isOpen, onClose }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [resumingId, setResumingId] = useState(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Separate effect for Escape key listener to avoid re-triggering data fetch
   useEffect(() => {
@@ -57,7 +63,7 @@ export default function DraftsPanel({ isOpen, onClose }) {
     };
   }, [isOpen, sessionToken, fetchDraftsList]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !mounted) return null;
 
   const handleSelectDraft = async (draft) => {
     if (draft.id === currentProjectId) {
@@ -95,7 +101,7 @@ export default function DraftsPanel({ isOpen, onClose }) {
     }
   };
 
-  return (
+  return createPortal(
     <div
       className="drafts-drawer-backdrop"
       onClick={onClose}
@@ -105,9 +111,12 @@ export default function DraftsPanel({ isOpen, onClose }) {
         left: 0,
         right: 0,
         bottom: 0,
+        width: "100vw",
+        height: "100vh",
         backgroundColor: "rgba(5, 8, 16, 0.75)",
         backdropFilter: "blur(4px)",
-        zIndex: 9999,
+        WebkitBackdropFilter: "blur(4px)",
+        zIndex: 99999,
         display: "flex",
         justifyContent: "flex-end",
         animation: "fadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1)",
@@ -385,6 +394,7 @@ export default function DraftsPanel({ isOpen, onClose }) {
             })}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

@@ -97,7 +97,7 @@ export default function DiagnosticBadge() {
 
   const ordered = [
     { key: "backend", label: "Backend" },
-    { key: "gemini", label: "Gemini" },
+    { key: "gemini", label: "Llama-Versatile" },
     { key: "groq", label: "Groq" },
   ];
 

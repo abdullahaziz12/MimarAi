@@ -1171,7 +1171,7 @@ export default function InterviewScreen() {
                   }}
                 >
                   <span>
-                    MIMAR DRAFTS WITH TWO MODELS (GEMINI + GROQ) IN PARALLEL
+                    MIMAR DRAFTS WITH TWO MODELS (LLAMA-VERSATILE + GROQ) IN PARALLEL
                     BEFORE SHOWING YOU ANYTHING
                   </span>
                   <span>{inputVal.length} / 2,000</span>
@@ -1198,7 +1198,7 @@ export default function InterviewScreen() {
               <div>
                 <div className="pipe-title">Dual-model draft</div>
                 <div className="pipe-desc">
-                  Gemini Flash &amp; Groq independently draft a feature plan
+                  Llama Versatile &amp; Groq independently draft a feature plan
                   from your inputs.
                 </div>
               </div>
