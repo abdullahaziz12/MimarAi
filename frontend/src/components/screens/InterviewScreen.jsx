@@ -51,7 +51,15 @@ export default function InterviewScreen() {
     setIdeaText,
     showToast,
     retryGenerationText,
+    rateLimits,
+    fetchRateLimits,
   } = useMimarStore();
+
+  useEffect(() => {
+    if (session?.access_token) {
+      fetchRateLimits(session.access_token);
+    }
+  }, [session?.access_token, fetchRateLimits]);
 
   const [inputVal, setInputVal] = useState("");
   const [retryPrompt, setRetryPrompt] = useState(null);
@@ -1173,6 +1181,9 @@ export default function InterviewScreen() {
                   <span>
                     MIMAR DRAFTS WITH TWO MODELS (LLAMA-VERSATILE + GROQ) IN PARALLEL
                     BEFORE SHOWING YOU ANYTHING
+                    {rateLimits?.classification?.remaining !== undefined
+                      ? ` • ${rateLimits.classification.remaining}/10 submissions left this hour`
+                      : ""}
                   </span>
                   <span>{inputVal.length} / 2,000</span>
                 </div>

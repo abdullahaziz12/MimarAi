@@ -192,6 +192,13 @@ const initialMimarState = {
   lightweightDraftData: null,
   lightweightDraftStatus: "idle", // 'idle' | 'generating' | 'reviewing' | 'submitting' | 'error'
 
+  // V3.12 Rate limits state
+  rateLimits: {
+    classification: { limit: 10, remaining: 10, reset_in_seconds: 0 },
+    generation: { limit: 5, remaining: 5, reset_in_seconds: 0 },
+    batch_fix: { limit: 15, remaining: 15, reset_in_seconds: 0 },
+  },
+
   // Chat message history
   messages: [
     {
@@ -570,6 +577,7 @@ export const useMimarStore = create((set, get) => ({
       get().setOperationRunning(false);
       set({ activeController: null });
       get().saveProjectState();
+      get().fetchRateLimits(sessionToken).catch(() => {});
     }
   },
 
@@ -1238,6 +1246,44 @@ export const useMimarStore = create((set, get) => ({
     } catch (err) {
       console.warn("Fetch drafts list error:", err);
       return { status: "error", detail: err.message || "Unable to connect to server for drafts." };
+    }
+  },
+
+  fetchRateLimits: async (sessionToken = null) => {
+    try {
+      let token = sessionToken;
+      if (!token) {
+        try {
+          const { supabase } = await import("../lib/supabaseClient");
+          const sessRes = await supabase.auth.getSession();
+          token = sessRes?.data?.session?.access_token || null;
+        } catch (authErr) {
+          console.warn("Failed to resolve active auth token for rate limits:", authErr);
+        }
+      }
+      if (!token) return { status: "error", detail: "No session token available." };
+
+      const res = await fetch(getBackendApiUrl("/api/rate-limits/status"), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        return { status: "error", detail: errData.detail || errData.message || "Failed to fetch rate limits." };
+      }
+      const data = await res.json();
+      if (data && data.status === "ok") {
+        set({
+          rateLimits: {
+            classification: data.classification || { limit: 10, remaining: 10, reset_in_seconds: 0 },
+            generation: data.generation || { limit: 5, remaining: 5, reset_in_seconds: 0 },
+            batch_fix: data.batch_fix || { limit: 15, remaining: 15, reset_in_seconds: 0 },
+          },
+        });
+      }
+      return { status: "ok", data };
+    } catch (err) {
+      console.warn("Fetch rate limits error:", err);
+      return { status: "error", detail: err.message || "Unable to connect to server for rate limits." };
     }
   },
 

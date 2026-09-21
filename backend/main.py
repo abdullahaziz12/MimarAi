@@ -19,6 +19,40 @@ import jwt
 
 load_dotenv()
 
+# V3.12 Reliability Batch — Item 3: Error Monitoring (Sentry SDK Initialization)
+sentry_dsn = os.getenv("SENTRY_DSN")
+if sentry_dsn and sentry_dsn.strip() and not sentry_dsn.startswith("https://your-sentry-dsn"):
+    try:
+        import sentry_sdk
+        sentry_sdk.init(
+            dsn=sentry_dsn.strip(),
+            traces_sample_rate=1.0,
+            profiles_sample_rate=1.0,
+            environment=os.getenv("ENVIRONMENT", "production"),
+            send_default_pii=False,
+        )
+        print("[Sentry] Error monitoring initialized successfully.")
+    except Exception as e:
+        print(f"[Sentry Init Warning] Failed to initialize Sentry: {e}")
+
+
+def capture_monitoring_error(exc: Exception, context: Optional[Dict[str, Any]] = None):
+    """Safely captures handled and unhandled fail-closed exceptions to Sentry when configured."""
+    try:
+        import sentry_sdk
+        if os.getenv("SENTRY_DSN"):
+            scope_cm = getattr(sentry_sdk, "new_scope", None) or getattr(sentry_sdk, "push_scope", None)
+            if context and scope_cm:
+                with scope_cm() as scope:
+                    for k, v in context.items():
+                        scope.set_extra(k, v)
+                    sentry_sdk.capture_exception(exc)
+            else:
+                sentry_sdk.capture_exception(exc)
+    except Exception:
+        pass
+
+
 app = FastAPI(
     title="MimarAi Backend API",
     description="Precision Architecture & Planning Layer API",
@@ -3855,6 +3889,146 @@ async def admin_ai_usage(
         "avg_latency_ms": avg_latency,
         "note": "AI usage reflects provider call counts and latencies. Dollar cost estimation is unavailable without configured pricing.",
         "maturity": "call_counts_only",
+    }
+
+
+# V3.12 Reliability Batch — Item 1: Abandoned Draft Cleanup
+class AbandonedDraftsCleanupRequest(BaseModel):
+    days_threshold: Optional[int] = 30
+
+
+@app.post("/admin/cleanup-abandoned-drafts")
+@app.post("/api/admin/cleanup-abandoned-drafts")
+async def cleanup_abandoned_drafts(
+    req: AbandonedDraftsCleanupRequest = AbandonedDraftsCleanupRequest(),
+    days: Optional[int] = None,
+    user: Dict[str, Any] = Depends(require_admin),
+):
+    """
+    Soft-deletes abandoned draft projects older than days_threshold by updating status to 'archived'.
+    Does NOT hard-delete rows, preserving project data and foreign key relationships.
+    Protected by require_admin.
+    """
+    client = get_supabase()
+    if not client:
+        raise HTTPException(status_code=503, detail="Admin project storage is unavailable.")
+        
+    days_threshold = days if days is not None else (req.days_threshold if req.days_threshold is not None else 30)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days_threshold)).isoformat()
+    
+    try:
+        # Fetch drafts matching threshold
+        res = client.table("projects").select("id, status, created_at").eq("status", "draft").lte("created_at", cutoff).execute()
+        drafts = getattr(res, "data", None) or []
+        archived_ids = []
+        
+        for d in drafts:
+            pid = d.get("id")
+            if pid:
+                client.table("projects").update({"status": "archived"}).eq("id", pid).execute()
+                archived_ids.append(pid)
+                
+        return {
+            "status": "ok",
+            "archived_count": len(archived_ids),
+            "archived_project_ids": archived_ids,
+            "days_threshold": days_threshold,
+            "cutoff_timestamp": cutoff,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[Abandoned Drafts Cleanup Error] {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to cleanup abandoned drafts: {str(e)}") from e
+
+
+# V3.12 Reliability Batch — Item 2: User-Facing Rate-Limit Visibility
+@app.get("/rate-limits/status")
+@app.get("/api/rate-limits/status")
+async def get_rate_limits_status(user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Returns the authenticated user's current rate limits, remaining counts, and window reset timestamps
+    for classification (10/hr), generation pipeline (5/24h), and batch-fix (15/hr).
+    """
+    client = get_supabase(user.get("token")) or get_supabase()
+    user_id = user.get("user_id")
+    if not client or not user_id:
+        raise HTTPException(status_code=503, detail="Rate limit storage is unavailable.")
+        
+    now = datetime.now(timezone.utc)
+    
+    # 1. Classification Rate Limit (10 per 1 hour)
+    classification_limit = 10
+    classification_remaining = 10
+    classification_reset_s = 0
+    try:
+        res = client.table("rate_limits").select("*").eq("user_id", user_id).execute()
+        rows = getattr(res, "data", None) or []
+        if rows:
+            row = rows[0]
+            start_str = row.get("window_start")
+            if start_str:
+                window_start = datetime.fromisoformat(str(start_str).replace("Z", "+00:00"))
+                elapsed = (now - window_start).total_seconds()
+                if elapsed < 3600:
+                    cnt = row.get("count", 0)
+                    classification_remaining = max(0, classification_limit - cnt)
+                    classification_reset_s = max(0, int(3600 - elapsed))
+    except Exception as e:
+        print(f"[Rate Limits Status Error - Classification] {e}")
+
+    # 2. Generation & Batch Rate Limits (5 per 24 hours, 15 per 1 hour)
+    pipeline_limit = 5
+    pipeline_remaining = 5
+    pipeline_reset_s = 0
+    batch_limit = 15
+    batch_remaining = 15
+    batch_reset_s = 0
+    
+    try:
+        res_gen = client.table("generation_rate_limits").select("*").eq("user_id", user_id).execute()
+        gen_rows = getattr(res_gen, "data", None) or []
+        if gen_rows:
+            grow = gen_rows[0]
+            # Pipeline 24h
+            p_start_str = grow.get("pipeline_window_start")
+            if p_start_str:
+                p_start = datetime.fromisoformat(str(p_start_str).replace("Z", "+00:00"))
+                p_elapsed = (now - p_start).total_seconds()
+                if p_elapsed < 86400:
+                    p_cnt = grow.get("pipeline_count", 0)
+                    pipeline_remaining = max(0, pipeline_limit - p_cnt)
+                    pipeline_reset_s = max(0, int(86400 - p_elapsed))
+            # Batch 1h
+            b_start_str = grow.get("batch_window_start")
+            if b_start_str:
+                b_start = datetime.fromisoformat(str(b_start_str).replace("Z", "+00:00"))
+                b_elapsed = (now - b_start).total_seconds()
+                if b_elapsed < 3600:
+                    b_cnt = grow.get("batch_count", 0)
+                    batch_remaining = max(0, batch_limit - b_cnt)
+                    batch_reset_s = max(0, int(3600 - b_elapsed))
+    except Exception as e:
+        print(f"[Rate Limits Status Error - Generation] {e}")
+
+    return {
+        "status": "ok",
+        "user_id": user_id,
+        "classification": {
+            "limit": classification_limit,
+            "remaining": classification_remaining,
+            "reset_in_seconds": classification_reset_s,
+        },
+        "generation": {
+            "limit": pipeline_limit,
+            "remaining": pipeline_remaining,
+            "reset_in_seconds": pipeline_reset_s,
+        },
+        "batch_fix": {
+            "limit": batch_limit,
+            "remaining": batch_remaining,
+            "reset_in_seconds": batch_reset_s,
+        },
     }
 
 
