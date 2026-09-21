@@ -488,7 +488,10 @@ export default function PlanScreen() {
 
             {featuresList.map((feat) => {
               const isRejected = !!rejectedFeatures[feat.id];
-              const isAiAdded = feat.source === "ai_added";
+              const isAiAdded =
+                feat.source === "ai_added" ||
+                feat.source === "ai_inferred" ||
+                feat.provenance === "ai_inferred";
               const isCommented = !!planComments[feat.id];
 
               const rawFailed = feat.quality_flags?.failed_checks || [];
