@@ -279,6 +279,11 @@ class ContactMessage(BaseModel):
         return v
 
 
+# --- V4 Project Structure Generation Schemas ---
+class StructureAcceptRequest(BaseModel):
+    structure: Optional[Dict[str, List[str]]] = None
+
+
 # --- Reusable SMTP Email Dispatcher ---
 def send_smtp_email(to_email: str, subject: str, html_body: str, plain_text_body: str) -> bool:
     """
@@ -2890,6 +2895,13 @@ async def generate_feature_pipeline(
     if project.get("status") == "locked_generating":
         raise HTTPException(status_code=429, detail="A generation run is already in progress for this project.")
 
+    gen_state = project.get("generation_state") or {}
+    if project.get("status") in ("features_accepted", "structure_accepted") or gen_state.get("features_locked"):
+        raise HTTPException(
+            status_code=400,
+            detail="Feature list is already accepted and locked. Full generation cannot overwrite an accepted feature list."
+        )
+
     if not idea_text.strip() or idea_text == "Software application":
         raise HTTPException(status_code=400, detail="A classified project idea is required before generation.")
     required_fixed_inputs = ("stack", "database", "deployment", "apis")
@@ -3551,6 +3563,552 @@ async def add_project_comment(
     }).execute()
 
     return res.data[0] if res.data else {"status": "created"}
+
+
+# ============================================================================
+# V4 Project Structure Generation — Logic, Helpers & Endpoints
+# ============================================================================
+
+@app.post("/projects/{project_id}/accept-features")
+@app.post("/api/projects/{project_id}/accept-features")
+async def accept_project_features(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    V4 Prerequisite: Explicitly accepts and locks the feature list,
+    transitioning project status to 'features_accepted' and preventing
+    subsequent AI-driven full generation overwrites.
+    """
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+    
+    gen_state = project.get("generation_state") or {}
+    features = gen_state.get("features", [])
+    rejected = set(gen_state.get("rejected_feature_ids", []))
+    active_features = [f for f in features if f.get("id") not in rejected]
+    
+    if not active_features:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot accept feature list: no active features found."
+        )
+    
+    gen_state["features_locked"] = True
+    gen_state["features_accepted_at"] = datetime.now(timezone.utc).isoformat()
+    
+    client.table("projects").update({
+        "generation_state": gen_state,
+        "status": "features_accepted"
+    }).eq("id", project_id).execute()
+    
+    return {
+        "status": "ok",
+        "project_id": project_id,
+        "project_status": "features_accepted",
+        "active_features_count": len(active_features),
+        "features_locked": True
+    }
+
+
+def normalize_structure_dict(raw: Any) -> Dict[str, List[str]]:
+    """
+    Normalizes structure dict so that keys are file paths (strings) and
+    values are lists of feature names/IDs (list of strings).
+    """
+    if not isinstance(raw, dict):
+        return {}
+    
+    if "structure" in raw and isinstance(raw["structure"], dict):
+        raw = raw["structure"]
+    
+    normalized: Dict[str, List[str]] = {}
+    for k, v in raw.items():
+        if not isinstance(k, str) or not k.strip():
+            continue
+        cleaned_path = k.strip()
+        if isinstance(v, list):
+            feats = [str(item).strip() for item in v if item]
+        elif isinstance(v, str):
+            feats = [v.strip()]
+        else:
+            feats = [str(v)]
+        normalized[cleaned_path] = feats
+    return normalized
+
+
+def diff_structure_proposals(draft_a: Dict[str, Any], draft_b: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Compares Model A draft structure and Model B draft structure.
+    Surfaces differences in file sets, directories, and feature-to-file assignments.
+    """
+    struct_a = normalize_structure_dict(draft_a)
+    struct_b = normalize_structure_dict(draft_b)
+    
+    conflicts: List[Dict[str, Any]] = []
+    
+    files_a = set(struct_a.keys())
+    files_b = set(struct_b.keys())
+    
+    only_in_a = files_a - files_b
+    only_in_b = files_b - files_a
+    
+    if only_in_a or only_in_b:
+        conflicts.append({
+            "type": "file_set_difference",
+            "description": f"Model A proposed {len(files_a)} files, Model B proposed {len(files_b)} files.",
+            "only_in_model_a": sorted(list(only_in_a)),
+            "only_in_model_b": sorted(list(only_in_b))
+        })
+    
+    feat_to_files_a: Dict[str, List[str]] = {}
+    for fpath, feats in struct_a.items():
+        for feat in feats:
+            feat_lower = feat.lower()
+            feat_to_files_a.setdefault(feat_lower, []).append(fpath)
+            
+    feat_to_files_b: Dict[str, List[str]] = {}
+    for fpath, feats in struct_b.items():
+        for feat in feats:
+            feat_lower = feat.lower()
+            feat_to_files_b.setdefault(feat_lower, []).append(fpath)
+            
+    all_features = set(feat_to_files_a.keys()) | set(feat_to_files_b.keys())
+    for feat in sorted(all_features):
+        files_for_feat_a = sorted(feat_to_files_a.get(feat, []))
+        files_for_feat_b = sorted(feat_to_files_b.get(feat, []))
+        if files_for_feat_a != files_for_feat_b:
+            conflicts.append({
+                "type": "feature_mapping_difference",
+                "feature": feat,
+                "model_a_files": files_for_feat_a,
+                "model_b_files": files_for_feat_b,
+                "description": f"Feature '{feat}' mapped to {files_for_feat_a} in Model A vs {files_for_feat_b} in Model B"
+            })
+            
+    for shared_file in sorted(files_a & files_b):
+        feats_in_a = sorted(struct_a[shared_file])
+        feats_in_b = sorted(struct_b[shared_file])
+        if feats_in_a != feats_in_b:
+            conflicts.append({
+                "type": "file_responsibility_difference",
+                "file_path": shared_file,
+                "model_a_features": feats_in_a,
+                "model_b_features": feats_in_b,
+                "description": f"File '{shared_file}' assigned features {feats_in_a} in Model A vs {feats_in_b} in Model B"
+            })
+            
+    return conflicts
+
+
+def evaluate_structure_code_level(
+    structure: Dict[str, List[str]],
+    active_features: List[Dict[str, Any]],
+    fixed_inputs: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Deterministic code-level verification for completeness, conventions, and non-conflicting assignments.
+    """
+    active_names = [f.get("name") or f.get("id") or "" for f in active_features if f.get("name") or f.get("id")]
+    active_names_lower = {name.lower(): name for name in active_names if name}
+    
+    mapped_features_lower = set()
+    for fpath, feats in structure.items():
+        for feat in feats:
+            feat_str = str(feat).lower().strip()
+            for act_lower in active_names_lower:
+                if act_lower in feat_str or feat_str in act_lower:
+                    mapped_features_lower.add(act_lower)
+                    
+    unmapped = [orig for act_lower, orig in active_names_lower.items() if act_lower not in mapped_features_lower]
+    completeness_passed = (len(unmapped) == 0) and len(structure) > 0
+    
+    stack = str(fixed_inputs.get("stack") or "").lower()
+    convention_passed = True
+    convention_reason = "Structure conforms to standard modular layout."
+    
+    if "fastapi" in stack or "python" in stack:
+        has_py = any(p.endswith(".py") for p in structure.keys())
+        has_routes = any("route" in p.lower() or "api" in p.lower() or "main.py" in p.lower() or "app" in p.lower() for p in structure.keys())
+        if not has_py:
+            convention_passed = False
+            convention_reason = "Python/FastAPI stack selected but no .py source files proposed."
+        elif not has_routes:
+            convention_passed = False
+            convention_reason = "FastAPI layout missing routes/api entry points."
+        else:
+            convention_reason = "Follows standard FastAPI routes/models layout."
+    elif "next" in stack or "react" in stack:
+        has_js_ts = any(p.endswith((".ts", ".tsx", ".js", ".jsx")) for p in structure.keys())
+        if not has_js_ts:
+            convention_passed = False
+            convention_reason = "React/Next.js stack selected but no .tsx/.jsx/.ts/.js files proposed."
+        else:
+            convention_reason = "Follows standard Next.js / React component and route structure."
+            
+    conflicts = []
+    for fpath, feats in structure.items():
+        fpath_lower = fpath.lower()
+        is_migration = "migration" in fpath_lower or "alembic" in fpath_lower or "schema.sql" in fpath_lower
+        is_frontend_ui = any("ui" in str(f).lower() or "screen" in str(f).lower() or "button" in str(f).lower() or "modal" in str(f).lower() for f in feats)
+        if is_migration and is_frontend_ui:
+            conflicts.append(f"UI presentation feature mapped to database migration file: {fpath}")
+            
+    no_conflicts_passed = (len(conflicts) == 0)
+    is_valid = completeness_passed and convention_passed and no_conflicts_passed
+    
+    return {
+        "is_valid": is_valid,
+        "convention_adherence": {
+            "passed": convention_passed,
+            "reason": convention_reason
+        },
+        "completeness": {
+            "passed": completeness_passed,
+            "unmapped_features": unmapped
+        },
+        "no_conflicting_assignments": {
+            "passed": no_conflicts_passed,
+            "conflicts": conflicts
+        }
+    }
+
+
+async def validate_structure_with_groq(
+    structure: Dict[str, List[str]],
+    active_features: List[Dict[str, Any]],
+    fixed_inputs: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Groq structure-specific validation check covering convention-adherence,
+    completeness, and no conflicting assignments.
+    """
+    code_eval = evaluate_structure_code_level(structure, active_features, fixed_inputs)
+    
+    active_feature_summaries = [
+        {"id": f.get("id"), "name": f.get("name"), "description": f.get("description")}
+        for f in active_features
+    ]
+    
+    system_prompt_val = """You are a precision software architecture validator.
+Evaluate the proposed project file/folder structure against the selected tech stack and active feature list.
+You must check three criteria:
+1. "convention_adherence": Does the structure strictly adhere to standard architecture and file organization for the specified tech stack (e.g. FastAPI, Next.js, Django)?
+2. "completeness": Is every single active feature mapped to at least one file? No orphan features.
+3. "no_conflicting_assignments": Are file responsibilities logical and free of contradictory co-locations?
+
+Output strictly valid JSON with no markdown:
+{
+  "is_valid": true,
+  "convention_adherence": {"passed": true, "reason": "<explanation>"},
+  "completeness": {"passed": true, "unmapped_features": []},
+  "no_conflicting_assignments": {"passed": true, "conflicts": []}
+}"""
+
+    user_prompt_val = f"""Tech Stack & Inputs:
+{json.dumps(fixed_inputs)}
+
+Active Features:
+{json.dumps(active_feature_summaries)}
+
+Proposed Structure:
+{json.dumps(structure, indent=2)}"""
+
+    try:
+        groq_val = await call_groq_json(system_prompt_val, user_prompt_val, timeout=20.0, stage="structure_validation")
+        if isinstance(groq_val, dict) and "convention_adherence" in groq_val and "completeness" in groq_val:
+            conv = groq_val.get("convention_adherence") or {}
+            comp = groq_val.get("completeness") or {}
+            no_conf = groq_val.get("no_conflicting_assignments") or {}
+            
+            final_completeness_passed = bool(comp.get("passed", True)) and code_eval["completeness"]["passed"]
+            final_unmapped = list(set(comp.get("unmapped_features", []) + code_eval["completeness"]["unmapped_features"]))
+            
+            final_conv_passed = bool(conv.get("passed", True)) and code_eval["convention_adherence"]["passed"]
+            final_no_conf_passed = bool(no_conf.get("passed", True)) and code_eval["no_conflicting_assignments"]["passed"]
+            final_conflicts = list(set(no_conf.get("conflicts", []) + code_eval["no_conflicting_assignments"]["conflicts"]))
+            
+            overall_valid = final_completeness_passed and final_conv_passed and final_no_conf_passed
+            return {
+                "is_valid": overall_valid,
+                "convention_adherence": {
+                    "passed": final_conv_passed,
+                    "reason": conv.get("reason") or code_eval["convention_adherence"]["reason"]
+                },
+                "completeness": {
+                    "passed": final_completeness_passed,
+                    "unmapped_features": final_unmapped
+                },
+                "no_conflicting_assignments": {
+                    "passed": final_no_conf_passed,
+                    "conflicts": final_conflicts
+                }
+            }
+    except Exception as e:
+        print(f"[Structure Groq Validation Fallback] {e}")
+        
+    return code_eval
+
+
+async def fix_structure_pass(
+    draft_structure: Dict[str, List[str]],
+    active_features: List[Dict[str, Any]],
+    fixed_inputs: Dict[str, Any],
+    val_result: Dict[str, Any]
+) -> Dict[str, List[str]]:
+    """
+    Model A performs ONE fix pass to correct validation issues flagged by Groq.
+    """
+    system_prompt_fix = """You are an expert AI software architect repairing a project file/folder structure proposal.
+Fix all identified validation errors (convention violations, unmapped features, conflicting assignments).
+Ensure 100% of active features are mapped to appropriate files according to the tech stack.
+Output strictly valid JSON with no markdown:
+{
+  "structure": {
+    "src/path/to/file.ext": ["Feature Name 1"]
+  }
+}"""
+
+    active_feature_summaries = [
+        {"id": f.get("id"), "name": f.get("name"), "description": f.get("description")}
+        for f in active_features
+    ]
+
+    user_prompt_fix = f"""Tech Stack:
+{json.dumps(fixed_inputs)}
+
+Active Features to Map:
+{json.dumps(active_feature_summaries)}
+
+Previous Structure Draft:
+{json.dumps(draft_structure, indent=2)}
+
+Validation Issues to Fix:
+{json.dumps(val_result, indent=2)}"""
+
+    try:
+        fix_res = await call_gemini_api(system_prompt_fix, user_prompt_fix, timeout=25.0, stage="structure_fix")
+    except Exception as e_fix:
+        print(f"[Structure Fix Gemini Fallback to Groq] {e_fix}")
+        fix_res = await call_groq_json(system_prompt_fix, user_prompt_fix, timeout=25.0, stage="structure_fix")
+        
+    fixed_struct = normalize_structure_dict(fix_res.get("structure") or fix_res)
+    if not fixed_struct:
+        return draft_structure
+    return fixed_struct
+
+
+@app.post("/projects/{project_id}/structure/generate")
+@app.post("/api/projects/{project_id}/structure/generate")
+async def generate_project_structure(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    V4 Structure Generation: Dual-independent draft (Model A + Model B), diff,
+    Groq 3-check validation, one-fix-pass cycle, and attempt recording.
+    Requires accepted feature list prerequisite.
+    """
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+    
+    # Prerequisite gate check
+    gen_state = project.get("generation_state") or {}
+    features = gen_state.get("features", [])
+    rejected = set(gen_state.get("rejected_feature_ids", []))
+    active_features = [f for f in features if f.get("id") not in rejected]
+    
+    if project.get("status") not in ("features_accepted", "structure_accepted") and not gen_state.get("features_locked"):
+        raise HTTPException(
+            status_code=400,
+            detail="Feature list must be explicitly accepted before structure generation can begin."
+        )
+        
+    if not active_features:
+        raise HTTPException(
+            status_code=400,
+            detail="No active features available for structure generation."
+        )
+        
+    fixed_inputs = project.get("fixed_inputs") or {}
+    active_feature_summaries = [
+        {"id": f.get("id"), "name": f.get("name"), "description": f.get("description")}
+        for f in active_features
+    ]
+    
+    # Step 1: Dual Independent Draft Generation
+    system_prompt_draft = """You are an expert AI software architect creating a project file/folder structure.
+Given the project's chosen tech stack and active features, propose a clean, maintainable directory and file structure.
+Map every active feature to the specific file(s) implementing it.
+Output strictly valid JSON with no markdown:
+{
+  "structure": {
+    "src/path/to/file.ext": ["Feature Name 1", "Feature Name 2"]
+  }
+}"""
+
+    context_str = f"Tech Stack: {json.dumps(fixed_inputs)}\nActive Features:\n{json.dumps(active_feature_summaries, indent=2)}"
+    
+    try:
+        gemini_task = call_gemini_api(system_prompt_draft, context_str, stage="structure_draft_a")
+        groq_task = call_groq_json(system_prompt_draft, context_str, stage="structure_draft_b")
+        draft_results = await asyncio.gather(gemini_task, groq_task, return_exceptions=True)
+        
+        draft_a_raw, draft_b_raw = draft_results[0], draft_results[1]
+        
+        if isinstance(draft_a_raw, Exception) and isinstance(draft_b_raw, Exception):
+            raise HTTPException(status_code=502, detail="Structure generation failed: both AI providers encountered an error.")
+            
+        if isinstance(draft_a_raw, Exception):
+            print(f"[Structure Draft A Fallback] {draft_a_raw}")
+            draft_a_raw = draft_b_raw
+        if isinstance(draft_b_raw, Exception):
+            print(f"[Structure Draft B Fallback] {draft_b_raw}")
+            draft_b_raw = draft_a_raw
+            
+        struct_a = normalize_structure_dict(draft_a_raw)
+        struct_b = normalize_structure_dict(draft_b_raw)
+        
+        if not struct_a and not struct_b:
+            raise HTTPException(status_code=502, detail="Both AI providers returned empty structure drafts.")
+        if not struct_a:
+            struct_a = dict(struct_b)
+        if not struct_b:
+            struct_b = dict(struct_a)
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[Structure Draft Error] {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to generate structure drafts: {str(e)}")
+        
+    # Step 2: Diff and Conflict Detection
+    diff_conflicts = diff_structure_proposals({"structure": struct_a}, {"structure": struct_b})
+    
+    # Step 3: Validation (Model A's draft is validated by Groq checks)
+    val_result = await validate_structure_with_groq(struct_a, active_features, fixed_inputs)
+    
+    survived_fix_pass = False
+    candidate_structure = struct_a
+    
+    # Step 4: One Fix Pass if Validation Failed
+    if not val_result.get("is_valid", False):
+        candidate_structure = await fix_structure_pass(struct_a, active_features, fixed_inputs, val_result)
+        val_result = await validate_structure_with_groq(candidate_structure, active_features, fixed_inputs)
+        survived_fix_pass = True
+        
+    # Step 5: Record attempt into structure_state
+    struct_state = project.get("structure_state") or {}
+    attempts = struct_state.get("attempts", [])
+    
+    new_attempt = {
+        "model_a_draft": {"structure": struct_a},
+        "model_b_draft": {"structure": struct_b},
+        "diff_conflicts": diff_conflicts,
+        "validation_result": val_result,
+        "survived_fix_pass": survived_fix_pass,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    attempts.append(new_attempt)
+    
+    struct_state["attempts"] = attempts
+    struct_state["candidate_structure"] = {"structure": candidate_structure}
+    if struct_state.get("status") != "accepted":
+        struct_state["status"] = "draft"
+        
+    client.table("projects").update({"structure_state": struct_state}).eq("id", project_id).execute()
+    
+    return {
+        "status": "ok",
+        "project_id": project_id,
+        "model_a_draft": {"structure": struct_a},
+        "model_b_draft": {"structure": struct_b},
+        "diff_conflicts": diff_conflicts,
+        "validation_result": val_result,
+        "candidate_structure": {"structure": candidate_structure},
+        "survived_fix_pass": survived_fix_pass
+    }
+
+
+@app.get("/projects/{project_id}/structure")
+@app.get("/api/projects/{project_id}/structure")
+async def get_project_structure(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Fetches the structure state (draft attempts, candidate, and accepted structure) for a project.
+    """
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+    
+    struct_state = project.get("structure_state") or {
+        "attempts": [],
+        "candidate_structure": None,
+        "accepted_structure": None,
+        "status": "draft"
+    }
+    return {
+        "status": "ok",
+        "project_id": project_id,
+        "structure_state": struct_state
+    }
+
+
+@app.post("/projects/{project_id}/structure/accept")
+@app.post("/api/projects/{project_id}/structure/accept")
+async def accept_project_structure(
+    project_id: str,
+    req: Optional[StructureAcceptRequest] = None,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Accepts the candidate structure and locks it in structure_state.accepted_structure,
+    transitioning project status to 'structure_accepted'.
+    """
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+    
+    struct_state = project.get("structure_state") or {}
+    
+    chosen_structure = None
+    if req and req.structure:
+        chosen_structure = normalize_structure_dict(req.structure)
+    elif struct_state.get("candidate_structure"):
+        chosen_structure = normalize_structure_dict(struct_state["candidate_structure"])
+    elif struct_state.get("attempts"):
+        last_attempt = struct_state["attempts"][-1]
+        chosen_structure = normalize_structure_dict(last_attempt.get("model_a_draft") or {})
+        
+    if not chosen_structure:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot accept structure: no generated structure candidate found."
+        )
+        
+    struct_state["accepted_structure"] = {"structure": chosen_structure}
+    struct_state["status"] = "accepted"
+    struct_state["accepted_at"] = datetime.now(timezone.utc).isoformat()
+    
+    client.table("projects").update({
+        "structure_state": struct_state,
+        "status": "structure_accepted"
+    }).eq("id", project_id).execute()
+    
+    return {
+        "status": "ok",
+        "project_id": project_id,
+        "project_status": "structure_accepted",
+        "accepted_structure": {"structure": chosen_structure}
+    }
 
 
 # ============================================================================
