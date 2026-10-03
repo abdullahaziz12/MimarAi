@@ -146,33 +146,25 @@ class LiveTestRunner:
             self.write_markdown_report(overall_status="FAIL")
             return
 
-        # Step 2: Ensure Project with Diagram Draft Exists
+        # Step 2: Ensure Target Project Exists
         if self.preconfigured_project_id:
             self.project_id = self.preconfigured_project_id
             print(f"[*] Fetching preconfigured project: {self.project_id}")
-            code, resp, lat = self._http_request("GET", f"/api/projects/{self.project_id}")
-            proj_data = resp.get("project") or resp
+            code, resp, lat = self._http_request("GET", f"/api/projects/{self.project_id}/diagram")
             self.record_step(
                 2, "Verify / Load Target Project", "GET", f"/api/projects/{self.project_id}", None,
                 code, resp, lat, "PASS" if code == 200 else "FAIL",
-                f"Using existing project with status '{proj_data.get('status')}'."
+                f"Using existing project {self.project_id}."
             )
         else:
-            # Create new project
-            unique_name = f"V5.1 Ask AI Project {uuid.uuid4().hex[:6]}"
+            # Create new project draft
             create_payload = {
-                "title": unique_name,
-                "idea_text": "An enterprise fintech matrix managing borrower intake, loan underwriting, and audit log trails.",
-                "fixed_inputs": {
-                    "stack": "FastAPI + React",
-                    "database": "PostgreSQL",
-                    "deployment": "Docker"
-                }
+                "idea_text": "An enterprise fintech lending system managing borrower intake, loan underwriting, and audit log trails."
             }
-            code, resp, lat = self._http_request("POST", "/api/projects", create_payload)
+            code, resp, lat = self._http_request("POST", "/api/projects/draft", create_payload)
             self.project_id = (resp.get("project") or resp).get("id")
             self.record_step(
-                2, "Create Fresh Target Project", "POST", "/api/projects", create_payload,
+                2, "Create Fresh Target Project Draft", "POST", "/api/projects/draft", create_payload,
                 code, resp, lat, "PASS" if code in (200, 201) and self.project_id else "FAIL",
                 f"Created target project ID: {self.project_id}"
             )
@@ -188,15 +180,28 @@ class LiveTestRunner:
         has_diagram_draft = bool(diag_state.get("candidate_draft") or diag_state.get("accepted_schema"))
 
         if not has_diagram_draft:
-            print("[*] Generating diagram drafts for project...")
-            # Step 3a: Accept structure prerequisite if needed
+            print("[*] Project does not have diagram draft. Running prerequisite stages...")
+            # 3a. Generate features if needed
+            feat_payload = {
+                "idea_text": "An enterprise fintech lending system managing borrower intake, loan underwriting, and audit log trails.",
+                "fixed_inputs": {"stack": "FastAPI + React", "database": "PostgreSQL", "deployment": "Docker"}
+            }
+            code_f, resp_f, _ = self._http_request("POST", f"/api/projects/{self.project_id}/generate", feat_payload, timeout=90.0)
             self._http_request("POST", f"/api/projects/{self.project_id}/accept-features")
-            self._http_request("POST", f"/api/projects/{self.project_id}/structure/accept", {"structure_data": {"src/routes/loan.py": ["Loan Application & Underwriting"]}})
             
-            # Generate diagram drafts
-            code_gen, resp_gen, lat_gen = self._http_request("POST", f"/api/projects/{self.project_id}/diagram/generate")
-            code_val, resp_val, lat_val = self._http_request("POST", f"/api/projects/{self.project_id}/diagram/validate")
-            has_diagram_draft = (code_gen == 200 and code_val == 200)
+            # 3b. Structure stage
+            self._http_request("POST", f"/api/projects/{self.project_id}/structure/generate")
+            self._http_request("POST", f"/api/projects/{self.project_id}/structure/validate")
+            self._http_request("POST", f"/api/projects/{self.project_id}/structure/accept")
+            
+            # 3c. Diagram stage
+            code_gen, resp_gen, _ = self._http_request("POST", f"/api/projects/{self.project_id}/diagram/generate")
+            code_val, resp_val, _ = self._http_request("POST", f"/api/projects/{self.project_id}/diagram/validate")
+            
+            # Refresh diagram state
+            code_diag, resp_diag, lat_diag = self._http_request("GET", f"/api/projects/{self.project_id}/diagram")
+            diag_state = (resp_diag.get("diagram_state") or {})
+            has_diagram_draft = bool(diag_state.get("candidate_draft") or diag_state.get("accepted_schema"))
 
         self.record_step(
             3, "Verify / Initialize Diagram Draft Prerequisite", "GET", f"/api/projects/{self.project_id}/diagram", None,
