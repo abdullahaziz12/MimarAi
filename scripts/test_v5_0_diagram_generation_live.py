@@ -31,7 +31,7 @@ import urllib.error
 from datetime import datetime, timezone
 from typing import Dict, Any, Tuple, Optional, List
 
-REPORT_PATH = os.path.join(os.path.dirname(__file__), "..", "Requirements", "Diagram_Generation_Test.md")
+REPORT_PATH = os.path.join(os.path.dirname(__file__), "..", "Requirements", "V5.0_Testing_Result.md")
 DEFAULT_BACKEND_URL = "https://mimaraibackend-6n4ojd1m.b4a.run"
 
 

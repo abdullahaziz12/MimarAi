@@ -386,7 +386,7 @@ async def check_provider_health():
     """Check provider reachability/model availability using minimal lightweight probes."""
     raw_gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     gemini_model = raw_gemini_model.replace("models/", "").strip()
-    groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    groq_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
     async def check_gemini():
         api_key = os.getenv("GEMINI_API_KEY")
@@ -1060,7 +1060,7 @@ Output strictly valid JSON with no markdown formatting:
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "openai/gpt-oss-120b",
+                    "model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": idea_text}
@@ -1279,9 +1279,9 @@ async def call_groq_json(
     if not groq_key:
         raise HTTPException(status_code=500, detail="Groq API unconfigured (GROQ_API_KEY missing).")
     
-    configured_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    configured_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     candidate_models = [configured_model]
-    for m in ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]:
+    for m in ["llama-3.3-70b-versatile", "llama-3.1-70b-versatile", "llama3-70b-8192", "llama3-8b-8192"]:
         if m not in candidate_models:
             candidate_models.append(m)
 

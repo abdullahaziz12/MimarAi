@@ -642,5 +642,5 @@ def test_live_test_script_token_safety_and_structure():
     assert "MIMARAI_BACKEND_URL" in content
     # Script must not hardcode real secret strings
     assert "Bearer eyJ" not in content
-    # Output must target Requirements/Diagram_Generation_Test.md
-    assert "Diagram_Generation_Test.md" in content
+    # Output must target Requirements/V5.0_Testing_Result.md
+    assert "V5.0_Testing_Result.md" in content
