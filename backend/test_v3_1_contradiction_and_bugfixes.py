@@ -153,10 +153,11 @@ class TestBugFixesAndContradictionScan(unittest.IsolatedAsyncioTestCase):
             Exception("Gemini API connection timeout during fix pass")
         ]
 
-        # Groq draft, then val1 (is_valid=False with flags to trigger fix pass), then val2 (is_valid=True)
+        # Groq draft, then val1 (is_valid=False with flags to trigger fix pass), then groq fallback fix pass, then val2 (is_valid=True)
         mock_groq.side_effect = [
             {"features": []},
             {"is_valid": False, "flags": ["Missing audit logs"]},
+            Exception("Groq fallback fix timeout"),
             {"is_valid": True, "flags": []}
         ]
 
