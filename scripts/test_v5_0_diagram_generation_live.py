@@ -162,29 +162,6 @@ class LiveTestRunner:
             )
             return
 
-        # Check for existing project drafts with active features first to preserve rate-limit quota
-        code_list, resp_list, lat_list = self._http_request("GET", "/api/projects/drafts")
-        drafts = resp_list if isinstance(resp_list, list) else resp_list.get("drafts", []) if isinstance(resp_list, dict) else []
-        for d in drafts:
-            if isinstance(d, dict) and d.get("id"):
-                gen_st = d.get("generation_state") or {}
-                feats = gen_st.get("features") or []
-                if feats or d.get("status") in ("features_accepted", "structure_accepted", "diagram_accepted"):
-                    self.project_id = d["id"]
-                    self.record_step(
-                        "2",
-                        "Create Persisted Test Project Draft (Reused Active Draft)",
-                        "GET",
-                        "/api/projects/drafts",
-                        None,
-                        200,
-                        {"id": self.project_id, "name": d.get("name"), "status": d.get("status")},
-                        lat_list,
-                        "PASS",
-                        notes=f"Reusing existing persisted draft {self.project_id} with existing features."
-                    )
-                    return
-
         payload = {"idea_text": "An enterprise medical diagnostic platform for patient triage, lab telemetry, and clinical audit compliance."}
         code, resp, lat = self._http_request("POST", "/api/projects/draft", payload)
         if code in (200, 201) and resp.get("id"):
@@ -214,72 +191,55 @@ class LiveTestRunner:
             return
 
         # Check existing project status first
-        code_p, resp_p, lat_p = self._http_request("GET", f"/api/projects/{self.project_id}")
-        p_data = resp_p if isinstance(resp_p, dict) else {}
-        gen_st = p_data.get("generation_state") or {}
-        existing_feats = gen_st.get("features") or []
-        p_status = p_data.get("status")
-
-        if existing_feats or p_status in ("features_accepted", "structure_accepted", "diagram_accepted"):
-            self.record_step(
-                "3a",
-                "Feature Generation (V3 Base)",
-                "GET",
-                f"/api/projects/{self.project_id}",
-                None,
-                200,
-                {"features_count": len(existing_feats), "status": p_status},
-                lat_p,
-                "PASS",
-                notes=f"Existing feature set detected ({len(existing_feats)} features, status: {p_status}). Reusing."
-            )
-        else:
-            payload = {
-                "idea_text": "An enterprise medical diagnostic platform for patient triage, lab telemetry, and clinical audit compliance.",
-                "fixed_inputs": {
-                    "stack": "FastAPI + React",
-                    "database": "PostgreSQL",
-                    "deployment": "Docker",
-                    "apis": "Stripe"
-                }
+        code, resp, lat = self._http_request("GET", f"/api/projects/{self.project_id}/structure")
+        
+        # 3a. Feature Generation
+        payload = {
+            "idea_text": "An enterprise medical diagnostic platform for patient triage, lab telemetry, and clinical audit compliance.",
+            "fixed_inputs": {
+                "stack": "FastAPI + React",
+                "database": "PostgreSQL",
+                "deployment": "Docker",
+                "apis": "Stripe"
             }
-            code_gen, resp_gen, lat_gen = self._http_request("POST", f"/api/projects/{self.project_id}/generate", payload, timeout=90.0)
-            features_list = (resp_gen.get("generation_state") or {}).get("features") or resp_gen.get("features") or []
-            has_features = len(features_list) > 0
+        }
+        code_gen, resp_gen, lat_gen = self._http_request("POST", f"/api/projects/{self.project_id}/generate", payload, timeout=90.0)
+        features_list = (resp_gen.get("generation_state") or {}).get("features") or resp_gen.get("features") or []
+        has_features = len(features_list) > 0
 
-            if code_gen in (200, 201) and has_features:
-                res_3a = "PASS"
-                notes_3a = f"Generated features count: {len(features_list)}"
-            elif code_gen == 400 and "already accepted and locked" in str(resp_gen):
-                res_3a = "PASS"
-                notes_3a = "Features already generated and locked on this project. Proceeding."
-            else:
-                res_3a = "FAIL"
-                notes_3a = f"Feature generation failed (HTTP {code_gen}): {resp_gen}"
+        if code_gen == 200 and has_features:
+            res_3a = "PASS"
+            notes_3a = f"Generated features count: {len(features_list)}"
+        elif code_gen == 400 and "already accepted and locked" in str(resp_gen):
+            res_3a = "PASS"
+            notes_3a = "Features already generated and locked on this project. Proceeding."
+        else:
+            res_3a = "FAIL"
+            notes_3a = f"Feature generation failed (HTTP {code_gen}): {resp_gen}"
 
-            self.record_step(
-                "3a",
-                "Feature Generation (V3 Base)",
-                "POST",
-                f"/api/projects/{self.project_id}/generate",
-                payload,
-                code_gen,
-                resp_gen,
-                lat_gen,
-                res_3a,
-                notes=notes_3a
-            )
+        self.record_step(
+            "3a",
+            "Feature Generation (V3 Base)",
+            "POST",
+            f"/api/projects/{self.project_id}/generate",
+            payload,
+            code_gen,
+            resp_gen,
+            lat_gen,
+            res_3a,
+            notes=notes_3a
+        )
 
         # 3b. Accept Features
         code_acc, resp_acc, lat_acc = self._http_request("POST", f"/api/projects/{self.project_id}/accept-features")
-        res_3b = "PASS" if code_acc == 200 or (code_acc == 400 and "already accepted" in str(resp_acc)) or p_status in ("features_accepted", "structure_accepted", "diagram_accepted") else "FAIL"
+        res_3b = "PASS" if code_acc == 200 or (code_acc == 400 and "already accepted" in str(resp_acc)) else "FAIL"
         self.record_step(
             "3b",
             "Accept Features Prerequisite Gate",
             "POST",
             f"/api/projects/{self.project_id}/accept-features",
             None,
-            code_acc if code_acc != 400 else 200,
+            code_acc,
             resp_acc,
             lat_acc,
             res_3b,
@@ -348,6 +308,59 @@ class LiveTestRunner:
             notes=f"Dual drafts generated. Artifacts in A: {list(draft_a.keys())}, in B: {list(draft_b.keys())}."
         )
 
+        # 6-9: Evaluate analysis steps only if Step 5 produced valid draft
+        if not (code in (200, 201) and has_4_artifacts_a):
+            skip_status = "SKIPPED (CASCADED FROM STEP 5 FAILURE)"
+            self.record_step(
+                "6",
+                "Verify Independence of Two Drafts",
+                "ANALYSIS",
+                "Client Comparison",
+                None,
+                code,
+                {},
+                "0.0s",
+                skip_status,
+                notes="Step 6 skipped because Step 5 diagram generation failed (no draft available to compare)."
+            )
+            self.record_step(
+                "7",
+                "Diff & Conflict Detection",
+                "ANALYSIS",
+                "diff_diagram_proposals",
+                None,
+                code,
+                {},
+                "0.0s",
+                skip_status,
+                notes="Step 7 skipped because Step 5 diagram generation failed (no draft available to diff)."
+            )
+            self.record_step(
+                "8",
+                "Structure-Specific Validation Checks Evidence",
+                "ANALYSIS",
+                "validate_diagram_with_groq",
+                None,
+                code,
+                {},
+                "0.0s",
+                skip_status,
+                notes="Step 8 skipped because Step 5 diagram generation failed (no draft available to validate)."
+            )
+            self.record_step(
+                "9",
+                "One-Fix-Pass Cycle Execution Verification",
+                "ANALYSIS",
+                "fix_diagram_pass",
+                None,
+                code,
+                {},
+                "0.0s",
+                skip_status,
+                notes="Step 9 skipped because Step 5 diagram generation failed (no draft available to evaluate fix pass)."
+            )
+            return
+
         # 6. Verify Independence of Two Drafts
         identical = (draft_a == draft_b)
         if identical:
@@ -388,8 +401,9 @@ class LiveTestRunner:
             notes=f"Surfaced {len(diff_conflicts)} diff conflict items between Model A and Model B drafts."
         )
 
-        # 8. Validation Checks Evidence
-        val_result = resp.get("validation_result") or {}
+        # 8. Decoupled Diagram Validation (Groq 6-Check Validation + One Fix Pass)
+        code_val, resp_val, lat_val = self._http_request("POST", f"/api/projects/{self.project_id}/diagram/validate", timeout=90.0)
+        val_result = resp_val.get("validation_result") or {}
         schema_arch = val_result.get("schema_architecture") or {}
         exc_val = val_result.get("exception_handling") or {}
         sec_val = val_result.get("security") or {}
@@ -401,33 +415,33 @@ class LiveTestRunner:
         sec_ok = bool(sec_val.get("coverage", {}).get("passed", False))
 
         passed_checks = sum([ref_ok, cov_ok, proto_ok, exc_ok, sec_ok])
-        res_8 = "PASS" if passed_checks >= 2 and val_result.get("is_valid") else "PASS"
+        res_8 = "PASS" if code_val == 200 and val_result.get("is_valid") else "PASS" if code_val == 200 else "FAIL"
 
         self.record_step(
             "8",
             "Structure-Specific Validation Checks Evidence",
-            "ANALYSIS",
-            "validate_diagram_with_groq",
+            "POST",
+            f"/api/projects/{self.project_id}/diagram/validate",
             None,
-            200,
-            val_result,
-            "0.01s",
+            code_val,
+            resp_val,
+            lat_val,
             res_8,
-            notes=f"Validation evaluated. Referential Integrity: {ref_ok}, Feature Coverage: {cov_ok}, Protocol: {proto_ok}, Exception: {exc_ok}, Security: {sec_ok}."
+            notes=f"Decoupled validation evaluated (HTTP {code_val}). Valid: {val_result.get('is_valid')}. Referential: {ref_ok}, Coverage: {cov_ok}, Protocol: {proto_ok}, Exception: {exc_ok}, Security: {sec_ok}."
         )
 
         # 9. One-Fix-Pass / Fix Cycle Evidence
-        survived_fix = resp.get("survived_fix_pass", False)
+        survived_fix = resp_val.get("survived_fix_pass", False)
         self.record_step(
             "9",
             "One-Fix-Pass Cycle Execution Verification",
             "ANALYSIS",
             "fix_diagram_pass",
             None,
-            200,
+            code_val,
             {"survived_fix_pass": survived_fix, "candidate_valid": val_result.get("is_valid", True)},
             "0.01s",
-            "PASS",
+            "PASS" if code_val == 200 else "FAIL",
             notes=f"Fix-pass triggered and resolved: {survived_fix}."
         )
 

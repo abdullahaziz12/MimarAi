@@ -386,7 +386,7 @@ async def check_provider_health():
     """Check provider reachability/model availability using minimal lightweight probes."""
     raw_gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     gemini_model = raw_gemini_model.replace("models/", "").strip()
-    groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    groq_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
     async def check_gemini():
         api_key = os.getenv("GEMINI_API_KEY")
@@ -1060,7 +1060,7 @@ Output strictly valid JSON with no markdown formatting:
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
+                    "model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": idea_text}
@@ -5200,19 +5200,7 @@ Active Features: {json.dumps(active_feature_summaries, indent=2)}"""
     # Step 2: Diff and Conflict Detection
     diff_conflicts = diff_diagram_proposals(draft_a, draft_b)
     
-    # Step 3: Validation (Model A's draft validated by Groq checks)
-    val_result = await validate_diagram_with_groq(draft_a, active_features, fixed_inputs, accepted_structure)
-    
-    survived_fix_pass = False
-    candidate_draft = draft_a
-    
-    # Step 4: One Fix Pass if Validation Failed
-    if not val_result.get("is_valid", False):
-        candidate_draft = await fix_diagram_pass(draft_a, active_features, fixed_inputs, accepted_structure, val_result)
-        val_result = await validate_diagram_with_groq(candidate_draft, active_features, fixed_inputs, accepted_structure)
-        survived_fix_pass = True
-        
-    # Step 5: Record attempt into diagram_state
+    # Step 3: Record attempt into diagram_state (Drafting Stage Only)
     diag_state = project.get("diagram_state") or {}
     attempts = diag_state.get("attempts", [])
     
@@ -5220,14 +5208,14 @@ Active Features: {json.dumps(active_feature_summaries, indent=2)}"""
         "model_a_draft": draft_a,
         "model_b_draft": draft_b,
         "diff_conflicts": diff_conflicts,
-        "validation_result": val_result,
-        "survived_fix_pass": survived_fix_pass,
+        "validation_result": None,
+        "survived_fix_pass": False,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     attempts.append(new_attempt)
     
     diag_state["attempts"] = attempts
-    diag_state["candidate_draft"] = candidate_draft
+    diag_state["candidate_draft"] = draft_a
     if diag_state.get("status") != "accepted":
         diag_state["status"] = "draft"
         
@@ -5239,6 +5227,80 @@ Active Features: {json.dumps(active_feature_summaries, indent=2)}"""
         "model_a_draft": draft_a,
         "model_b_draft": draft_b,
         "diff_conflicts": diff_conflicts,
+        "candidate_draft": draft_a
+    }
+
+
+@app.post("/projects/{project_id}/diagram/validate")
+@app.post("/api/projects/{project_id}/diagram/validate")
+async def validate_project_diagram(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    V5.0 Diagram Validation (Decoupled Stage 2): Reads the most recent candidate draft from diagram_state,
+    runs the 6-check structure-specific validation, triggers one fix pass if flaws are detected, re-validates,
+    and updates the attempt record with validation evidence.
+    """
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+    
+    diag_state = project.get("diagram_state") or {}
+    candidate_draft = diag_state.get("candidate_draft")
+    if not candidate_draft and diag_state.get("attempts"):
+        candidate_draft = diag_state["attempts"][-1].get("model_a_draft")
+        
+    if not candidate_draft:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot validate diagram: no draft candidate found. Generate a diagram draft first."
+        )
+        
+    gen_state = project.get("generation_state") or {}
+    features = gen_state.get("features", [])
+    rejected = set(gen_state.get("rejected_feature_ids", []))
+    active_features = [f for f in features if f.get("id") not in rejected]
+    
+    fixed_inputs = project.get("fixed_inputs") or {}
+    struct_state = project.get("structure_state") or {}
+    accepted_structure = (struct_state.get("accepted_structure") or {}).get("structure") or {}
+    
+    # Step 1: Run 6-check Groq validation
+    val_result = await validate_diagram_with_groq(candidate_draft, active_features, fixed_inputs, accepted_structure)
+    
+    survived_fix_pass = False
+    
+    # Step 2: One Fix Pass if validation failed
+    if not val_result.get("is_valid", False):
+        candidate_draft = await fix_diagram_pass(candidate_draft, active_features, fixed_inputs, accepted_structure, val_result)
+        val_result = await validate_diagram_with_groq(candidate_draft, active_features, fixed_inputs, accepted_structure)
+        survived_fix_pass = True
+        
+    # Step 3: Persist validation results into diagram_state
+    attempts = diag_state.get("attempts", [])
+    if attempts:
+        attempts[-1]["validation_result"] = val_result
+        attempts[-1]["survived_fix_pass"] = survived_fix_pass
+    else:
+        attempts.append({
+            "model_a_draft": candidate_draft,
+            "model_b_draft": candidate_draft,
+            "diff_conflicts": [],
+            "validation_result": val_result,
+            "survived_fix_pass": survived_fix_pass,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+        
+    diag_state["attempts"] = attempts
+    diag_state["candidate_draft"] = candidate_draft
+    
+    client.table("projects").update({"diagram_state": diag_state}).eq("id", project_id).execute()
+    
+    return {
+        "status": "ok",
+        "project_id": project_id,
         "validation_result": val_result,
         "candidate_draft": candidate_draft,
         "survived_fix_pass": survived_fix_pass

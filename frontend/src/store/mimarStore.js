@@ -2021,30 +2021,46 @@ export const useMimarStore = create((set, get) => ({
     };
 
     try {
-      const res = await fetch(`${backendUrl}/api/projects/${s.projectId}/diagram/generate`, {
+      const resGen = await fetch(`${backendUrl}/api/projects/${s.projectId}/diagram/generate`, {
         method: "POST",
         headers: authHeaders,
       });
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || errData.message || "Failed to generate diagrams.");
+      if (!resGen.ok) {
+        const errData = await resGen.json().catch(() => ({}));
+        throw new Error(errData.detail || errData.message || "Failed to generate diagram drafts.");
       }
 
-      const data = await res.json();
-      const cand = data.candidate_draft || data.model_a_draft || {};
+      const dataGen = await resGen.json();
+      
+      set({
+        operationLabel: "Auditing & Validating Technical Artifacts (Groq 6-Check Validation)…",
+      });
+
+      const resVal = await fetch(`${backendUrl}/api/projects/${s.projectId}/diagram/validate`, {
+        method: "POST",
+        headers: authHeaders,
+      });
+
+      if (!resVal.ok) {
+        const errData = await resVal.json().catch(() => ({}));
+        throw new Error(errData.detail || errData.message || "Failed to validate diagrams.");
+      }
+
+      const dataVal = await resVal.json();
+      const cand = dataVal.candidate_draft || dataGen.model_a_draft || {};
 
       set({
         diagramData: cand,
         diagramJsonGenerated: true,
-        diagramDiffConflicts: data.diff_conflicts || [],
-        diagramValidationResult: data.validation_result || null,
-        diagramSurvivedFixPass: Boolean(data.survived_fix_pass),
+        diagramDiffConflicts: dataGen.diff_conflicts || [],
+        diagramValidationResult: dataVal.validation_result || null,
+        diagramSurvivedFixPass: Boolean(dataVal.survived_fix_pass),
         diagramGenerating: false,
         operationRunning: false,
       });
 
-      s.showToast("Schema & Architecture artifacts generated and validated successfully.");
+      s.showToast("Schema, Architecture, Exception & Security artifacts generated and validated.");
       get().saveProjectState();
     } catch (err) {
       console.error("Diagram generation error:", err);
@@ -2052,7 +2068,7 @@ export const useMimarStore = create((set, get) => ({
         diagramGenerating: false,
         operationRunning: false,
       });
-      s.showToast(`Diagram generation failed: ${err.message}`);
+      s.showToast(`Diagram pipeline failed: ${err.message}`);
     }
   },
 

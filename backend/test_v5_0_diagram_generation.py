@@ -210,7 +210,7 @@ def test_diagram_generation_prerequisite_gate_success(mock_auth, mock_db):
     model_b_mock = dict(model_a_mock)
 
     with patch("main.call_gemini_api", new=AsyncMock(return_value=model_a_mock)), \
-         patch("main.call_groq_json", new=AsyncMock(side_effect=[model_b_mock, {"is_valid": True}])):
+         patch("main.call_groq_json", new=AsyncMock(return_value=model_b_mock)):
 
         client = TestClient(app)
         resp = client.post(f"/api/projects/{TEST_PROJECT_ID}/diagram/generate", headers=AUTH_HEADER)
@@ -219,6 +219,13 @@ def test_diagram_generation_prerequisite_gate_success(mock_auth, mock_db):
         assert data["status"] == "ok"
         assert len(data["candidate_draft"]["schema"]["tables"]) == 3
         assert len(project_record["diagram_state"]["attempts"]) == 1
+
+    with patch("main.validate_diagram_with_groq", new=AsyncMock(return_value={"is_valid": True})):
+        resp_val = client.post(f"/api/projects/{TEST_PROJECT_ID}/diagram/validate", headers=AUTH_HEADER)
+        assert resp_val.status_code == 200
+        data_val = resp_val.json()
+        assert data_val["status"] == "ok"
+        assert data_val["validation_result"]["is_valid"] is True
 
 
 def test_diagram_generation_rejected_when_structure_not_accepted(mock_auth, mock_db):
@@ -473,16 +480,23 @@ async def test_diagram_generation_triggers_single_fix_pass_on_flaw(mock_auth, mo
         "security": {"access_control_rules": [{"resource": "/api/intake", "allowed_roles": ["doctor"]}]}
     }
 
-    # Model A: call 1 (draft), call 2 (fix pass)
-    with patch("main.call_gemini_api", new=AsyncMock(side_effect=[model_a_flawed, model_a_fixed])), \
-         patch("main.call_groq_json", new=AsyncMock(side_effect=[model_a_flawed, {"is_valid": False}, {"is_valid": True}])):
+    # Model A: draft call
+    with patch("main.call_gemini_api", new=AsyncMock(return_value=model_a_flawed)), \
+         patch("main.call_groq_json", new=AsyncMock(return_value=model_a_flawed)):
 
         client = TestClient(app)
         resp = client.post(f"/api/projects/{TEST_PROJECT_ID}/diagram/generate", headers=AUTH_HEADER)
         assert resp.status_code == 200
-        data = resp.json()
-        assert data["survived_fix_pass"] is True
-        assert len(data["candidate_draft"]["schema"]["tables"]) == 3
+
+    # Validation: 1 failed val -> 1 fix pass -> 1 passed val
+    with patch("main.validate_diagram_with_groq", new=AsyncMock(side_effect=[{"is_valid": False}, {"is_valid": True}])), \
+         patch("main.fix_diagram_pass", new=AsyncMock(return_value=model_a_fixed)):
+
+        resp_val = client.post(f"/api/projects/{TEST_PROJECT_ID}/diagram/validate", headers=AUTH_HEADER)
+        assert resp_val.status_code == 200
+        data_val = resp_val.json()
+        assert data_val["survived_fix_pass"] is True
+        assert len(data_val["candidate_draft"]["schema"]["tables"]) == 3
 
 
 # ============================================================================
