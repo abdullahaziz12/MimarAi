@@ -1242,9 +1242,9 @@ async def call_gemini_api(
                         print(f"[Gemini 404 Model {model_name}] Skipping — model not available")
                         break
                     
-                    if resp.status_code == 503 and attempt == 0:
-                        print(f"[Gemini 503 Model {model_name}] Waiting 1.5s before retry")
-                        await asyncio.sleep(1.5)
+                    if resp.status_code in (429, 503) and attempt == 0:
+                        print(f"[Gemini {resp.status_code} Model {model_name}] Rate limit / Service busy — waiting 2s before retry")
+                        await asyncio.sleep(2.0)
                         continue
                     
                     sanitized_text = _sanitize_gemini_error(resp.text[:500], gemini_key)
