@@ -2,9 +2,11 @@
 
 import React, { useState, useMemo } from 'react';
 import { useMimarStore } from '../../store/mimarStore';
+import { useAuth } from '../../context/AuthContext';
 import ReviewCommentSheet from '../ReviewCommentSheet';
 
 export default function DiagramScreen() {
+  const { session } = useAuth();
   const {
     currentScreen,
     diagramData,
@@ -172,7 +174,7 @@ export default function DiagramScreen() {
                 type="button"
                 className="btn btn-secondary"
                 id="generateDiagramBtn"
-                onClick={() => generateDiagram()}
+                onClick={() => generateDiagram(session?.access_token)}
                 disabled={operationRunning}
               >
                 <span>⚡ Re-generate Diagrams</span>
@@ -198,7 +200,7 @@ export default function DiagramScreen() {
               className={`btn ${diagramJsonAccepted ? 'btn-success' : 'btn-primary'} ${commentCount > 0 && !diagramJsonAccepted ? 'disabled-by-comments' : ''}`}
               id="acceptBtnDiagram"
               disabled={diagramJsonAccepted || operationRunning || diagramGenerating}
-              onClick={() => acceptDiagramJson()}
+              onClick={() => acceptDiagramJson(session?.access_token)}
               title={commentCount > 0 && !diagramJsonAccepted ? `Cannot accept with ${commentCount} pending review comment(s). Submit comments for AI revision, or delete comments to accept.` : ''}
             >
               {diagramJsonAccepted ? '✓ JSON Accepted' : (diagramGenerating ? 'Generating Diagrams…' : 'Accept & Render →')}

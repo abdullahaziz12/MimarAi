@@ -2,9 +2,11 @@
 
 import React, { useState, useMemo } from 'react';
 import { useMimarStore } from '../../store/mimarStore';
+import { useAuth } from '../../context/AuthContext';
 import ReviewCommentSheet from '../ReviewCommentSheet';
 
 export default function StructureScreen() {
+  const { session } = useAuth();
   const {
     currentScreen,
     structureData,
@@ -181,7 +183,7 @@ export default function StructureScreen() {
               className={`btn ${structureAccepted ? 'btn-success' : 'btn-primary'} ${commentCount > 0 && !structureAccepted ? 'disabled-by-comments' : ''}`}
               id="acceptBtnStruct"
               disabled={structureAccepted || operationRunning || structureGenerating}
-              onClick={() => acceptStructure()}
+              onClick={() => acceptStructure(session?.access_token)}
               title={commentCount > 0 && !structureAccepted ? `Cannot accept with ${commentCount} pending review comment(s). Submit comments for AI revision, or delete comments to accept.` : ''}
             >
               {structureAccepted ? '✓ Structure Accepted' : 'Accept Structure →'}

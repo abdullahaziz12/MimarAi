@@ -1,5 +1,21 @@
 import { create } from "zustand";
 import { getBackendApiUrl, getBackendUrlStatus } from "../lib/backendConfig";
+import { supabase } from "../lib/supabaseClient";
+
+export async function getActiveSessionToken(explicitToken = null) {
+  if (explicitToken && typeof explicitToken === 'string' && explicitToken.trim()) {
+    return explicitToken.trim();
+  }
+  try {
+    const { data } = await supabase.auth.getSession();
+    if (data?.session?.access_token) {
+      return data.session.access_token;
+    }
+  } catch (e) {
+    console.warn("Could not retrieve active session token:", e);
+  }
+  return null;
+}
 
 export const SCREEN_ORDER = [
   "interview",
@@ -1890,6 +1906,8 @@ export const useMimarStore = create((set, get) => ({
       return;
     }
 
+    const token = await getActiveSessionToken(sessionToken);
+
     let backendUrl = "";
     try {
       backendUrl = getBackendApiUrl("").replace(/\/$/, "");
@@ -1906,7 +1924,7 @@ export const useMimarStore = create((set, get) => ({
 
     const authHeaders = {
       "Content-Type": "application/json",
-      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     };
 
     try {
@@ -1957,6 +1975,8 @@ export const useMimarStore = create((set, get) => ({
     }
     set({ operationRunning: true, operationLabel: "Locking Structure…" });
 
+    const token = await getActiveSessionToken(sessionToken);
+
     let backendUrl = "";
     try {
       backendUrl = getBackendApiUrl("").replace(/\/$/, "");
@@ -1968,7 +1988,7 @@ export const useMimarStore = create((set, get) => ({
       try {
         const authHeaders = {
           "Content-Type": "application/json",
-          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         };
         await fetch(`${backendUrl}/api/projects/${s.projectId}/structure/accept`, {
           method: "POST",
@@ -1990,7 +2010,7 @@ export const useMimarStore = create((set, get) => ({
     s.showScreen("diagram");
     get().saveProjectState();
     if (!get().diagramData && !get().diagramJsonGenerated) {
-      get().generateDiagram(sessionToken);
+      get().generateDiagram(token);
     }
   },
 
@@ -2001,6 +2021,8 @@ export const useMimarStore = create((set, get) => ({
       s.showToast("No active project ID found.");
       return;
     }
+
+    const token = await getActiveSessionToken(sessionToken);
 
     let backendUrl = "";
     try {
@@ -2018,7 +2040,7 @@ export const useMimarStore = create((set, get) => ({
 
     const authHeaders = {
       "Content-Type": "application/json",
-      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     };
 
     try {
@@ -2085,6 +2107,8 @@ export const useMimarStore = create((set, get) => ({
     }
     set({ operationRunning: true, operationLabel: "Accepting & Rendering Blueprint…" });
 
+    const token = await getActiveSessionToken(sessionToken);
+
     let backendUrl = "";
     try {
       backendUrl = getBackendApiUrl("").replace(/\/$/, "");
@@ -2099,7 +2123,7 @@ export const useMimarStore = create((set, get) => ({
       try {
         const authHeaders = {
           "Content-Type": "application/json",
-          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         };
         const res = await fetch(`${backendUrl}/api/projects/${s.projectId}/diagram/accept`, {
           method: "POST",
@@ -2145,6 +2169,8 @@ export const useMimarStore = create((set, get) => ({
       operationLabel: confirmOverride ? "Propagating Forced Override into Specifications…" : "Classifying & Processing Diagram Edit (AI)…"
     });
 
+    const token = await getActiveSessionToken(sessionToken);
+
     let backendUrl = "";
     try {
       backendUrl = getBackendApiUrl("").replace(/\/$/, "");
@@ -2156,7 +2182,7 @@ export const useMimarStore = create((set, get) => ({
 
     const authHeaders = {
       "Content-Type": "application/json",
-      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     };
 
     try {
