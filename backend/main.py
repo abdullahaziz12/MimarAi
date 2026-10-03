@@ -892,6 +892,8 @@ async def get_project_state(
             "step0_state": step0_state,
             "fixed_inputs": project.get("fixed_inputs") or {},
             "generation_state": project.get("generation_state") or {},
+            "structure_state": project.get("structure_state") or {},
+            "diagram_state": project.get("diagram_state") or {},
             "density_flags": project.get("density_flags") or dict(DEFAULT_DENSITY_FLAGS),
             "personas": personas_data,
             "nfrs": nfrs_data,

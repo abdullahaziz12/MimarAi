@@ -304,10 +304,13 @@ class LiveTestRunner:
 
         # Step 7: Scenario 4 — Verify Upstream Feature & Structure Persistence
         code_proj, resp_proj, lat_proj = self._http_request("GET", f"/api/projects/{self.project_id}")
+        code_struct, resp_struct, _ = self._http_request("GET", f"/api/projects/{self.project_id}/structure")
+        code_diag, resp_diag, _ = self._http_request("GET", f"/api/projects/{self.project_id}/diagram")
+        
         project_obj = resp_proj.get("project") or resp_proj
         gen_state_persisted = project_obj.get("generation_state") or {}
-        struct_state_persisted = project_obj.get("structure_state") or {}
-        diag_state_persisted = project_obj.get("diagram_state") or {}
+        struct_state_persisted = resp_struct.get("structure_state") or project_obj.get("structure_state") or {}
+        diag_state_persisted = resp_diag.get("diagram_state") or project_obj.get("diagram_state") or {}
 
         features_list = gen_state_persisted.get("features") or []
         has_feature_amended = any(f.get("manually_amended") is True for f in features_list) or gen_state_persisted.get("manually_amended") is True
