@@ -32,14 +32,15 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Tuple, Optional, List
 
 REPORT_PATH = os.path.join(os.path.dirname(__file__), "..", "Requirements", "v5_1_test.md")
-DEFAULT_BACKEND_URL = "https://mimaraibackend-bwdydsdb.b4a.run"
+DEFAULT_BACKEND_URL = "https://mimaraibackend-w8vvs3vg.b4a.run"
+DEFAULT_PROJECT_ID = "d56bc308-7c77-467d-b530-16cf76ae70fc"
 
 
 class LiveTestRunner:
     def __init__(self):
         self.backend_url = os.getenv("MIMARAI_BACKEND_URL", DEFAULT_BACKEND_URL).rstrip("/")
         self.token = os.getenv("MIMARAI_TEST_TOKEN", "").strip()
-        self.preconfigured_project_id = os.getenv("MIMARAI_TEST_PROJECT_ID", "").strip()
+        self.preconfigured_project_id = os.getenv("MIMARAI_TEST_PROJECT_ID", DEFAULT_PROJECT_ID).strip()
         self.results: List[Dict[str, Any]] = []
         self.project_id: Optional[str] = None
         self.start_time = datetime.now(timezone.utc)
