@@ -536,3 +536,24 @@ def test_ask_ai_is_strictly_separate_from_review_comments_table(mock_auth, mock_
     resp_comments = client.get(f"/api/projects/{TEST_PROJECT_ID}/comments", headers=AUTH_HEADER)
     assert resp_comments.status_code == 200
     assert resp_comments.json()["comments"] == []
+
+
+# ============================================================================
+# 6. Live Test Script Verification & Token Safety
+# ============================================================================
+
+def test_live_test_script_token_safety_and_structure():
+    """Verify that scripts/test_v5_1_ask_ai_diagram_editing_live.py exists and strictly enforces token safety."""
+    script_path = os.path.join(os.path.dirname(__file__), "..", "scripts", "test_v5_1_ask_ai_diagram_editing_live.py")
+    assert os.path.exists(script_path), "Live test script must exist."
+
+    with open(script_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    assert "MIMARAI_TEST_TOKEN" in content
+    assert "Requirements" in content
+    assert "v5_1_test.md" in content
+    assert "cosmetic" in content
+    assert "structural_conflict" in content
+    assert "confirm_override" in content
+    assert "manually_amended" in content
