@@ -1276,8 +1276,9 @@ async def call_groq_json(
         raise HTTPException(status_code=500, detail="Groq API unconfigured (GROQ_API_KEY missing).")
     
     configured_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-    candidate_models = [configured_model]
-    for m in ["llama-3.3-70b-versatile", "llama-3.1-70b-versatile", "llama3-70b-8192", "llama3-8b-8192"]:
+    active_groq_models = ["llama-3.3-70b-versatile", "llama-3.1-70b-versatile", "mixtral-8x7b-32768", "gemma2-9b-it"]
+    candidate_models = [configured_model] if configured_model in active_groq_models else ["llama-3.3-70b-versatile"]
+    for m in active_groq_models:
         if m not in candidate_models:
             candidate_models.append(m)
 
@@ -1314,6 +1315,11 @@ async def call_groq_json(
                         asyncio.create_task(log_ai_call("groq", stage, True, latency_ms, user_id, project_id))
                         return parse_llm_json(raw)
                     
+                    # Status-specific handling: decommissioned or non-existent model (skip to next candidate)
+                    if resp.status_code in (400, 404) and any(k in resp.text.lower() for k in ("decommissioned", "not exist", "model_not_found", "no longer supported")):
+                        print(f"[Groq Model {model_name}] Model unavailable/decommissioned ({resp.text[:100]}) — skipping to next model")
+                        break
+
                     # Status-specific handling: 429 TPM rate limit (wait 2.0s before retry)
                     if resp.status_code == 429 and attempt == 0:
                         print(f"[Groq 429 Model {model_name}] TPM limit — waiting 2s before retry")

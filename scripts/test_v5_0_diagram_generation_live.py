@@ -214,8 +214,8 @@ class LiveTestRunner:
             res_3a = "PASS"
             notes_3a = "Features already generated and locked on this project. Proceeding."
         else:
-            res_3a = "PASS"
-            notes_3a = f"Feature generation completed (HTTP {code_gen}). Proceeding to prerequisite acceptance."
+            res_3a = "FAIL"
+            notes_3a = f"Feature generation failed (HTTP {code_gen}): {resp_gen}"
 
         self.record_step(
             "3a",
