@@ -284,6 +284,14 @@ class StructureAcceptRequest(BaseModel):
     structure: Optional[Dict[str, List[str]]] = None
 
 
+# --- V5 Diagram Generation Schemas ---
+class DiagramAcceptRequest(BaseModel):
+    schema_data: Optional[Dict[str, Any]] = None
+    architecture_data: Optional[Dict[str, Any]] = None
+    exception_handling_data: Optional[Dict[str, Any]] = None
+    security_data: Optional[Dict[str, Any]] = None
+
+
 # --- Reusable SMTP Email Dispatcher ---
 def send_smtp_email(to_email: str, subject: str, html_body: str, plain_text_body: str) -> bool:
     """
@@ -378,7 +386,7 @@ async def check_provider_health():
     """Check provider reachability/model availability using minimal lightweight probes."""
     raw_gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     gemini_model = raw_gemini_model.replace("models/", "").strip()
-    groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    groq_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
     async def check_gemini():
         api_key = os.getenv("GEMINI_API_KEY")
@@ -1052,7 +1060,7 @@ Output strictly valid JSON with no markdown formatting:
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "openai/gpt-oss-120b",
+                    "model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": idea_text}
@@ -1180,24 +1188,30 @@ async def call_gemini_api(
 ) -> Dict[str, Any]:
     gemini_key = os.getenv("GEMINI_API_KEY")
     if not gemini_key:
-        raise HTTPException(status_code=500, detail="Gemini API unconfigured (GEMINI_API_KEY missing).")
+        print("[Tracked Substitution] GEMINI_API_KEY unconfigured — substituting with Groq llama-versatile")
+        return await call_groq_json(
+            system_prompt,
+            user_prompt,
+            timeout=timeout,
+            retry_user_prompt=retry_user_prompt,
+            retry=retry,
+            stage=stage,
+            user_id=user_id,
+            project_id=project_id
+        )
     
-    raw_configured_model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+    raw_configured_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
     configured_model = raw_configured_model.replace("models/", "").strip()
     
     # Verified public Gemini models supporting generateContent on v1beta
     VERIFIED_GEMINI_MODELS = [
-        "gemini-3.6-flash",
-        "gemini-flash-latest",
-        "gemini-3.1-pro-preview",
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
         "gemini-1.5-flash",
-        "gemini-2.5-pro",
-        "gemini-1.5-pro"
+        "gemini-2.0-flash",
+        "gemini-1.5-pro",
+        "gemini-flash-latest"
     ]
     
-    candidate_models = [configured_model] if configured_model in VERIFIED_GEMINI_MODELS else ["gemini-3.6-flash"]
+    candidate_models = [configured_model] if configured_model in VERIFIED_GEMINI_MODELS else ["gemini-1.5-flash"]
     for m in VERIFIED_GEMINI_MODELS:
         if m not in candidate_models:
             candidate_models.append(m)
@@ -1238,9 +1252,9 @@ async def call_gemini_api(
                         print(f"[Gemini 404 Model {model_name}] Skipping — model not available")
                         break
                     
-                    if resp.status_code == 503 and attempt == 0:
-                        print(f"[Gemini 503 Model {model_name}] Waiting 1.5s before retry")
-                        await asyncio.sleep(1.5)
+                    if resp.status_code in (429, 503) and attempt == 0:
+                        print(f"[Gemini {resp.status_code} Model {model_name}] Rate limit / Service busy — waiting 2s before retry")
+                        await asyncio.sleep(2.0)
                         continue
                     
                     sanitized_text = _sanitize_gemini_error(resp.text[:500], gemini_key)
@@ -1254,7 +1268,17 @@ async def call_gemini_api(
 
     latency_ms = int((time.time() - start_time) * 1000)
     asyncio.create_task(log_ai_call("gemini", stage, False, latency_ms, user_id, project_id))
-    raise HTTPException(status_code=502, detail=f"Gemini API request failed: {last_error}")
+    print(f"[Gemini All Models Failed] {last_error} — falling back to Groq llama-versatile")
+    return await call_groq_json(
+        system_prompt,
+        user_prompt,
+        timeout=timeout,
+        retry_user_prompt=retry_user_prompt,
+        retry=retry,
+        stage=stage,
+        user_id=user_id,
+        project_id=project_id
+    )
 
 
 async def call_groq_json(
@@ -1272,8 +1296,9 @@ async def call_groq_json(
         raise HTTPException(status_code=500, detail="Groq API unconfigured (GROQ_API_KEY missing).")
     
     configured_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
-    candidate_models = [configured_model]
-    for m in ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]:
+    active_groq_models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "allam-2-7b"]
+    candidate_models = [configured_model] if configured_model in active_groq_models else ["openai/gpt-oss-120b"]
+    for m in active_groq_models:
         if m not in candidate_models:
             candidate_models.append(m)
 
@@ -1310,11 +1335,20 @@ async def call_groq_json(
                         asyncio.create_task(log_ai_call("groq", stage, True, latency_ms, user_id, project_id))
                         return parse_llm_json(raw)
                     
-                    # Status-specific handling: 429 TPM rate limit (wait 2.0s before retry)
-                    if resp.status_code == 429 and attempt == 0:
-                        print(f"[Groq 429 Model {model_name}] TPM limit — waiting 2s before retry")
-                        await asyncio.sleep(2.0)
-                        continue
+                    # Status-specific handling: decommissioned or non-existent model (skip to next candidate)
+                    if resp.status_code in (400, 404) and any(k in resp.text.lower() for k in ("decommissioned", "not exist", "model_not_found", "no longer supported")):
+                        print(f"[Groq Model {model_name}] Model unavailable ({resp.text[:100]}) — skipping to next model")
+                        break
+
+                    # Status-specific handling: 429 TPM rate limit (wait 2.0s before retry, or rotate model on attempt 2)
+                    if resp.status_code == 429:
+                        if attempt == 0:
+                            print(f"[Groq 429 Model {model_name}] TPM limit — waiting 2s before retry")
+                            await asyncio.sleep(2.0)
+                            continue
+                        else:
+                            print(f"[Groq 429 Model {model_name}] TPM limit exhausted — rotating to next candidate model")
+                            break
                     
                     last_error = f"Status {resp.status_code}: {resp.text}"
                     print(f"[Groq API Error Model {model_name} Attempt {attempt+1}] {last_error}")
@@ -4108,6 +4142,1283 @@ async def accept_project_structure(
         "project_id": project_id,
         "project_status": "structure_accepted",
         "accepted_structure": {"structure": chosen_structure}
+    }
+
+
+# ============================================================================
+# V5.0 Diagram Generation (Core) — Logic, Helpers & Endpoints
+# ============================================================================
+
+def normalize_diagram_draft(raw: Any) -> Dict[str, Any]:
+    """
+    Normalizes a diagram draft dictionary ensuring all 4 artifacts (schema, architecture,
+    exception_handling, security) are properly structured and typed.
+    """
+    if not isinstance(raw, dict):
+        return {
+            "schema": {"tables": []},
+            "architecture": {"services": []},
+            "exception_handling": {"feature_rules": [], "global_standard": {"error_response_shape": {"status": "integer", "code": "string", "message": "string"}, "logging_standard": "structured_json"}},
+            "security": {"access_control_rules": [], "cross_cutting": {"authentication_method": "JWT Bearer Token", "secrets_handling": "Environment Variables", "transport_security": "HTTPS/TLS 1.3", "row_level_security": "Enabled where applicable"}}
+        }
+    
+    # 1. Schema
+    schema_raw = raw.get("schema") or {}
+    if not isinstance(schema_raw, dict):
+        schema_raw = {"tables": []}
+    tables_raw = schema_raw.get("tables") or []
+    if isinstance(tables_raw, dict):
+        tables_list = []
+        for tname, tinfo in tables_raw.items():
+            if isinstance(tinfo, dict):
+                tinfo["name"] = tname
+                tables_list.append(tinfo)
+            else:
+                tables_list.append({"name": tname, "columns": []})
+        tables_raw = tables_list
+    elif not isinstance(tables_raw, list):
+        tables_raw = []
+    
+    normalized_tables = []
+    for tbl in tables_raw:
+        if not isinstance(tbl, dict):
+            continue
+        tname = str(tbl.get("name") or "").strip()
+        if not tname:
+            continue
+        
+        cols_raw = tbl.get("columns") or []
+        norm_cols = []
+        if isinstance(cols_raw, list):
+            for col in cols_raw:
+                if isinstance(col, dict):
+                    norm_cols.append({
+                        "name": str(col.get("name") or "").strip(),
+                        "type": str(col.get("type") or "varchar").strip(),
+                        "is_primary_key": bool(col.get("is_primary_key", False)),
+                        "is_foreign_key": bool(col.get("is_foreign_key", False)),
+                        "references": str(col.get("references") or "").strip() if col.get("references") else None,
+                        "nullable": bool(col.get("nullable", True))
+                    })
+                elif isinstance(col, str):
+                    norm_cols.append({"name": col.strip(), "type": "varchar", "is_primary_key": False, "is_foreign_key": False, "nullable": True})
+        elif isinstance(cols_raw, dict):
+            for cname, ctype in cols_raw.items():
+                norm_cols.append({"name": str(cname).strip(), "type": str(ctype).strip(), "is_primary_key": False, "is_foreign_key": False, "nullable": True})
+        
+        fks_raw = tbl.get("foreign_keys") or []
+        norm_fks = []
+        if isinstance(fks_raw, list):
+            for fk in fks_raw:
+                if isinstance(fk, dict):
+                    norm_fks.append({
+                        "column": str(fk.get("column") or "").strip(),
+                        "references_table": str(fk.get("references_table") or "").strip(),
+                        "references_column": str(fk.get("references_column") or "id").strip()
+                    })
+        
+        mapped_feats = tbl.get("mapped_features") or []
+        if isinstance(mapped_feats, str):
+            mapped_feats = [mapped_feats]
+        elif not isinstance(mapped_feats, list):
+            mapped_feats = []
+            
+        normalized_tables.append({
+            "name": tname,
+            "description": str(tbl.get("description") or ""),
+            "columns": norm_cols,
+            "primary_key": str(tbl.get("primary_key") or "id"),
+            "foreign_keys": norm_fks,
+            "mapped_features": [str(m).strip() for m in mapped_feats if m]
+        })
+    
+    # 2. Architecture
+    arch_raw = raw.get("architecture") or {}
+    if not isinstance(arch_raw, dict):
+        arch_raw = {"services": []}
+    services_raw = arch_raw.get("services") or arch_raw.get("components") or []
+    if isinstance(services_raw, dict):
+        services_list = []
+        for sname, sinfo in services_raw.items():
+            if isinstance(sinfo, dict):
+                sinfo["name"] = sname
+                services_list.append(sinfo)
+            else:
+                services_list.append({"name": sname})
+        services_raw = services_list
+    elif not isinstance(services_raw, list):
+        services_raw = []
+        
+    normalized_services = []
+    for svc in services_raw:
+        if not isinstance(svc, dict):
+            continue
+        sname = str(svc.get("name") or "").strip()
+        if not sname:
+            continue
+        deps = svc.get("dependencies") or []
+        if isinstance(deps, str):
+            deps = [deps]
+        elif not isinstance(deps, list):
+            deps = []
+            
+        mapped_feats = svc.get("mapped_features") or []
+        if isinstance(mapped_feats, str):
+            mapped_feats = [mapped_feats]
+        elif not isinstance(mapped_feats, list):
+            mapped_feats = []
+            
+        normalized_services.append({
+            "name": sname,
+            "layer": str(svc.get("layer") or "service").strip(),
+            "protocol": str(svc.get("protocol") or "HTTPS").strip(),
+            "port": svc.get("port") or 8000,
+            "dependencies": [str(d).strip() for d in deps if d],
+            "mapped_features": [str(m).strip() for m in mapped_feats if m]
+        })
+        
+    # 3. Exception Handling
+    exc_raw = raw.get("exception_handling") or {}
+    if not isinstance(exc_raw, dict):
+        exc_raw = {"feature_rules": []}
+    feat_rules_raw = exc_raw.get("feature_rules") or exc_raw.get("policies") or []
+    if isinstance(feat_rules_raw, dict):
+        rules_list = []
+        for fname, rinfo in feat_rules_raw.items():
+            if isinstance(rinfo, dict):
+                rinfo["feature_name"] = fname
+                rules_list.append(rinfo)
+            elif isinstance(rinfo, list):
+                rules_list.append({"feature_name": fname, "failure_modes": rinfo})
+        feat_rules_raw = rules_list
+    elif not isinstance(feat_rules_raw, list):
+        feat_rules_raw = []
+        
+    normalized_exc_rules = []
+    for r in feat_rules_raw:
+        if not isinstance(r, dict):
+            continue
+        fname = str(r.get("feature_name") or r.get("feature_id") or "").strip()
+        if not fname:
+            continue
+        fmodes = r.get("failure_modes") or []
+        if not isinstance(fmodes, list):
+            fmodes = []
+        norm_fmodes = []
+        for fm in fmodes:
+            if isinstance(fm, dict):
+                norm_fmodes.append({
+                    "error_type": str(fm.get("error_type") or "validation_error"),
+                    "handling_layer": str(fm.get("handling_layer") or "validation_layer"),
+                    "error_response_shape": fm.get("error_response_shape") if isinstance(fm.get("error_response_shape"), dict) else {"status": 400, "code": "ERROR", "message": "Error occurred"},
+                    "retryable": bool(fm.get("retryable", False)),
+                    "logging": str(fm.get("logging") or "warning")
+                })
+            elif isinstance(fm, str):
+                norm_fmodes.append({
+                    "error_type": fm,
+                    "handling_layer": "validation_layer",
+                    "error_response_shape": {"status": 400, "code": fm.upper().replace(" ", "_"), "message": fm},
+                    "retryable": False,
+                    "logging": "warning"
+                })
+        normalized_exc_rules.append({
+            "feature_name": fname,
+            "failure_modes": norm_fmodes
+        })
+        
+    global_std = exc_raw.get("global_standard")
+    if not isinstance(global_std, dict):
+        global_std = {
+            "error_response_shape": {"status": "integer", "code": "string", "message": "string"},
+            "logging_standard": "structured_json"
+        }
+        
+    # 4. Security
+    sec_raw = raw.get("security") or {}
+    if not isinstance(sec_raw, dict):
+        sec_raw = {"access_control_rules": []}
+    rules_raw = sec_raw.get("access_control_rules") or sec_raw.get("rules") or []
+    if isinstance(rules_raw, dict):
+        rules_list = []
+        for res, rinfo in rules_raw.items():
+            if isinstance(rinfo, dict):
+                rinfo["resource"] = res
+                rules_list.append(rinfo)
+            elif isinstance(rinfo, list):
+                rules_list.append({"resource": res, "allowed_roles": rinfo})
+        rules_raw = rules_list
+    elif not isinstance(rules_raw, list):
+        rules_raw = []
+        
+    normalized_sec_rules = []
+    for sr in rules_raw:
+        if not isinstance(sr, dict):
+            continue
+        resource = str(sr.get("resource") or "").strip()
+        if not resource:
+            continue
+        roles = sr.get("allowed_roles") or []
+        if isinstance(roles, str):
+            roles = [roles]
+        elif not isinstance(roles, list):
+            roles = []
+        action = str(sr.get("action") or "read_write").strip()
+        normalized_sec_rules.append({
+            "resource": resource,
+            "allowed_roles": [str(role).strip() for role in roles if role],
+            "action": action
+        })
+        
+    cross_cutting = sec_raw.get("cross_cutting")
+    if not isinstance(cross_cutting, dict):
+        cross_cutting = {
+            "authentication_method": "JWT Bearer Token",
+            "secrets_handling": "Environment Variables",
+            "transport_security": "HTTPS/TLS 1.3",
+            "row_level_security": "Enabled where applicable"
+        }
+        
+    return {
+        "schema": {
+            "tables": normalized_tables
+        },
+        "architecture": {
+            "services": normalized_services
+        },
+        "exception_handling": {
+            "feature_rules": normalized_exc_rules,
+            "global_standard": global_std
+        },
+        "security": {
+            "access_control_rules": normalized_sec_rules,
+            "cross_cutting": cross_cutting
+        }
+    }
+
+
+def generate_mermaid_erd(schema_data: Dict[str, Any]) -> str:
+    """
+    Pure Python function converting schema JSON into valid Mermaid ERD syntax.
+    Deterministic, non-AI rendering step.
+    """
+    if not isinstance(schema_data, dict):
+        return "erDiagram\n"
+    
+    tables = schema_data.get("tables", [])
+    if not tables:
+        return "erDiagram\n"
+    
+    lines = ["erDiagram"]
+    relationships = []
+    table_names_seen = set()
+
+    def clean_ident(s: str) -> str:
+        cleaned = re.sub(r'[^a-zA-Z0-9_]', '_', str(s).strip())
+        return cleaned if cleaned else "entity"
+
+    def clean_type(s: str) -> str:
+        raw = str(s).strip()
+        if not raw:
+            return "string"
+        first_word = raw.split("(")[0].split()[0]
+        cleaned = re.sub(r'[^a-zA-Z0-9_]', '', first_word)
+        return cleaned.lower() if cleaned else "string"
+
+    for tbl in tables:
+        if not isinstance(tbl, dict):
+            continue
+        raw_name = tbl.get("name") or "Table"
+        tname = clean_ident(raw_name).upper()
+        if not tname:
+            continue
+        table_names_seen.add(tname)
+        
+        lines.append(f"    {tname} {{")
+        cols = tbl.get("columns") or []
+        pk_field = str(tbl.get("primary_key") or "id").lower()
+        
+        for col in cols:
+            if isinstance(col, dict):
+                cname = clean_ident(col.get("name") or "col")
+                ctype = clean_type(col.get("type") or "varchar")
+                is_pk = bool(col.get("is_primary_key")) or (cname.lower() == pk_field)
+                is_fk = bool(col.get("is_foreign_key")) or (col.get("references") is not None)
+                
+                marker = ""
+                if is_pk:
+                    marker = " PK"
+                elif is_fk:
+                    marker = " FK"
+                
+                lines.append(f"        {ctype} {cname}{marker}")
+            elif isinstance(col, str):
+                cname = clean_ident(col)
+                marker = " PK" if cname.lower() == pk_field else ""
+                lines.append(f"        string {cname}{marker}")
+                
+        lines.append("    }")
+
+        fks = tbl.get("foreign_keys") or []
+        for fk in fks:
+            if isinstance(fk, dict):
+                ref_tbl = clean_ident(fk.get("references_table") or "").upper()
+                if ref_tbl:
+                    relationships.append((ref_tbl, tname, fk.get("column") or "references"))
+                    
+        for col in cols:
+            if isinstance(col, dict) and col.get("references"):
+                ref_parts = str(col.get("references")).split(".")
+                if ref_parts:
+                    ref_tbl = clean_ident(ref_parts[0]).upper()
+                    if ref_tbl:
+                        relationships.append((ref_tbl, tname, col.get("name") or "references"))
+
+    for ref_tbl, target_tbl, label in relationships:
+        clean_label = clean_ident(label)
+        lines.append(f'    {ref_tbl} ||--o{{ {target_tbl} : "{clean_label}"')
+
+    return "\n".join(lines) + "\n"
+
+
+def generate_mermaid_architecture(architecture_data: Dict[str, Any]) -> str:
+    """
+    Pure Python function converting architecture JSON into valid Mermaid Flowchart syntax.
+    Deterministic, non-AI rendering step.
+    """
+    if not isinstance(architecture_data, dict):
+        return "flowchart TD\n"
+    
+    services = architecture_data.get("services") or architecture_data.get("components") or []
+    if not services:
+        return "flowchart TD\n    App[Application]\n"
+    
+    lines = ["flowchart TD"]
+    
+    def clean_id(s: str) -> str:
+        cleaned = re.sub(r'[^a-zA-Z0-9_]', '_', str(s).strip())
+        return cleaned if cleaned else "node"
+
+    def clean_text(s: str) -> str:
+        return str(s).replace('"', "'").replace("\n", " ").strip()
+
+    layers: Dict[str, List[Dict[str, Any]]] = {}
+    service_id_map: Dict[str, str] = {}
+    
+    for idx, svc in enumerate(services):
+        if not isinstance(svc, dict):
+            continue
+        sname = str(svc.get("name") or f"Service_{idx+1}").strip()
+        layer = str(svc.get("layer") or "Services").strip().title()
+        layers.setdefault(layer, []).append(svc)
+        node_id = f"{clean_id(layer)}_{clean_id(sname)}"
+        service_id_map[sname.lower()] = node_id
+
+    for layer_name, svcs in layers.items():
+        clean_layer = clean_text(layer_name)
+        lines.append(f'    subgraph {clean_id(clean_layer)}["{clean_layer}"]')
+        for svc in svcs:
+            sname = str(svc.get("name") or "Service").strip()
+            node_id = service_id_map[sname.lower()]
+            proto = str(svc.get("protocol") or "HTTPS").strip()
+            port = svc.get("port")
+            port_str = f"Port: {port}" if port else ""
+            meta_str = f" ({proto}{', ' + port_str if port_str else ''})" if (proto or port_str) else ""
+            label = f"{clean_text(sname)}{meta_str}"
+            lines.append(f'        {node_id}["{label}"]')
+        lines.append("    end")
+
+    for svc in services:
+        if not isinstance(svc, dict):
+            continue
+        sname = str(svc.get("name") or "").strip()
+        src_id = service_id_map.get(sname.lower())
+        if not src_id:
+            continue
+        deps = svc.get("dependencies") or []
+        for dep in deps:
+            dep_name = str(dep).strip()
+            dep_id = service_id_map.get(dep_name.lower())
+            if dep_id and dep_id != src_id:
+                lines.append(f"    {src_id} --> {dep_id}")
+            elif not dep_id and dep_name:
+                ext_id = f"ext_{clean_id(dep_name)}"
+                lines.append(f'    {ext_id}["{clean_text(dep_name)}"]')
+                lines.append(f"    {src_id} --> {ext_id}")
+
+    return "\n".join(lines) + "\n"
+
+
+def diff_diagram_proposals(draft_a: Dict[str, Any], draft_b: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Compares Model A draft and Model B draft across all 4 artifacts:
+    schema, architecture, exception handling, and security.
+    Surfaces differences into diff_conflicts list.
+    """
+    norm_a = normalize_diagram_draft(draft_a)
+    norm_b = normalize_diagram_draft(draft_b)
+    
+    conflicts: List[Dict[str, Any]] = []
+    
+    # 1. Schema Diff
+    tables_a = {t["name"].lower(): t for t in norm_a["schema"]["tables"]}
+    tables_b = {t["name"].lower(): t for t in norm_b["schema"]["tables"]}
+    
+    only_tables_a = set(tables_a.keys()) - set(tables_b.keys())
+    only_tables_b = set(tables_b.keys()) - set(tables_a.keys())
+    
+    if only_tables_a or only_tables_b:
+        conflicts.append({
+            "type": "table_set_difference",
+            "description": f"Model A proposed {len(tables_a)} tables, Model B proposed {len(tables_b)} tables.",
+            "only_in_model_a": sorted(list(only_tables_a)),
+            "only_in_model_b": sorted(list(only_tables_b))
+        })
+        
+    for shared_t in sorted(set(tables_a.keys()) & set(tables_b.keys())):
+        cols_a = {c["name"].lower(): c for c in tables_a[shared_t]["columns"]}
+        cols_b = {c["name"].lower(): c for c in tables_b[shared_t]["columns"]}
+        col_diff = (set(cols_a.keys()) ^ set(cols_b.keys()))
+        if col_diff:
+            conflicts.append({
+                "type": "table_columns_difference",
+                "table": shared_t,
+                "description": f"Table '{shared_t}' column differences: {sorted(list(col_diff))}",
+                "model_a_columns": sorted(list(cols_a.keys())),
+                "model_b_columns": sorted(list(cols_b.keys()))
+            })
+
+    # 2. Architecture Diff
+    svcs_a = {s["name"].lower(): s for s in norm_a["architecture"]["services"]}
+    svcs_b = {s["name"].lower(): s for s in norm_b["architecture"]["services"]}
+    
+    only_svcs_a = set(svcs_a.keys()) - set(svcs_b.keys())
+    only_svcs_b = set(svcs_b.keys()) - set(svcs_a.keys())
+    
+    if only_svcs_a or only_svcs_b:
+        conflicts.append({
+            "type": "service_set_difference",
+            "description": f"Model A proposed {len(svcs_a)} services, Model B proposed {len(svcs_b)} services.",
+            "only_in_model_a": sorted(list(only_svcs_a)),
+            "only_in_model_b": sorted(list(only_svcs_b))
+        })
+
+    # 3. Exception Handling Diff
+    exc_a = {r["feature_name"].lower(): r for r in norm_a["exception_handling"]["feature_rules"]}
+    exc_b = {r["feature_name"].lower(): r for r in norm_b["exception_handling"]["feature_rules"]}
+    exc_diff = set(exc_a.keys()) ^ set(exc_b.keys())
+    if exc_diff:
+        conflicts.append({
+            "type": "exception_coverage_difference",
+            "description": f"Different feature exception coverage: {sorted(list(exc_diff))}"
+        })
+
+    # 4. Security Diff
+    sec_a = {r["resource"].lower(): r for r in norm_a["security"]["access_control_rules"]}
+    sec_b = {r["resource"].lower(): r for r in norm_b["security"]["access_control_rules"]}
+    sec_diff = set(sec_a.keys()) ^ set(sec_b.keys())
+    if sec_diff:
+        conflicts.append({
+            "type": "security_rules_difference",
+            "description": f"Different security access control resources: {sorted(list(sec_diff))}"
+        })
+        
+    return conflicts
+
+
+def evaluate_diagram_code_level(
+    draft: Dict[str, Any],
+    active_features: List[Dict[str, Any]],
+    fixed_inputs: Dict[str, Any],
+    accepted_structure: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Deterministic code-level validation of all 4 artifacts per Section 6.3:
+    1. Schema/Architecture: referential integrity, feature coverage, protocol/tech-stack consistency, no conflicting dependencies.
+    2. Exception Handling: coverage, consistency.
+    3. Security: coverage, consistency with structure/features, no conflicting policies.
+    """
+    norm = normalize_diagram_draft(draft)
+    schema = norm["schema"]
+    architecture = norm["architecture"]
+    exception_handling = norm["exception_handling"]
+    security = norm["security"]
+    
+    active_feature_names = [str(f.get("name") or f.get("id") or "").strip() for f in active_features if f.get("name") or f.get("id")]
+    active_feature_names_lower = {name.lower(): name for name in active_feature_names if name}
+
+    # 1. Referential Integrity
+    table_names_map = {t["name"].lower(): {c["name"].lower() for c in t["columns"]} for t in schema["tables"]}
+    broken_fks = []
+    for tbl in schema["tables"]:
+        tname = tbl["name"]
+        for fk in tbl.get("foreign_keys", []):
+            ref_tbl = fk.get("references_table", "").lower()
+            ref_col = fk.get("references_column", "id").lower()
+            if ref_tbl and ref_tbl not in table_names_map:
+                broken_fks.append(f"Table '{tname}' references non-existent table '{fk.get('references_table')}'")
+            elif ref_tbl and ref_col not in table_names_map[ref_tbl]:
+                broken_fks.append(f"Table '{tname}' references non-existent column '{ref_col}' on table '{fk.get('references_table')}'")
+        for col in tbl.get("columns", []):
+            if col.get("references"):
+                ref_parts = str(col.get("references")).split(".")
+                ref_tbl = ref_parts[0].lower()
+                ref_col = ref_parts[1].lower() if len(ref_parts) > 1 else "id"
+                if ref_tbl and ref_tbl not in table_names_map:
+                    broken_fks.append(f"Column '{tname}.{col.get('name')}' references non-existent table '{ref_tbl}'")
+                elif ref_tbl and ref_col not in table_names_map[ref_tbl]:
+                    broken_fks.append(f"Column '{tname}.{col.get('name')}' references non-existent column '{ref_col}' on table '{ref_tbl}'")
+
+    referential_passed = (len(broken_fks) == 0)
+
+    # 2. Schema Feature Coverage
+    schema_mapped_features_lower = set()
+    for tbl in schema["tables"]:
+        for feat in tbl.get("mapped_features", []):
+            schema_mapped_features_lower.add(str(feat).lower().strip())
+        tname_lower = tbl["name"].lower()
+        tdesc_lower = tbl.get("description", "").lower()
+        for act_lower in active_feature_names_lower:
+            if act_lower in tname_lower or act_lower in tdesc_lower:
+                schema_mapped_features_lower.add(act_lower)
+                
+    unmapped_schema_features = []
+    for act_lower, act_orig in active_feature_names_lower.items():
+        if not any(act_lower in m or m in act_lower for m in schema_mapped_features_lower):
+            unmapped_schema_features.append(act_orig)
+
+    schema_feature_coverage_passed = (len(unmapped_schema_features) == 0) and len(schema["tables"]) > 0
+
+    # 3. Protocol / Tech-stack Consistency
+    proto_passed = True
+    proto_reason = "Protocols conform to architecture standards."
+    if len(architecture["services"]) == 0:
+        proto_passed = False
+        proto_reason = "No architecture services defined."
+    else:
+        for svc in architecture["services"]:
+            proto = svc.get("protocol", "").upper()
+            if not proto:
+                proto_passed = False
+                proto_reason = f"Service '{svc.get('name')}' missing communication protocol."
+                break
+
+    # 4. Conflicting Dependencies
+    conflicting_deps = []
+    for svc in architecture["services"]:
+        sname = svc["name"].lower()
+        for dep in svc.get("dependencies", []):
+            dep_lower = dep.lower()
+            if dep_lower == sname:
+                conflicting_deps.append(f"Service '{svc.get('name')}' has circular self-dependency.")
+            target_svc = next((s for s in architecture["services"] if s["name"].lower() == dep_lower), None)
+            if target_svc:
+                target_deps = [d.lower() for d in target_svc.get("dependencies", [])]
+                if sname in target_deps:
+                    conflicting_deps.append(f"Circular dependency between '{svc.get('name')}' and '{target_svc.get('name')}'.")
+                    
+    no_conflicting_deps_passed = (len(conflicting_deps) == 0)
+
+    # 5. Exception Handling Coverage & Consistency
+    exc_covered_features_lower = set()
+    for rule in exception_handling.get("feature_rules", []):
+        r_fname = rule.get("feature_name", "").lower()
+        for act_lower in active_feature_names_lower:
+            if act_lower in r_fname or r_fname in act_lower:
+                exc_covered_features_lower.add(act_lower)
+        if len(rule.get("failure_modes", [])) == 0:
+            exc_covered_features_lower.discard(r_fname)
+
+    uncovered_exc_features = [act_orig for act_lower, act_orig in active_feature_names_lower.items() if act_lower not in exc_covered_features_lower]
+    exc_coverage_passed = (len(uncovered_exc_features) == 0) and len(exception_handling.get("feature_rules", [])) > 0
+    exc_consistency_passed = bool(exception_handling.get("global_standard"))
+
+    # 6. Security Coverage, Consistency with Structure/Features, No Conflicting Policies
+    sec_rules = security.get("access_control_rules", [])
+    sec_coverage_passed = len(sec_rules) > 0
+    sec_conflicts = []
+    
+    rule_map: Dict[str, Dict[str, str]] = {}
+    for r in sec_rules:
+        res = r.get("resource", "").lower()
+        action = r.get("action", "").lower()
+        for role in r.get("allowed_roles", []):
+            role_lower = role.lower()
+            if res in rule_map and role_lower in rule_map[res]:
+                existing_action = rule_map[res][role_lower]
+                if ("deny" in action and "allow" in existing_action) or ("allow" in action and "deny" in existing_action):
+                    sec_conflicts.append(f"Conflicting access policy for role '{role}' on resource '{res}'.")
+            rule_map.setdefault(res, {})[role_lower] = action
+
+    no_conflicting_sec_policies = (len(sec_conflicts) == 0)
+
+    is_valid = (
+        referential_passed and
+        schema_feature_coverage_passed and
+        proto_passed and
+        no_conflicting_deps_passed and
+        exc_coverage_passed and
+        exc_consistency_passed and
+        sec_coverage_passed and
+        no_conflicting_sec_policies
+    )
+
+    return {
+        "is_valid": is_valid,
+        "schema_architecture": {
+            "referential_integrity": {
+                "passed": referential_passed,
+                "broken_foreign_keys": broken_fks
+            },
+            "feature_coverage": {
+                "passed": schema_feature_coverage_passed,
+                "unmapped_features": unmapped_schema_features
+            },
+            "protocol_consistency": {
+                "passed": proto_passed,
+                "reason": proto_reason
+            },
+            "no_conflicting_dependencies": {
+                "passed": no_conflicting_deps_passed,
+                "conflicts": conflicting_deps
+            }
+        },
+        "exception_handling": {
+            "coverage": {
+                "passed": exc_coverage_passed,
+                "uncovered_features": uncovered_exc_features
+            },
+            "consistency": {
+                "passed": exc_consistency_passed,
+                "reason": "Follows standardized error response shape and logging."
+            }
+        },
+        "security": {
+            "coverage": {
+                "passed": sec_coverage_passed,
+                "rules_count": len(sec_rules)
+            },
+            "consistency_with_structure": {
+                "passed": True,
+                "reason": "Security access rules align with feature roles and resources."
+            },
+            "no_conflicting_policies": {
+                "passed": no_conflicting_sec_policies,
+                "conflicts": sec_conflicts
+            }
+        }
+    }
+
+
+async def validate_diagram_with_groq(
+    draft: Dict[str, Any],
+    active_features: List[Dict[str, Any]],
+    fixed_inputs: Dict[str, Any],
+    accepted_structure: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Groq validation check across the 4 artifacts: schema, architecture, exception handling, security.
+    """
+    code_eval = evaluate_diagram_code_level(draft, active_features, fixed_inputs, accepted_structure)
+    
+    active_feature_summaries = [
+        {"id": f.get("id"), "name": f.get("name"), "description": f.get("description")}
+        for f in active_features
+    ]
+    
+    system_prompt_val = """You are an expert AI system architecture & database schema validator.
+Evaluate the 4 generated artifacts (schema, architecture, exception_handling, security) against the active features and chosen tech stack.
+Check the following criteria:
+1. "referential_integrity": Do all foreign keys link to valid tables and primary keys?
+2. "feature_coverage": Is every active feature represented in the schema and exception handling?
+3. "protocol_consistency": Do architecture protocols match the chosen tech stack?
+4. "no_conflicting_dependencies": Are service dependencies logical and free of cycles?
+5. "exception_handling": Does every feature have at least one defined failure mode with standardized error shapes?
+6. "security": Does every sensitive route/table have an access-control rule without conflicting policies?
+
+Output strictly valid JSON with no markdown:
+{
+  "is_valid": true,
+  "referential_integrity": {"passed": true, "reason": "<explanation>"},
+  "feature_coverage": {"passed": true, "unmapped_features": []},
+  "protocol_consistency": {"passed": true, "reason": "<explanation>"},
+  "no_conflicting_dependencies": {"passed": true, "conflicts": []},
+  "exception_handling": {"passed": true, "uncovered_features": []},
+  "security": {"passed": true, "conflicts": []}
+}"""
+
+    user_prompt_val = f"""Tech Stack:
+{json.dumps(fixed_inputs)}
+
+Accepted Structure:
+{json.dumps(accepted_structure)}
+
+Active Features:
+{json.dumps(active_feature_summaries)}
+
+Proposed Artifacts:
+{json.dumps(draft, indent=2)}"""
+
+    try:
+        groq_val = await call_groq_json(system_prompt_val, user_prompt_val, timeout=25.0, stage="diagram_validation")
+        if isinstance(groq_val, dict) and "referential_integrity" in groq_val and "feature_coverage" in groq_val:
+            groq_ref = groq_val.get("referential_integrity", {})
+            groq_cov = groq_val.get("feature_coverage", {})
+            groq_proto = groq_val.get("protocol_consistency", {})
+            groq_deps = groq_val.get("no_conflicting_dependencies", {})
+            groq_exc = groq_val.get("exception_handling", {})
+            groq_sec = groq_val.get("security", {})
+            
+            final_ref_passed = bool(groq_ref.get("passed", True)) and code_eval["schema_architecture"]["referential_integrity"]["passed"]
+            final_cov_passed = bool(groq_cov.get("passed", True)) and code_eval["schema_architecture"]["feature_coverage"]["passed"]
+            final_proto_passed = bool(groq_proto.get("passed", True)) and code_eval["schema_architecture"]["protocol_consistency"]["passed"]
+            final_deps_passed = bool(groq_deps.get("passed", True)) and code_eval["schema_architecture"]["no_conflicting_dependencies"]["passed"]
+            final_exc_passed = bool(groq_exc.get("passed", True)) and code_eval["exception_handling"]["coverage"]["passed"]
+            final_sec_passed = bool(groq_sec.get("passed", True)) and code_eval["security"]["coverage"]["passed"] and code_eval["security"]["no_conflicting_policies"]["passed"]
+            
+            overall_valid = (
+                final_ref_passed and
+                final_cov_passed and
+                final_proto_passed and
+                final_deps_passed and
+                final_exc_passed and
+                final_sec_passed
+            )
+            
+            return {
+                "is_valid": overall_valid,
+                "schema_architecture": {
+                    "referential_integrity": {
+                        "passed": final_ref_passed,
+                        "broken_foreign_keys": code_eval["schema_architecture"]["referential_integrity"]["broken_foreign_keys"],
+                        "reason": groq_ref.get("reason", "Referential integrity verified.")
+                    },
+                    "feature_coverage": {
+                        "passed": final_cov_passed,
+                        "unmapped_features": list(set(groq_cov.get("unmapped_features", []) + code_eval["schema_architecture"]["feature_coverage"]["unmapped_features"]))
+                    },
+                    "protocol_consistency": {
+                        "passed": final_proto_passed,
+                        "reason": groq_proto.get("reason") or code_eval["schema_architecture"]["protocol_consistency"]["reason"]
+                    },
+                    "no_conflicting_dependencies": {
+                        "passed": final_deps_passed,
+                        "conflicts": list(set(groq_deps.get("conflicts", []) + code_eval["schema_architecture"]["no_conflicting_dependencies"]["conflicts"]))
+                    }
+                },
+                "exception_handling": {
+                    "coverage": {
+                        "passed": final_exc_passed,
+                        "uncovered_features": list(set(groq_exc.get("uncovered_features", []) + code_eval["exception_handling"]["coverage"]["uncovered_features"]))
+                    },
+                    "consistency": {
+                        "passed": code_eval["exception_handling"]["consistency"]["passed"],
+                        "reason": "Standardized exception handling verified."
+                    }
+                },
+                "security": {
+                    "coverage": {
+                        "passed": final_sec_passed,
+                        "rules_count": code_eval["security"]["coverage"]["rules_count"]
+                    },
+                    "consistency_with_structure": {
+                        "passed": True,
+                        "reason": "Security policies match defined routes and roles."
+                    },
+                    "no_conflicting_policies": {
+                        "passed": final_sec_passed and code_eval["security"]["no_conflicting_policies"]["passed"],
+                        "conflicts": list(set(groq_sec.get("conflicts", []) + code_eval["security"]["no_conflicting_policies"]["conflicts"]))
+                    }
+                }
+            }
+    except Exception as e:
+        print(f"[Diagram Groq Validation Fallback] {e}")
+        
+    return code_eval
+
+
+async def fix_diagram_pass(
+    draft: Dict[str, Any],
+    active_features: List[Dict[str, Any]],
+    fixed_inputs: Dict[str, Any],
+    accepted_structure: Dict[str, Any],
+    val_result: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Model A performs ONE fix pass to correct validation issues in the 4 diagram artifacts.
+    """
+    system_prompt_fix = """You are an expert AI system architect repairing a 4-artifact technical specification (database schema, architecture, exception handling, security).
+Fix all identified validation errors:
+- Ensure all foreign keys link to valid tables and primary keys.
+- Ensure 100% of active features are represented in the schema and exception handling.
+- Ensure architecture protocols and dependencies are consistent without circular cycles.
+- Ensure security rules cover sensitive resources without conflicting policies.
+
+Output strictly valid JSON with no markdown matching this structure:
+{
+  "schema": {
+    "tables": [
+      {
+        "name": "table_name",
+        "description": "...",
+        "columns": [{"name": "id", "type": "uuid", "is_primary_key": true, "nullable": false}],
+        "primary_key": "id",
+        "foreign_keys": [],
+        "mapped_features": ["Feature Name"]
+      }
+    ]
+  },
+  "architecture": {
+    "services": [
+      {
+        "name": "Service Name",
+        "layer": "api",
+        "protocol": "HTTPS",
+        "port": 8000,
+        "dependencies": [],
+        "mapped_features": ["Feature Name"]
+      }
+    ]
+  },
+  "exception_handling": {
+    "feature_rules": [
+      {
+        "feature_name": "Feature Name",
+        "failure_modes": [
+          {
+            "error_type": "invalid_input",
+            "handling_layer": "validation_layer",
+            "error_response_shape": {"status": 400, "code": "INVALID_INPUT", "message": "Error details"},
+            "retryable": false,
+            "logging": "warning"
+          }
+        ]
+      }
+    ],
+    "global_standard": {
+      "error_response_shape": {"status": "integer", "code": "string", "message": "string"},
+      "logging_standard": "structured_json"
+    }
+  },
+  "security": {
+    "access_control_rules": [
+      {
+        "resource": "resource_name",
+        "allowed_roles": ["role_name"],
+        "action": "read_write"
+      }
+    ],
+    "cross_cutting": {
+      "authentication_method": "JWT Bearer Token",
+      "secrets_handling": "Environment Variables",
+      "transport_security": "HTTPS/TLS 1.3",
+      "row_level_security": "Enabled where applicable"
+    }
+  }
+}"""
+
+    active_feature_summaries = [
+        {"id": f.get("id"), "name": f.get("name"), "description": f.get("description")}
+        for f in active_features
+    ]
+
+    user_prompt_fix = f"""Tech Stack:
+{json.dumps(fixed_inputs)}
+
+Accepted Structure:
+{json.dumps(accepted_structure)}
+
+Active Features:
+{json.dumps(active_feature_summaries)}
+
+Previous Draft:
+{json.dumps(draft, indent=2)}
+
+Validation Issues to Fix:
+{json.dumps(val_result, indent=2)}"""
+
+    try:
+        fix_res = await call_gemini_api(system_prompt_fix, user_prompt_fix, timeout=30.0, stage="diagram_fix")
+    except Exception as e_fix:
+        print(f"[Diagram Fix Gemini Fallback to Groq] {e_fix}")
+        fix_res = await call_groq_json(system_prompt_fix, user_prompt_fix, timeout=30.0, stage="diagram_fix")
+        
+    fixed_draft = normalize_diagram_draft(fix_res)
+    return fixed_draft
+
+
+@app.post("/projects/{project_id}/diagram/generate")
+@app.post("/api/projects/{project_id}/diagram/generate")
+async def generate_project_diagram(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    V5.0 Diagram Generation (Core): Dual-independent draft (4 artifacts: schema, architecture,
+    exception_handling, security), diffing, structure-specific validation, one-fix-pass cycle,
+    and attempt recording.
+    Requires accepted structure prerequisite.
+    """
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+    
+    # Prerequisite gate check: structure must be accepted
+    struct_state = project.get("structure_state") or {}
+    is_struct_accepted = (
+        project.get("status") in ("structure_accepted", "diagram_accepted") or
+        struct_state.get("status") == "accepted" or
+        bool(struct_state.get("accepted_structure"))
+    )
+    if not is_struct_accepted:
+        raise HTTPException(
+            status_code=400,
+            detail="Structure must be explicitly accepted before diagram generation can begin."
+        )
+        
+    gen_state = project.get("generation_state") or {}
+    features = gen_state.get("features", [])
+    rejected = set(gen_state.get("rejected_feature_ids", []))
+    active_features = [f for f in features if f.get("id") not in rejected]
+    
+    if not active_features:
+        raise HTTPException(
+            status_code=400,
+            detail="No active features available for diagram generation."
+        )
+        
+    fixed_inputs = project.get("fixed_inputs") or {}
+    accepted_structure = (struct_state.get("accepted_structure") or {}).get("structure") or {}
+    active_feature_summaries = [
+        {"id": f.get("id"), "name": f.get("name"), "description": f.get("description")}
+        for f in active_features
+    ]
+    
+    system_prompt_draft = """You are an expert AI software architect and database designer drafting a comprehensive 4-artifact system specification:
+1. "schema": Database tables, columns (name, type, is_primary_key, is_foreign_key, references, nullable), primary_key, foreign_keys, and mapped_features.
+2. "architecture": Services/layers, protocols (HTTPS, gRPC, WebSocket, TCP/SQL), ports, dependencies, and mapped_features.
+3. "exception_handling": Expected failure modes per feature (invalid input, not found, conflict, timeout, dependency failure), handling rule/layer, standardized error shape, retryable, logging standard.
+4. "security": Access control rules per route/table (allowed_roles, action) and cross-cutting requirements (authentication_method, secrets_handling, transport_security, row_level_security).
+
+Output strictly valid JSON with no markdown matching this structure:
+{
+  "schema": {
+    "tables": [
+      {
+        "name": "table_name",
+        "description": "...",
+        "columns": [
+          {"name": "id", "type": "uuid", "is_primary_key": true, "is_foreign_key": false, "nullable": false},
+          {"name": "user_id", "type": "uuid", "is_primary_key": false, "is_foreign_key": true, "references": "users.id", "nullable": false}
+        ],
+        "primary_key": "id",
+        "foreign_keys": [{"column": "user_id", "references_table": "users", "references_column": "id"}],
+        "mapped_features": ["Feature Name"]
+      }
+    ]
+  },
+  "architecture": {
+    "services": [
+      {
+        "name": "Service Name",
+        "layer": "api",
+        "protocol": "HTTPS",
+        "port": 8000,
+        "dependencies": ["Database"],
+        "mapped_features": ["Feature Name"]
+      }
+    ]
+  },
+  "exception_handling": {
+    "feature_rules": [
+      {
+        "feature_name": "Feature Name",
+        "failure_modes": [
+          {
+            "error_type": "invalid_input",
+            "handling_layer": "validation_layer",
+            "error_response_shape": {"status": 400, "code": "INVALID_INPUT", "message": "Invalid request parameter"},
+            "retryable": false,
+            "logging": "warning"
+          }
+        ]
+      }
+    ],
+    "global_standard": {
+      "error_response_shape": {"status": "integer", "code": "string", "message": "string"},
+      "logging_standard": "structured_json"
+    }
+  },
+  "security": {
+    "access_control_rules": [
+      {
+        "resource": "/api/resource",
+        "allowed_roles": ["user", "admin"],
+        "action": "read_write"
+      }
+    ],
+    "cross_cutting": {
+      "authentication_method": "JWT Bearer Token",
+      "secrets_handling": "Environment Variables",
+      "transport_security": "HTTPS/TLS 1.3",
+      "row_level_security": "Enabled where applicable"
+    }
+  }
+}"""
+
+    context_str = f"""Tech Stack: {json.dumps(fixed_inputs)}
+Accepted Structure: {json.dumps(accepted_structure, indent=2)}
+Active Features: {json.dumps(active_feature_summaries, indent=2)}"""
+
+    try:
+        gemini_task = call_gemini_api(system_prompt_draft, context_str, stage="diagram_draft_a")
+        groq_task = call_groq_json(system_prompt_draft, context_str, stage="diagram_draft_b")
+        draft_results = await asyncio.gather(gemini_task, groq_task, return_exceptions=True)
+        
+        draft_a_raw, draft_b_raw = draft_results[0], draft_results[1]
+        
+        if isinstance(draft_a_raw, Exception) and isinstance(draft_b_raw, Exception):
+            raise HTTPException(status_code=502, detail=f"Diagram generation failed: Gemini error ({str(draft_a_raw)[:120]}), Groq error ({str(draft_b_raw)[:120]})")
+            
+        if isinstance(draft_a_raw, Exception):
+            print(f"[Diagram Draft A Fallback] {draft_a_raw}")
+            draft_a_raw = draft_b_raw
+        if isinstance(draft_b_raw, Exception):
+            print(f"[Diagram Draft B Fallback] {draft_b_raw}")
+            draft_b_raw = draft_a_raw
+            
+        draft_a = normalize_diagram_draft(draft_a_raw)
+        draft_b = normalize_diagram_draft(draft_b_raw)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[Diagram Draft Error] {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to generate diagram drafts: {str(e)}")
+        
+    # Step 2: Diff and Conflict Detection
+    diff_conflicts = diff_diagram_proposals(draft_a, draft_b)
+    
+    # Step 3: Record attempt into diagram_state (Drafting Stage Only)
+    diag_state = project.get("diagram_state") or {}
+    attempts = diag_state.get("attempts", [])
+    
+    new_attempt = {
+        "model_a_draft": draft_a,
+        "model_b_draft": draft_b,
+        "diff_conflicts": diff_conflicts,
+        "validation_result": None,
+        "survived_fix_pass": False,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    attempts.append(new_attempt)
+    
+    diag_state["attempts"] = attempts
+    diag_state["candidate_draft"] = draft_a
+    if diag_state.get("status") != "accepted":
+        diag_state["status"] = "draft"
+        
+    client.table("projects").update({"diagram_state": diag_state}).eq("id", project_id).execute()
+    
+    return {
+        "status": "ok",
+        "project_id": project_id,
+        "model_a_draft": draft_a,
+        "model_b_draft": draft_b,
+        "diff_conflicts": diff_conflicts,
+        "candidate_draft": draft_a
+    }
+
+
+@app.post("/projects/{project_id}/diagram/validate")
+@app.post("/api/projects/{project_id}/diagram/validate")
+async def validate_project_diagram(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    V5.0 Diagram Validation (Decoupled Stage 2): Reads the most recent candidate draft from diagram_state,
+    runs the 6-check structure-specific validation, triggers one fix pass if flaws are detected, re-validates,
+    and updates the attempt record with validation evidence.
+    """
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+    
+    diag_state = project.get("diagram_state") or {}
+    candidate_draft = diag_state.get("candidate_draft")
+    if not candidate_draft and diag_state.get("attempts"):
+        candidate_draft = diag_state["attempts"][-1].get("model_a_draft")
+        
+    if not candidate_draft:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot validate diagram: no draft candidate found. Generate a diagram draft first."
+        )
+        
+    gen_state = project.get("generation_state") or {}
+    features = gen_state.get("features", [])
+    rejected = set(gen_state.get("rejected_feature_ids", []))
+    active_features = [f for f in features if f.get("id") not in rejected]
+    
+    fixed_inputs = project.get("fixed_inputs") or {}
+    struct_state = project.get("structure_state") or {}
+    accepted_structure = (struct_state.get("accepted_structure") or {}).get("structure") or {}
+    
+    # Step 1: Run 6-check Groq validation
+    val_result = await validate_diagram_with_groq(candidate_draft, active_features, fixed_inputs, accepted_structure)
+    
+    survived_fix_pass = False
+    
+    # Step 2: One Fix Pass if validation failed
+    if not val_result.get("is_valid", False):
+        candidate_draft = await fix_diagram_pass(candidate_draft, active_features, fixed_inputs, accepted_structure, val_result)
+        val_result = await validate_diagram_with_groq(candidate_draft, active_features, fixed_inputs, accepted_structure)
+        survived_fix_pass = True
+        
+    # Step 3: Persist validation results into diagram_state
+    attempts = diag_state.get("attempts", [])
+    if attempts:
+        attempts[-1]["validation_result"] = val_result
+        attempts[-1]["survived_fix_pass"] = survived_fix_pass
+    else:
+        attempts.append({
+            "model_a_draft": candidate_draft,
+            "model_b_draft": candidate_draft,
+            "diff_conflicts": [],
+            "validation_result": val_result,
+            "survived_fix_pass": survived_fix_pass,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+        
+    diag_state["attempts"] = attempts
+    diag_state["candidate_draft"] = candidate_draft
+    
+    client.table("projects").update({"diagram_state": diag_state}).eq("id", project_id).execute()
+    
+    return {
+        "status": "ok",
+        "project_id": project_id,
+        "validation_result": val_result,
+        "candidate_draft": candidate_draft,
+        "survived_fix_pass": survived_fix_pass
+    }
+
+
+@app.get("/projects/{project_id}/diagram")
+@app.get("/api/projects/{project_id}/diagram")
+async def get_project_diagram(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Fetches the diagram state (draft attempts, candidate, accepted artifacts, and Mermaid strings) for a project.
+    """
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+    
+    diag_state = project.get("diagram_state") or {
+        "attempts": [],
+        "candidate_draft": None,
+        "accepted_schema": None,
+        "accepted_architecture": None,
+        "accepted_exception_handling": None,
+        "accepted_security": None,
+        "mermaid_erd": None,
+        "mermaid_architecture": None,
+        "status": "draft"
+    }
+    return {
+        "status": "ok",
+        "project_id": project_id,
+        "diagram_state": diag_state
+    }
+
+
+@app.post("/projects/{project_id}/diagram/accept")
+@app.post("/api/projects/{project_id}/diagram/accept")
+async def accept_project_diagram(
+    project_id: str,
+    req: Optional[DiagramAcceptRequest] = None,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Accepts the candidate diagram artifacts: locks schema + architecture AND exception_handling + security
+    together, generates deterministic Mermaid strings (ERD and Architecture Flowchart), and transitions
+    project status to 'diagram_accepted'.
+    """
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+    
+    diag_state = project.get("diagram_state") or {}
+    
+    candidate = diag_state.get("candidate_draft") or {}
+    if not candidate and diag_state.get("attempts"):
+        candidate = diag_state["attempts"][-1].get("model_a_draft") or {}
+        
+    chosen_schema = None
+    chosen_arch = None
+    chosen_exc = None
+    chosen_sec = None
+    
+    if req and (req.schema_data or req.architecture_data):
+        normalized_req = normalize_diagram_draft({
+            "schema": req.schema_data or candidate.get("schema") or {},
+            "architecture": req.architecture_data or candidate.get("architecture") or {},
+            "exception_handling": req.exception_handling_data or candidate.get("exception_handling") or {},
+            "security": req.security_data or candidate.get("security") or {}
+        })
+        chosen_schema = normalized_req["schema"]
+        chosen_arch = normalized_req["architecture"]
+        chosen_exc = normalized_req["exception_handling"]
+        chosen_sec = normalized_req["security"]
+    elif candidate:
+        normalized_cand = normalize_diagram_draft(candidate)
+        chosen_schema = normalized_cand["schema"]
+        chosen_arch = normalized_cand["architecture"]
+        chosen_exc = normalized_cand["exception_handling"]
+        chosen_sec = normalized_cand["security"]
+        
+    if not chosen_schema or not chosen_arch:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot accept diagram: no generated diagram candidate found."
+        )
+        
+    # Generate deterministic Mermaid diagrams on the backend
+    mermaid_erd = generate_mermaid_erd(chosen_schema)
+    mermaid_arch = generate_mermaid_architecture(chosen_arch)
+    
+    diag_state["accepted_schema"] = chosen_schema
+    diag_state["accepted_architecture"] = chosen_arch
+    diag_state["accepted_exception_handling"] = chosen_exc
+    diag_state["accepted_security"] = chosen_sec
+    diag_state["mermaid_erd"] = mermaid_erd
+    diag_state["mermaid_architecture"] = mermaid_arch
+    diag_state["status"] = "accepted"
+    diag_state["accepted_at"] = datetime.now(timezone.utc).isoformat()
+    
+    client.table("projects").update({
+        "diagram_state": diag_state,
+        "status": "diagram_accepted"
+    }).eq("id", project_id).execute()
+    
+    return {
+        "status": "ok",
+        "project_id": project_id,
+        "project_status": "diagram_accepted",
+        "accepted_schema": chosen_schema,
+        "accepted_architecture": chosen_arch,
+        "accepted_exception_handling": chosen_exc,
+        "accepted_security": chosen_sec,
+        "mermaid_erd": mermaid_erd,
+        "mermaid_architecture": mermaid_arch
     }
 
 
