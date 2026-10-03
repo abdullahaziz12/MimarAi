@@ -139,6 +139,14 @@ const initialMimarState = {
   diagramJsonGenerated: false,
   diagramJsonAccepted: false,
   diagramJsonComments: {},
+  diagramData: null,
+  diagramAttempts: [],
+  diagramDiffConflicts: [],
+  diagramValidationResult: null,
+  diagramSurvivedFixPass: false,
+  diagramGenerating: false,
+  mermaidErd: null,
+  mermaidArchitecture: null,
 
   workingDiagramJson: null,
   diagramRendered: false,
@@ -1980,9 +1988,75 @@ export const useMimarStore = create((set, get) => ({
     );
     s.showScreen("diagram");
     get().saveProjectState();
+    if (!get().diagramData && !get().diagramJsonGenerated) {
+      get().generateDiagram(sessionToken);
+    }
   },
 
-  acceptDiagramJson: async () => {
+  generateDiagram: async (sessionToken = null) => {
+    const s = get();
+    if (s.diagramGenerating || s.operationRunning) return;
+    if (!s.projectId) {
+      s.showToast("No active project ID found.");
+      return;
+    }
+
+    let backendUrl = "";
+    try {
+      backendUrl = getBackendApiUrl("").replace(/\/$/, "");
+    } catch (err) {
+      s.showToast("Backend not configured. Set NEXT_PUBLIC_BACKEND_URL before continuing.");
+      return;
+    }
+
+    set({
+      diagramGenerating: true,
+      operationRunning: true,
+      operationLabel: "Drafting Schema, Architecture, Exception & Security (Gemini + Groq)…",
+    });
+
+    const authHeaders = {
+      "Content-Type": "application/json",
+      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+    };
+
+    try {
+      const res = await fetch(`${backendUrl}/api/projects/${s.projectId}/diagram/generate`, {
+        method: "POST",
+        headers: authHeaders,
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || errData.message || "Failed to generate diagrams.");
+      }
+
+      const data = await res.json();
+      const cand = data.candidate_draft || data.model_a_draft || {};
+
+      set({
+        diagramData: cand,
+        diagramJsonGenerated: true,
+        diagramDiffConflicts: data.diff_conflicts || [],
+        diagramValidationResult: data.validation_result || null,
+        diagramSurvivedFixPass: Boolean(data.survived_fix_pass),
+        diagramGenerating: false,
+        operationRunning: false,
+      });
+
+      s.showToast("Schema & Architecture artifacts generated and validated successfully.");
+      get().saveProjectState();
+    } catch (err) {
+      console.error("Diagram generation error:", err);
+      set({
+        diagramGenerating: false,
+        operationRunning: false,
+      });
+      s.showToast(`Diagram generation failed: ${err.message}`);
+    }
+  },
+
+  acceptDiagramJson: async (sessionToken = null) => {
     const s = get();
     if (s.diagramJsonAccepted) return;
     const commentCount = Object.keys(s.diagramJsonComments).length;
@@ -1992,15 +2066,55 @@ export const useMimarStore = create((set, get) => ({
       );
       return;
     }
-    set({ operationRunning: true, operationLabel: "Rendering Blueprint…" });
-    await sleep(500);
+    set({ operationRunning: true, operationLabel: "Accepting & Rendering Blueprint…" });
+
+    let backendUrl = "";
+    try {
+      backendUrl = getBackendApiUrl("").replace(/\/$/, "");
+    } catch (err) {
+      // Offline fallback
+    }
+
+    let erdMermaid = null;
+    let archMermaid = null;
+
+    if (backendUrl && s.projectId) {
+      try {
+        const authHeaders = {
+          "Content-Type": "application/json",
+          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+        };
+        const res = await fetch(`${backendUrl}/api/projects/${s.projectId}/diagram/accept`, {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({
+            schema_data: s.diagramData?.schema || null,
+            architecture_data: s.diagramData?.architecture || null,
+            exception_handling_data: s.diagramData?.exception_handling || null,
+            security_data: s.diagramData?.security || null,
+          }),
+        });
+        if (res.ok) {
+          const accData = await res.json();
+          erdMermaid = accData.mermaid_erd;
+          archMermaid = accData.mermaid_architecture;
+        }
+      } catch (err) {
+        console.warn("Diagram accept backend sync warning:", err);
+      }
+    }
+
+    await sleep(400);
     set({
       diagramJsonAccepted: true,
       diagramRendered: true,
+      mermaidErd: erdMermaid,
+      mermaidArchitecture: archMermaid,
       operationRunning: false,
     });
-    s.showToast("Schema JSON accepted. Rendered blueprints on Step 05.");
+    s.showToast("Schema & Architecture JSON locked as accepted. Rendered blueprints on Step 05.");
     s.showScreen("render");
+    get().saveProjectState();
   },
 
   acceptRenderDiagram: async () => {
