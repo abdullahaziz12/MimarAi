@@ -386,7 +386,7 @@ async def check_provider_health():
     """Check provider reachability/model availability using minimal lightweight probes."""
     raw_gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     gemini_model = raw_gemini_model.replace("models/", "").strip()
-    groq_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
     async def check_gemini():
         api_key = os.getenv("GEMINI_API_KEY")
@@ -1060,7 +1060,7 @@ Output strictly valid JSON with no markdown formatting:
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+                    "model": os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": idea_text}
@@ -1295,9 +1295,9 @@ async def call_groq_json(
     if not groq_key:
         raise HTTPException(status_code=500, detail="Groq API unconfigured (GROQ_API_KEY missing).")
     
-    configured_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-    active_groq_models = ["llama-3.3-70b-versatile", "llama-3.1-70b-versatile", "mixtral-8x7b-32768", "gemma2-9b-it"]
-    candidate_models = [configured_model] if configured_model in active_groq_models else ["llama-3.3-70b-versatile"]
+    configured_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    active_groq_models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "allam-2-7b"]
+    candidate_models = [configured_model] if configured_model in active_groq_models else ["openai/gpt-oss-120b"]
     for m in active_groq_models:
         if m not in candidate_models:
             candidate_models.append(m)
@@ -1337,14 +1337,18 @@ async def call_groq_json(
                     
                     # Status-specific handling: decommissioned or non-existent model (skip to next candidate)
                     if resp.status_code in (400, 404) and any(k in resp.text.lower() for k in ("decommissioned", "not exist", "model_not_found", "no longer supported")):
-                        print(f"[Groq Model {model_name}] Model unavailable/decommissioned ({resp.text[:100]}) — skipping to next model")
+                        print(f"[Groq Model {model_name}] Model unavailable ({resp.text[:100]}) — skipping to next model")
                         break
 
-                    # Status-specific handling: 429 TPM rate limit (wait 2.0s before retry)
-                    if resp.status_code == 429 and attempt == 0:
-                        print(f"[Groq 429 Model {model_name}] TPM limit — waiting 2s before retry")
-                        await asyncio.sleep(2.0)
-                        continue
+                    # Status-specific handling: 429 TPM rate limit (wait 2.0s before retry, or rotate model on attempt 2)
+                    if resp.status_code == 429:
+                        if attempt == 0:
+                            print(f"[Groq 429 Model {model_name}] TPM limit — waiting 2s before retry")
+                            await asyncio.sleep(2.0)
+                            continue
+                        else:
+                            print(f"[Groq 429 Model {model_name}] TPM limit exhausted — rotating to next candidate model")
+                            break
                     
                     last_error = f"Status {resp.status_code}: {resp.text}"
                     print(f"[Groq API Error Model {model_name} Attempt {attempt+1}] {last_error}")
