@@ -1188,7 +1188,17 @@ async def call_gemini_api(
 ) -> Dict[str, Any]:
     gemini_key = os.getenv("GEMINI_API_KEY")
     if not gemini_key:
-        raise HTTPException(status_code=500, detail="Gemini API unconfigured (GEMINI_API_KEY missing).")
+        print("[Tracked Substitution] GEMINI_API_KEY unconfigured — substituting with Groq llama-versatile")
+        return await call_groq_json(
+            system_prompt,
+            user_prompt,
+            timeout=timeout,
+            retry_user_prompt=retry_user_prompt,
+            retry=retry,
+            stage=stage,
+            user_id=user_id,
+            project_id=project_id
+        )
     
     raw_configured_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
     configured_model = raw_configured_model.replace("models/", "").strip()
@@ -1258,7 +1268,17 @@ async def call_gemini_api(
 
     latency_ms = int((time.time() - start_time) * 1000)
     asyncio.create_task(log_ai_call("gemini", stage, False, latency_ms, user_id, project_id))
-    raise HTTPException(status_code=502, detail=f"Gemini API request failed: {last_error}")
+    print(f"[Gemini All Models Failed] {last_error} — falling back to Groq llama-versatile")
+    return await call_groq_json(
+        system_prompt,
+        user_prompt,
+        timeout=timeout,
+        retry_user_prompt=retry_user_prompt,
+        retry=retry,
+        stage=stage,
+        user_id=user_id,
+        project_id=project_id
+    )
 
 
 async def call_groq_json(
