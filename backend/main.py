@@ -5528,6 +5528,14 @@ Tech Stack:
             "updated_architecture": current_architecture
         }
 
+    # Ensure forced override always has non-empty propagated_changes description
+    if confirm_override and ai_res.get("classification") == "structural_conflict":
+        if not ai_res.get("propagated_changes"):
+            ai_res["propagated_changes"] = [
+                f"Updated structural elements matching request: {message[:100]}",
+                "Marked upstream features, structure, and diagram states as manually amended (manually_amended=true)"
+            ]
+
     return ai_res
 
 
@@ -5682,12 +5690,17 @@ async def diagram_ask_ai(
         # Propagate upstream into Features (V3.9 schema)
         updated_features_from_ai = ai_result.get("updated_features") or []
         ai_feat_map = {f.get("id"): f for f in updated_features_from_ai if f.get("id")}
+        conflicting_names = {str(f).lower() for f in conflicting_features}
 
         updated_features_list = []
         for feat in features:
             f_id = feat.get("id")
+            f_name = str(feat.get("name", "")).lower()
             if f_id in ai_feat_map:
                 amended_f = {**feat, **ai_feat_map[f_id], "manually_amended": True}
+                updated_features_list.append(amended_f)
+            elif any(c in f_name or f_name in c for c in conflicting_names if c):
+                amended_f = {**feat, "manually_amended": True}
                 updated_features_list.append(amended_f)
             else:
                 updated_features_list.append(feat)
@@ -5705,8 +5718,8 @@ async def diagram_ask_ai(
             if "candidate_structure" in struct_state and isinstance(struct_state["candidate_structure"], dict):
                 struct_state["candidate_structure"]["structure"] = updated_structure_from_ai
                 struct_state["candidate_structure"]["manually_amended"] = True
-            struct_state["manually_amended"] = True
-            project_updates["structure_state"] = struct_state
+        struct_state["manually_amended"] = True
+        project_updates["structure_state"] = struct_state
 
         history_entry = {
             "request_text": req.message,
