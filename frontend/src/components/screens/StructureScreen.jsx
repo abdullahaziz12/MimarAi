@@ -16,6 +16,7 @@ export default function StructureScreen() {
     structureSurvivedFixPass,
     rejectedFeatures,
     structureHasRefreshToken,
+    manuallyAmended,
     operationRunning,
     generateStructure,
     acceptStructure,
@@ -119,6 +120,25 @@ export default function StructureScreen() {
             <h2>Project Structure</h2>
             <div className="sub">
               <span id="structMeta">{treeData.totalFiles} FILES · {treeData.featuresMappedCount} FEATURES MAPPED</span>
+              {manuallyAmended && (
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '11px',
+                    fontWeight: '600',
+                    padding: '2px 8px',
+                    borderRadius: '12px',
+                    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                    color: '#10B981',
+                    border: '1px solid #10B981',
+                    marginLeft: '8px',
+                  }}
+                >
+                  ✓ Manually Amended
+                </span>
+              )}
               {structureAccepted && (
                 <span className="accepted-badge" id="structAcceptedBadge" style={{ display: 'inline-flex' }}>
                   <span className="ab-dot"></span>ACCEPTED &amp; LOCKED

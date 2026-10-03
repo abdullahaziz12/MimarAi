@@ -15,6 +15,7 @@ export default function DiagramScreen() {
     diagramValidationResult,
     diagramSurvivedFixPass,
     rejectedFeatures,
+    manuallyAmended,
     operationRunning,
     generateDiagram,
     acceptDiagramJson,
@@ -136,6 +137,25 @@ export default function DiagramScreen() {
             <h2>Schema &amp; Architecture JSON</h2>
             <div className="sub">
               <span id="diagramMeta">{tables.length} TABLES · {services.length} SERVICES</span>
+              {manuallyAmended && (
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '11px',
+                    fontWeight: '600',
+                    padding: '2px 8px',
+                    borderRadius: '12px',
+                    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                    color: '#10B981',
+                    border: '1px solid #10B981',
+                    marginLeft: '8px',
+                  }}
+                >
+                  ✓ Manually Amended
+                </span>
+              )}
               {diagramJsonAccepted && (
                 <span className="accepted-badge" id="diagramJsonAcceptedBadge" style={{ display: 'inline-flex' }}>
                   <span className="ab-dot"></span>ACCEPTED &amp; LOCKED

@@ -1,9 +1,11 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
-import { useMimarStore, classifyAskRequest, sleep } from '../../store/mimarStore';
+import { useMimarStore, sleep } from '../../store/mimarStore';
+import { useAuth } from '../../context/AuthContext';
 
 export default function RenderScreen() {
+  const { session } = useAuth();
   const {
     currentScreen,
     diagramAccepted,
@@ -15,6 +17,7 @@ export default function RenderScreen() {
     switchDiagramView,
     acceptRenderDiagram,
     setManuallyAmended,
+    askAiDiagram,
     showToast
   } = useMimarStore();
 
@@ -202,6 +205,8 @@ export default function RenderScreen() {
     `;
   };
 
+  const [pendingConflictMessage, setPendingConflictMessage] = useState(null);
+
   const handleAskSend = async () => {
     if (askRunningLocal) {
       if (askAbortCtrl) askAbortCtrl.abort();
@@ -214,7 +219,6 @@ export default function RenderScreen() {
     const controller = new AbortController();
     setAskAbortCtrl(controller);
     setAskRunningLocal(true);
-    useMimarStore.setState({ askAiRunning: true });
 
     setAskMessages(prev => [
       ...prev,
@@ -226,112 +230,100 @@ export default function RenderScreen() {
     const statusId = 'status-' + Date.now();
     setAskMessages(prev => [
       ...prev,
-      { id: statusId, role: 'status', text: 'Classifying request (Gemini + Groq)…' }
+      { id: statusId, role: 'status', text: 'Classifying & processing edit request (AI)…' }
     ]);
 
     try {
-      await sleep(650, controller.signal);
-      const kind = classifyAskRequest(text);
+      const result = await askAiDiagram(text, false, session?.access_token);
 
-      if (kind === 'cosmetic') {
-        setAskMessages(prev => prev.filter(m => m.id !== statusId).concat([
-          {
-            id: 'ai-cosmetic-' + Date.now(),
-            role: 'ai',
-            html: 'Applying cosmetic modification.<div class="classify-tag cosmetic">Cosmetic change</div>'
-          }
-        ]));
+      if (result && (result.status === "refused" || result.refused)) {
+        setPendingConflictMessage(text);
+        const reason = result.explanation || "This request introduces a structural conflict against locked specifications.";
+        const featList = (result.conflicting_features || []).map(f => `• Feature '${f.name || f.id}': ${f.reason}`).join('<br/>');
+        const structList = (result.conflicting_structure || []).map(s => `• File '${s.path}': ${s.reason}`).join('<br/>');
+        const conflictDetails = (featList || structList) ? `<div style="margin-top:8px;font-size:11px;color:#cbd5e1">${featList ? `<b>Conflicting Features:</b><br/>${featList}<br/>` : ''}${structList ? `<b>Conflicting Structure:</b><br/>${structList}` : ''}</div>` : '';
 
-        await sleep(600, controller.signal);
-
-        setAskMessages(prev => [
-          ...prev,
-          {
-            id: 'ai-done-' + Date.now(),
-            role: 'ai',
-            html: 'Updated working diagram JSON — Gemini modified and Groq validated. Re-rendered the blueprint canvas.'
-          }
-        ]);
-        showToast("Diagram re-rendered. Working JSON updated (not yet merged to Plan).");
-      } else {
-        // Structural conflict
         setAskMessages(prev => prev.filter(m => m.id !== statusId).concat([
           {
             id: 'ai-struct-' + Date.now(),
             role: 'ai',
             isStructuralConflict: true,
-            html: `This request introduces a <b>structural conflict</b> against an upstream locked feature or structure. It is refused by default to preserve project state integrity.<div class="classify-tag structural">Structural conflict</div>`
+            html: `<b>Structural Conflict Refused by Default:</b><br/>${reason}${conflictDetails}<div class="classify-tag structural">Structural conflict</div>`
+          }
+        ]));
+      } else if (result) {
+        setPendingConflictMessage(null);
+        setAskMessages(prev => prev.filter(m => m.id !== statusId).concat([
+          {
+            id: 'ai-cosmetic-' + Date.now(),
+            role: 'ai',
+            html: `${result.explanation || 'Applied cosmetic modification.'}<div class="classify-tag cosmetic">Cosmetic change</div>`
           }
         ]));
       }
     } catch (err) {
-      if (err.name === 'AbortError') {
-        setAskMessages(prev => prev.filter(m => m.id !== statusId).concat([
-          {
-            id: 'ai-stopped-' + Date.now(),
-            role: 'ai',
-            html: '<span style="color:var(--ink-muted)">AI generation stopped by user.</span>'
-          }
-        ]));
-        showToast("Ask AI generation stopped.");
-      }
+      setAskMessages(prev => prev.filter(m => m.id !== statusId).concat([
+        {
+          id: 'ai-err-' + Date.now(),
+          role: 'ai',
+          html: `<span style="color:#EF4444">Ask AI error: ${err.message || 'Failed to process request.'}</span>`
+        }
+      ]));
     } finally {
       setAskRunningLocal(false);
       setAskAbortCtrl(null);
-      useMimarStore.setState({ askAiRunning: false });
     }
   };
 
   const handleForceOverride = async () => {
-    if (askRunningLocal) return;
+    if (askRunningLocal || !pendingConflictMessage) return;
 
+    const messageToOverride = pendingConflictMessage;
     setAskMessages(prev => [
       ...prev,
-      { id: 'user-force-' + Date.now(), role: 'user', text: 'Yes, force override and propagate upstream.' }
+      { id: 'user-force-' + Date.now(), role: 'user', text: 'Yes, force override and propagate upstream into Features and Structure.' }
     ]);
 
     const statusId = 'status-force-' + Date.now();
     setAskMessages(prev => [
       ...prev,
-      { id: statusId, role: 'status', text: 'Propagating change into locked Feature & Structure JSON…' }
+      { id: statusId, role: 'status', text: 'Propagating changes upstream into locked Feature & Structure JSON…' }
     ]);
 
     const controller = new AbortController();
     setAskAbortCtrl(controller);
     setAskRunningLocal(true);
-    useMimarStore.setState({ askAiRunning: true });
 
     try {
-      await sleep(950, controller.signal);
-      setManuallyAmended(true);
+      const result = await askAiDiagram(messageToOverride, true, session?.access_token);
+      setPendingConflictMessage(null);
+
+      const propList = (result?.propagated_changes || []).map(p => `• [${p.target.toUpperCase()}] ${p.id || ''} (${p.field}): ${p.old_value} → ${p.new_value}`).join('<br/>');
+      const propDetails = propList ? `<div style="margin-top:8px;font-size:11px;color:#38BDF8"><b>Propagated Upstream Changes:</b><br/>${propList}</div>` : '';
 
       setAskMessages(prev => prev.filter(m => m.id !== statusId).concat([
         {
           id: 'ai-force-done-' + Date.now(),
           role: 'ai',
-          html: 'Done — the change was propagated into the locked feature &amp; structure JSON. The affected entity is now tagged <b>Manually Amended</b> across all views.'
+          html: `<b>Forced Override Applied:</b><br/>${result?.explanation || 'Changes propagated into locked specifications.'}${propDetails}<div class="classify-tag structural" style="background:#10B981">Manually Amended</div>`
         }
       ]));
-      showToast("Upstream specifications updated and labeled 'Manually Amended'.");
     } catch (err) {
-      if (err.name === 'AbortError') {
-        setAskMessages(prev => prev.filter(m => m.id !== statusId).concat([
-          {
-            id: 'ai-force-stopped-' + Date.now(),
-            role: 'ai',
-            html: '<span style="color:var(--ink-muted)">Propagate override stopped by user.</span>'
-          }
-        ]));
-        showToast("Ask AI override stopped.");
-      }
+      setAskMessages(prev => prev.filter(m => m.id !== statusId).concat([
+        {
+          id: 'ai-force-err-' + Date.now(),
+          role: 'ai',
+          html: `<span style="color:#EF4444">Override error: ${err.message}</span>`
+        }
+      ]));
     } finally {
       setAskRunningLocal(false);
       setAskAbortCtrl(null);
-      useMimarStore.setState({ askAiRunning: false });
     }
   };
 
   const handleCancelConflict = () => {
+    setPendingConflictMessage(null);
     setAskMessages(prev => [
       ...prev,
       {
