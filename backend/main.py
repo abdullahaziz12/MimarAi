@@ -5423,6 +5423,338 @@ async def accept_project_diagram(
 
 
 # ============================================================================
+# V5.1 "Ask AI" Conversational Diagram Editing — Logic & Endpoints
+# ============================================================================
+
+class DiagramAskAiRequest(BaseModel):
+    message: str
+    confirm_override: Optional[bool] = False
+
+
+async def process_diagram_ask_ai(
+    message: str,
+    confirm_override: bool,
+    current_schema: Dict[str, Any],
+    current_architecture: Dict[str, Any],
+    active_features: List[Dict[str, Any]],
+    structure_mapping: Dict[str, List[str]],
+    fixed_inputs: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    AI-driven classification & editing for Diagram 'Ask AI' (Section 6.6).
+    Classifies user message as 'cosmetic' or 'structural_conflict'.
+    - Cosmetic: applied directly, updates schema/architecture, re-renders Mermaid immediately.
+    - Structural conflict (confirm_override=False): refused by default with explanation referencing locked features/structure.
+    - Structural conflict (confirm_override=True): applies change, propagates upstream into features and structure,
+      sets manually_amended flags across all touched sections, and re-renders Mermaid diagrams.
+    """
+    system_prompt = """You are an expert AI software architect interpreting conversational edit requests for a database schema and system architecture.
+The project has locked features and an accepted file structure.
+Your job:
+1. Classify the user's request as:
+   - "cosmetic": e.g. renaming a column or table (without breaking external feature definitions), modifying data types, adding/removing indexes, adjusting internal service ports/protocols, adding a supplementary column or helper service.
+   - "structural_conflict": e.g. removing/dropping a table or service that locked features depend on (in data_touched, name, description, business_rules), or removing/modifying files/components defined in the locked structure.
+
+2. If "cosmetic":
+   - Generate the updated "schema" and "architecture". Keep the rest consistent.
+   - Set "classification": "cosmetic", "refused": false, "requires_confirmation": false.
+   - Explain what was updated in "explanation".
+
+3. If "structural_conflict":
+   - If confirm_override is FALSE:
+     - Set "classification": "structural_conflict", "refused": true, "requires_confirmation": true.
+     - Provide a clear, polite explanation in "explanation" citing the exact conflicting locked features (name, id) and/or structure files.
+     - List conflicting features in "conflicting_features" (id, name, reason) and files in "conflicting_structure" (path, reason).
+     - Do not alter schema, architecture, features, or structure.
+   - If confirm_override is TRUE:
+     - Set "classification": "structural_conflict", "refused": false, "requires_confirmation": false, "forced_override_confirmed": true.
+     - Generate updated "schema" and "architecture".
+     - Upstream propagation:
+       - Update affected features in "updated_features": remove references to the deleted/altered table from data_touched, rewrite description/business_rules to eliminate stale references, and set "manually_amended": true on those features.
+       - Update structure in "updated_structure": remove/update file mappings that reference the altered/removed table or component, and set "manually_amended": true.
+       - List all changes in "propagated_changes": [{"target": "feature"|"structure", "id": "...", "field": "...", "old_value": "...", "new_value": "..."}].
+
+Output STRICTLY valid JSON with no markdown formatting:
+{
+  "classification": "cosmetic" | "structural_conflict",
+  "refused": true | false,
+  "requires_confirmation": true | false,
+  "forced_override_confirmed": true | false | null,
+  "explanation": "string",
+  "conflicting_features": [{"id": "string", "name": "string", "reason": "string"}],
+  "conflicting_structure": [{"path": "string", "reason": "string"}],
+  "updated_schema": { "tables": [...] },
+  "updated_architecture": { "services": [...] },
+  "updated_features": [...],
+  "updated_structure": { ... },
+  "propagated_changes": [
+    {"target": "feature" | "structure", "id": "string", "field": "string", "old_value": "string", "new_value": "string"}
+  ]
+}"""
+
+    user_context = f"""User Request:
+"{message}"
+
+Confirm Forced Override: {confirm_override}
+
+Current Schema:
+{json.dumps(current_schema, indent=2)}
+
+Current Architecture:
+{json.dumps(current_architecture, indent=2)}
+
+Active Locked Features:
+{json.dumps(active_features, indent=2)}
+
+Accepted Structure File Mapping:
+{json.dumps(structure_mapping, indent=2)}
+
+Tech Stack:
+{json.dumps(fixed_inputs, indent=2)}"""
+
+    try:
+        ai_res = await call_gemini_api(system_prompt, user_context, stage="diagram_ask_ai")
+    except Exception as e_gem:
+        print(f"[Diagram Ask AI Gemini Fallback to Groq] {e_gem}")
+        ai_res = await call_groq_json(system_prompt, user_context, stage="diagram_ask_ai")
+
+    if not isinstance(ai_res, dict):
+        ai_res = {
+            "classification": "cosmetic",
+            "refused": False,
+            "requires_confirmation": False,
+            "explanation": "Processed edit request.",
+            "updated_schema": current_schema,
+            "updated_architecture": current_architecture
+        }
+
+    return ai_res
+
+
+@app.post("/projects/{project_id}/diagram/ask-ai")
+@app.post("/api/projects/{project_id}/diagram/ask-ai")
+async def diagram_ask_ai(
+    project_id: str,
+    req: DiagramAskAiRequest,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    V5.1 'Ask AI' Conversational Diagram Editing:
+    Scoped specifically to schema and architecture.
+    Classifies user message as cosmetic or structural-conflict.
+    - Cosmetic: applied directly, updates working draft, re-renders Mermaid immediately.
+    - Structural conflict without confirm_override: refused by default with explanation.
+    - Structural conflict with confirm_override: updates diagram + propagates upstream to Features (V3.9) and Structure (V4),
+      tagging affected records with manually_amended=True, re-rendering Mermaid, and recording in ask_ai_history.
+    """
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+
+    diag_state = project.get("diagram_state") or {}
+    
+    # Retrieve current working schema & architecture
+    candidate = diag_state.get("candidate_draft") or {}
+    if not candidate and diag_state.get("attempts"):
+        candidate = diag_state["attempts"][-1].get("model_a_draft") or {}
+
+    current_schema = diag_state.get("accepted_schema") or candidate.get("schema")
+    current_architecture = diag_state.get("accepted_architecture") or candidate.get("architecture")
+
+    if not current_schema or not current_architecture:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot use Ask AI: no diagram draft or accepted diagram found. Generate diagrams first."
+        )
+
+    # Normalize working copies
+    norm_curr = normalize_diagram_draft({
+        "schema": current_schema,
+        "architecture": current_architecture,
+        "exception_handling": diag_state.get("accepted_exception_handling") or candidate.get("exception_handling") or {},
+        "security": diag_state.get("accepted_security") or candidate.get("security") or {}
+    })
+    current_schema = norm_curr["schema"]
+    current_architecture = norm_curr["architecture"]
+
+    gen_state = project.get("generation_state") or {}
+    features = gen_state.get("features", [])
+    rejected = set(gen_state.get("rejected_feature_ids", []))
+    active_features = [f for f in features if f.get("id") not in rejected]
+
+    struct_state = project.get("structure_state") or {}
+    accepted_structure = (struct_state.get("accepted_structure") or {}).get("structure") or (struct_state.get("candidate_structure") or {}).get("structure") or {}
+    fixed_inputs = project.get("fixed_inputs") or {}
+
+    # Call AI classification & processor
+    ai_result = await process_diagram_ask_ai(
+        message=req.message,
+        confirm_override=bool(req.confirm_override),
+        current_schema=current_schema,
+        current_architecture=current_architecture,
+        active_features=active_features,
+        structure_mapping=accepted_structure,
+        fixed_inputs=fixed_inputs
+    )
+
+    classification = ai_result.get("classification") or "cosmetic"
+    refused = bool(ai_result.get("refused", False))
+    requires_confirmation = bool(ai_result.get("requires_confirmation", False))
+    explanation = ai_result.get("explanation") or ""
+    conflicting_features = ai_result.get("conflicting_features") or []
+    conflicting_structure = ai_result.get("conflicting_structure") or []
+    propagated_changes = ai_result.get("propagated_changes") or []
+
+    history = diag_state.get("ask_ai_history") or []
+
+    # Path 1: Structural Conflict Refused by Default (confirm_override is False)
+    if classification == "structural_conflict" and not req.confirm_override:
+        history_entry = {
+            "request_text": req.message,
+            "classification": "structural_conflict",
+            "refused": True,
+            "forced_override_confirmed": False,
+            "explanation": explanation,
+            "conflicting_features": conflicting_features,
+            "conflicting_structure": conflicting_structure,
+            "propagated_changes": [],
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        history.append(history_entry)
+        diag_state["ask_ai_history"] = history
+        
+        # Save diagram_state with history entry
+        client.table("projects").update({"diagram_state": diag_state}).eq("id", project_id).execute()
+
+        return {
+            "status": "refused",
+            "classification": "structural_conflict",
+            "refused": True,
+            "requires_confirmation": True,
+            "explanation": explanation,
+            "conflicting_features": conflicting_features,
+            "conflicting_structure": conflicting_structure,
+            "ask_ai_history": history
+        }
+
+    # Path 2: Cosmetic Change or Confirmed Forced Override -> Apply updates
+    updated_schema = ai_result.get("updated_schema") or current_schema
+    updated_architecture = ai_result.get("updated_architecture") or current_architecture
+
+    norm_updated = normalize_diagram_draft({
+        "schema": updated_schema,
+        "architecture": updated_architecture,
+        "exception_handling": norm_curr["exception_handling"],
+        "security": norm_curr["security"]
+    })
+    updated_schema = norm_updated["schema"]
+    updated_architecture = norm_updated["architecture"]
+
+    # Re-render deterministic Mermaid diagrams
+    new_mermaid_erd = generate_mermaid_erd(updated_schema)
+    new_mermaid_arch = generate_mermaid_architecture(updated_architecture)
+
+    # Update diagram_state
+    if "candidate_draft" in diag_state and diag_state["candidate_draft"]:
+        diag_state["candidate_draft"]["schema"] = updated_schema
+        diag_state["candidate_draft"]["architecture"] = updated_architecture
+    else:
+        diag_state["candidate_draft"] = {
+            "schema": updated_schema,
+            "architecture": updated_architecture,
+            "exception_handling": norm_curr["exception_handling"],
+            "security": norm_curr["security"]
+        }
+
+    if diag_state.get("status") == "accepted":
+        diag_state["accepted_schema"] = updated_schema
+        diag_state["accepted_architecture"] = updated_architecture
+        diag_state["mermaid_erd"] = new_mermaid_erd
+        diag_state["mermaid_architecture"] = new_mermaid_arch
+
+    project_updates: Dict[str, Any] = {}
+
+    if classification == "structural_conflict" and req.confirm_override:
+        # Mark diagram_state as manually amended
+        diag_state["manually_amended"] = True
+
+        # Propagate upstream into Features (V3.9 schema)
+        updated_features_from_ai = ai_result.get("updated_features") or []
+        ai_feat_map = {f.get("id"): f for f in updated_features_from_ai if f.get("id")}
+
+        updated_features_list = []
+        for feat in features:
+            f_id = feat.get("id")
+            if f_id in ai_feat_map:
+                amended_f = {**feat, **ai_feat_map[f_id], "manually_amended": True}
+                updated_features_list.append(amended_f)
+            else:
+                updated_features_list.append(feat)
+
+        gen_state["features"] = updated_features_list
+        gen_state["manually_amended"] = True
+        project_updates["generation_state"] = gen_state
+
+        # Propagate upstream into Structure (V4 schema)
+        updated_structure_from_ai = ai_result.get("updated_structure")
+        if updated_structure_from_ai and isinstance(updated_structure_from_ai, dict):
+            if "accepted_structure" in struct_state and isinstance(struct_state["accepted_structure"], dict):
+                struct_state["accepted_structure"]["structure"] = updated_structure_from_ai
+                struct_state["accepted_structure"]["manually_amended"] = True
+            if "candidate_structure" in struct_state and isinstance(struct_state["candidate_structure"], dict):
+                struct_state["candidate_structure"]["structure"] = updated_structure_from_ai
+                struct_state["candidate_structure"]["manually_amended"] = True
+            struct_state["manually_amended"] = True
+            project_updates["structure_state"] = struct_state
+
+        history_entry = {
+            "request_text": req.message,
+            "classification": "structural_conflict",
+            "refused": False,
+            "forced_override_confirmed": True,
+            "explanation": explanation,
+            "propagated_changes": propagated_changes,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+    else:
+        # Cosmetic change
+        history_entry = {
+            "request_text": req.message,
+            "classification": "cosmetic",
+            "refused": False,
+            "forced_override_confirmed": None,
+            "explanation": explanation,
+            "propagated_changes": [],
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+
+    history.append(history_entry)
+    diag_state["ask_ai_history"] = history
+    project_updates["diagram_state"] = diag_state
+
+    # Save all updated states in a single database update
+    client.table("projects").update(project_updates).eq("id", project_id).execute()
+
+    return {
+        "status": "ok",
+        "classification": classification,
+        "refused": False,
+        "requires_confirmation": False,
+        "forced_override_confirmed": bool(req.confirm_override) if classification == "structural_conflict" else None,
+        "explanation": explanation,
+        "propagated_changes": propagated_changes,
+        "schema": updated_schema,
+        "architecture": updated_architecture,
+        "mermaid_erd": new_mermaid_erd,
+        "mermaid_architecture": new_mermaid_arch,
+        "ask_ai_history": history,
+        "features": gen_state.get("features"),
+        "structure": struct_state.get("accepted_structure", {}).get("structure") or struct_state.get("candidate_structure", {}).get("structure")
+    }
+
+
+# ============================================================================
 # V3.10 Admin Portal — Security, Instrumentation, and Analytics Endpoints
 # ============================================================================
 
