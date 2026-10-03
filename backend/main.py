@@ -1190,22 +1190,18 @@ async def call_gemini_api(
     if not gemini_key:
         raise HTTPException(status_code=500, detail="Gemini API unconfigured (GEMINI_API_KEY missing).")
     
-    raw_configured_model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+    raw_configured_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
     configured_model = raw_configured_model.replace("models/", "").strip()
     
     # Verified public Gemini models supporting generateContent on v1beta
     VERIFIED_GEMINI_MODELS = [
-        "gemini-3.6-flash",
-        "gemini-flash-latest",
-        "gemini-3.1-pro-preview",
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
         "gemini-1.5-flash",
-        "gemini-2.5-pro",
-        "gemini-1.5-pro"
+        "gemini-2.0-flash",
+        "gemini-1.5-pro",
+        "gemini-flash-latest"
     ]
     
-    candidate_models = [configured_model] if configured_model in VERIFIED_GEMINI_MODELS else ["gemini-3.6-flash"]
+    candidate_models = [configured_model] if configured_model in VERIFIED_GEMINI_MODELS else ["gemini-1.5-flash"]
     for m in VERIFIED_GEMINI_MODELS:
         if m not in candidate_models:
             candidate_models.append(m)
@@ -5153,7 +5149,7 @@ Active Features: {json.dumps(active_feature_summaries, indent=2)}"""
         draft_a_raw, draft_b_raw = draft_results[0], draft_results[1]
         
         if isinstance(draft_a_raw, Exception) and isinstance(draft_b_raw, Exception):
-            raise HTTPException(status_code=502, detail="Diagram generation failed: both AI providers encountered an error.")
+            raise HTTPException(status_code=502, detail=f"Diagram generation failed: Gemini error ({str(draft_a_raw)[:120]}), Groq error ({str(draft_b_raw)[:120]})")
             
         if isinstance(draft_a_raw, Exception):
             print(f"[Diagram Draft A Fallback] {draft_a_raw}")
