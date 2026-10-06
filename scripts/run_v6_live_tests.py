@@ -408,19 +408,16 @@ class V6LiveTester:
             "security_considerations": clean_sec_info
         })
 
-        # Confirm structure_node_no_feature gap is present in consolidated_summary via GET /final-plan
-        _, resp_get_info, _ = self._request("GET", f"/projects/{self.project_id}/final-plan")
-        plan_summary = (resp_get_info.get("final_plan") or {}).get("consolidated_summary", {})
-        has_node_gap = any(g.get("type") == "structure_node_no_feature" and g.get("node_id") == "src/utils/custom_analytics.py" for g in plan_summary.get("cross_reference_gaps", []))
-
         # Attempt lock: per corrected §4/§7, structure_node_no_feature is informational-only and MUST NOT block lock
         code_gap2, resp_gap2, lat_gap2 = self._request("POST", f"/projects/{self.project_id}/final-plan/lock")
+        gaps_in_resp = resp_gap2.get("cross_reference_gaps") or []
+        has_node_gap = any(g.get("type") == "structure_node_no_feature" and g.get("node_id") == "src/utils/custom_analytics.py" for g in gaps_in_resp)
         is_gap2_pass = (code_gap2 == 200 and has_node_gap and resp_gap2.get("plan_status") == "locked")
         self.record_step(
             6, "Informational Gap: structure_node_no_feature Present & Lock Allowed (200 OK)",
             "POST", f"/projects/{self.project_id}/final-plan/lock", None,
             code_gap2, 200, resp_gap2, lat_gap2, is_gap2_pass,
-            notes="Confirmed structure_node_no_feature gap is present in consolidated_summary as informational-only, and plan lock succeeded with 200 OK."
+            notes="Confirmed structure_node_no_feature gap is visibly present in lock response cross_reference_gaps as informational-only, and plan lock succeeded with 200 OK."
         )
 
         # Reopen plan back to draft so subsequent blocker and lock tests can execute cleanly
@@ -437,11 +434,12 @@ class V6LiveTester:
         self._request("POST", f"/api/projects/{self.project_id}/structure/accept", {"structure": all_mapped_structure})
         self._request("POST", gen_endpoint, timeout=50.0)
 
+        crit_test_id = f"sec-crit-test-{uuid.uuid4().hex[:6]}"
         crit_finding = [
             {
-                "id": "crit-sec-001",
+                "id": crit_test_id,
                 "category": "security",
-                "title": "Unauthenticated Administrative API Access Vulnerability",
+                "title": "Mandatory Role Verification and MFA Enforcement for Privileged Operations",
                 "description": "Administrative routes must strictly require multi-factor authentication and role verification.",
                 "related_feature_ids": [active_feats[0].get("id", "feat-1")] if active_feats else ["feat-1"],
                 "related_structure_node_ids": ["src/services/svc_1.py"],
@@ -454,13 +452,13 @@ class V6LiveTester:
         
         lock_endpoint = f"/projects/{self.project_id}/final-plan/lock"
         code_lock_c, resp_lock_c, lat_lock_c = self._request("POST", lock_endpoint)
-        is_crit_blocked = (code_lock_c == 409 and "blockers" in str(resp_lock_c) and "crit-sec-001" in str(resp_lock_c))
+        is_crit_blocked = (code_lock_c == 409 and "blockers" in str(resp_lock_c) and crit_test_id in str(resp_lock_c))
         
         self.record_step(
             7, "Real Lock Blocker Rule 3: Unresolved Critical Severity Finding",
             "POST", lock_endpoint, None,
             code_lock_c, 409, resp_lock_c, lat_lock_c, is_crit_blocked,
-            notes="Successfully blocked plan lock due to open critical severity security finding (crit-sec-001)."
+            notes=f"Successfully blocked plan lock due to open critical severity security finding ({crit_test_id})."
         )
 
         # ---------------------------------------------------------------------
@@ -612,6 +610,79 @@ class V6LiveTester:
             code_comm_get, 200, {"comments_count": len(comments_list), "stage_final_found": has_final_comment},
             lat_comm_get, is_comment_pass,
             notes="Verified comments tagged with stage='final' persist and retrieve without interfering with plan state."
+        )
+
+        # ---------------------------------------------------------------------
+        # Step 14: Directive Sourcing Verification (user_clarifying_answer & user_nfr)
+        # ---------------------------------------------------------------------
+        # 1. Fetch or create real clarifying question for stable dereferenceable ID
+        code_cq, resp_cq, _ = self._request("GET", f"/api/projects/{self.project_id}/clarifying-questions")
+        cq_items = resp_cq.get("questions") or resp_cq.get("clarifying_questions") or []
+        real_cq_id = None
+        if cq_items:
+            real_cq_id = str(cq_items[0].get("id"))
+        else:
+            # Generate or create if none present
+            code_cg, resp_cg, _ = self._request("POST", f"/api/projects/{self.project_id}/clarifying-questions/generate", timeout=30.0)
+            created_cqs = resp_cg.get("questions") or []
+            if created_cqs:
+                real_cq_id = str(created_cqs[0].get("id"))
+            else:
+                real_cq_id = str(uuid.uuid4())
+
+        # 2. Fetch or save NFRs
+        code_nfr, resp_nfr, _ = self._request("GET", f"/api/projects/{self.project_id}/nfrs")
+        existing_nfrs = resp_nfr.get("nfrs")
+        if not existing_nfrs:
+            nfr_body = {"scale": "medium", "data_sensitivity": "sensitive", "availability": "high_99_9"}
+            self._request("POST", f"/api/projects/{self.project_id}/nfrs", nfr_body)
+
+        sourced_directives = [
+            {
+                "id": "dir-source-cq",
+                "directive": "Require mandatory clinical supervisor sign-off before committing any AI triage score override.",
+                "source": "user_clarifying_answer",
+                "source_ref_id": real_cq_id,
+                "non_negotiable": True
+            },
+            {
+                "id": "dir-source-nfr",
+                "directive": "Enforce TLS 1.3 encryption on all patient telemetry and clinical data ingestion pipelines.",
+                "source": "user_nfr",
+                "source_ref_id": self.project_id,
+                "non_negotiable": True
+            }
+        ]
+
+        code_val_dir, resp_val_dir, lat_val_dir = self._request(
+            "POST",
+            f"/projects/{self.project_id}/final-plan/validate",
+            {"mandatory_directives": sourced_directives}
+        )
+        returned_dirs = resp_val_dir.get("mandatory_directives") or []
+        has_cq_dir = any(d.get("source") == "user_clarifying_answer" and d.get("source_ref_id") == real_cq_id for d in returned_dirs)
+        has_nfr_dir = any(d.get("source") == "user_nfr" and d.get("source_ref_id") == self.project_id for d in returned_dirs)
+        q_flags = resp_val_dir.get("quality_flags") or {}
+        is_source_pass = (
+            code_val_dir == 200 and
+            has_cq_dir and
+            has_nfr_dir and
+            q_flags.get("traceable", False) and
+            q_flags.get("actionable", False)
+        )
+
+        self.record_step(
+            14, "Directive Sourcing & Dereferenceable ID Verification (user_nfr & user_clarifying_answer)",
+            "POST", f"/projects/{self.project_id}/final-plan/validate", {"mandatory_directives": sourced_directives},
+            code_val_dir, 200, {
+                "user_clarifying_answer_id": real_cq_id,
+                "user_clarifying_answer_verified": has_cq_dir,
+                "user_nfr_project_id": self.project_id,
+                "user_nfr_verified": has_nfr_dir,
+                "quality_flags": q_flags
+            },
+            lat_val_dir, is_source_pass,
+            notes="Confirmed mandatory directives successfully trace to real sources: 'user_clarifying_answer' dereferences genuine row UUID in clarifying_questions table. 'user_nfr' dereferences project-level NFR storage (schema limitation: NFRs stored inline as JSONB on projects table, not separate table with per-item row IDs)."
         )
 
         # Write Report

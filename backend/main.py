@@ -6768,13 +6768,15 @@ async def lock_final_plan(
     }
 
     client.table("final_plans").update(update_payload).eq("project_id", project_id).execute()
+    gaps = (current_plan.get("consolidated_summary") or {}).get("cross_reference_gaps", [])
 
     return {
         "status": "ok",
         "project_id": project_id,
         "plan_status": "locked",
         "locked_at": now_iso,
-        "locked_by": user_id
+        "locked_by": user_id,
+        "cross_reference_gaps": gaps
     }
 
 

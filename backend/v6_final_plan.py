@@ -104,6 +104,35 @@ def is_generic_phrase(text: str, blocklist: Optional[List[str]] = None, threshol
     return False, None
 
 
+def is_non_duplicate(text_a: str, text_b: str, threshold: float = 0.8) -> Tuple[bool, float]:
+    """
+    Evaluates whether text_b is non-duplicate of text_a using token-level Jaccard similarity (§6).
+    Returns (is_non_duplicate: bool, similarity: float).
+    If similarity >= threshold, it is considered a duplicate (returns False, sim).
+    Otherwise returns (True, sim).
+    """
+    sim = calculate_jaccard_similarity(text_a, text_b, remove_stopwords=False)
+    return (sim < threshold), sim
+
+
+def is_actionable(text: str, blocklist: Optional[List[str]] = None, min_words: int = 6) -> Tuple[bool, Optional[str]]:
+    """
+    Evaluates whether a directive or finding description is actionable per §6:
+    (a) Must have >= min_words words.
+    (b) Must not exact/near-match (Jaccard >= 0.8) an entry in the generic-phrase blocklist.
+    Returns (is_actionable: bool, failure_reason: Optional[str]).
+    """
+    if not text or not isinstance(text, str):
+        return False, "Empty or non-string text"
+    words = [w for w in re.sub(r"[^\w\s]", " ", text).split() if w]
+    if len(words) < min_words:
+        return False, f"Text is under {min_words} words ({len(words)} words found) and lacks actionable technical specificity."
+    is_gen, phrase = is_generic_phrase(text, blocklist=blocklist)
+    if is_gen:
+        return False, f"Matches generic non-actionable phrase blocklist pattern ('{phrase}')."
+    return True, None
+
+
 # ============================================================================
 # Quality Validation (§6)
 # ============================================================================

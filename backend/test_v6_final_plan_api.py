@@ -332,7 +332,7 @@ class TestV6FinalPlanApi(unittest.IsolatedAsyncioTestCase):
         """Rule 3: Unresolved critical finding blocks lock with 409."""
         mock_get_owned_project.return_value = {"id": self.project_id, "status": "diagram_accepted"}
 
-        crit_id = "crit-sec-001"
+        crit_id = "sec-crit-rule3"
         plan_record = {
             "id": str(uuid.uuid4()),
             "project_id": self.project_id,
@@ -396,7 +396,7 @@ class TestV6FinalPlanApi(unittest.IsolatedAsyncioTestCase):
         """Lock succeeds with 200 when gaps are empty and critical finding is resolved via comments."""
         mock_get_owned_project.return_value = {"id": self.project_id, "status": "diagram_accepted"}
 
-        crit_id = "crit-sec-001"
+        crit_id = "sec-crit-rule3"
         plan_record = {
             "id": str(uuid.uuid4()),
             "project_id": self.project_id,
