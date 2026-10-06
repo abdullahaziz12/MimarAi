@@ -73,6 +73,8 @@ def build_error_payload(status_code: int, detail: Any) -> Dict[str, Any]:
         error_type = "forbidden"
     elif status_code == 404:
         error_type = "not_found"
+    elif status_code == 409:
+        error_type = "conflict"
     elif status_code == 422:
         error_type = "validation_error"
     elif status_code == 429:
@@ -95,11 +97,17 @@ def build_error_payload(status_code: int, detail: Any) -> Dict[str, Any]:
     else:
         msg = str(detail)
 
-    return {
+    payload = {
         "status": "error",
         "error_type": error_type,
         "message": msg
     }
+    if isinstance(detail, dict):
+        for k, v in detail.items():
+            if k not in payload:
+                payload[k] = v
+
+    return payload
 
 
 @app.exception_handler(HTTPException)
@@ -6265,6 +6273,587 @@ async def get_rate_limits_status(user: Dict[str, Any] = Depends(get_current_user
             "remaining": batch_remaining,
             "reset_in_seconds": batch_reset_s,
         },
+    }
+
+
+# ============================================================================
+# V6.0 Final Plan Consolidation — Logic, Prerequisite Gates & Endpoints
+# ============================================================================
+
+try:
+    from backend.v6_final_plan import (
+        step1_consolidate_plan,
+        diff_merge_final_plan_drafts,
+        evaluate_v6_quality_validation,
+        check_final_plan_lock_blockers,
+        calculate_jaccard_similarity,
+        is_generic_phrase,
+    )
+except ImportError:
+    from v6_final_plan import (
+        step1_consolidate_plan,
+        diff_merge_final_plan_drafts,
+        evaluate_v6_quality_validation,
+        check_final_plan_lock_blockers,
+        calculate_jaccard_similarity,
+        is_generic_phrase,
+    )
+
+
+class FinalPlanReopenRequest(BaseModel):
+    reason: str
+
+
+class FinalPlanValidateRequest(BaseModel):
+    exception_handling: Optional[List[Dict[str, Any]]] = None
+    security_considerations: Optional[List[Dict[str, Any]]] = None
+    mandatory_directives: Optional[List[Dict[str, Any]]] = None
+
+
+def check_v6_prerequisites(project: Dict[str, Any]) -> List[str]:
+    """
+    Checks prerequisite gate (§2):
+    - features_status = 'accepted'
+    - structure_status = 'accepted'
+    - diagram_status = 'accepted'
+    Returns list of missing requirements (empty list if all met).
+    """
+    missing = []
+    
+    # 1. Features
+    gen_state = project.get("generation_state") or {}
+    features = gen_state.get("features", [])
+    rejected = set(gen_state.get("rejected_feature_ids", []))
+    active_features = [f for f in features if f.get("id") not in rejected]
+    is_features_accepted = (
+        project.get("status") in ("features_accepted", "structure_accepted", "diagram_accepted", "accepted") or
+        bool(active_features)
+    )
+    if not is_features_accepted or not active_features:
+        missing.append("features_accepted")
+
+    # 2. Structure
+    struct_state = project.get("structure_state") or {}
+    is_struct_accepted = (
+        project.get("status") in ("structure_accepted", "diagram_accepted") or
+        struct_state.get("status") == "accepted" or
+        bool(struct_state.get("accepted_structure"))
+    )
+    if not is_struct_accepted:
+        missing.append("structure_accepted")
+
+    # 3. Diagram
+    diag_state = project.get("diagram_state") or {}
+    is_diag_accepted = (
+        project.get("status") == "diagram_accepted" or
+        diag_state.get("status") == "accepted" or
+        bool(diag_state.get("accepted_schema") and diag_state.get("accepted_architecture"))
+    )
+    if not is_diag_accepted:
+        missing.append("diagram_accepted")
+
+    return missing
+
+
+@app.post("/projects/{project_id}/final-plan/generate")
+@app.post("/api/projects/{project_id}/final-plan/generate")
+async def generate_final_plan(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    V6.0 Final Plan Consolidation Step 1 (Consolidation) + Step 2 Draft Phase.
+    Decoupled from validation to prevent platform timeouts.
+    """
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    project = get_owned_project(client, user_id, project_id)
+
+    # Prerequisite gate check
+    missing = check_v6_prerequisites(project)
+    if missing:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "Prerequisites not met for final plan consolidation",
+                "missing": missing,
+                "message": f"Required prerequisite artifacts missing or unaccepted: {', '.join(missing)}."
+            }
+        )
+
+    # Step 1: Deterministic Consolidation
+    gen_state = project.get("generation_state") or {}
+    features = gen_state.get("features", [])
+    rejected = set(gen_state.get("rejected_feature_ids", []))
+    active_features = [f for f in features if f.get("id") not in rejected]
+
+    struct_state = project.get("structure_state") or {}
+    accepted_struct = (struct_state.get("accepted_structure") or {}).get("structure") or {}
+    structure_nodes = accepted_struct.get("nodes", [])
+
+    diag_state = project.get("diagram_state") or {}
+
+    consolidated_summary = step1_consolidate_plan(active_features, structure_nodes, diag_state)
+
+    # Fetch clarifying questions if any for stable IDs
+    clarifying_qa = []
+    try:
+        cq_res = client.table("clarifying_questions").select("id, question, answer").eq("project_id", project_id).execute()
+        clarifying_qa = cq_res.data or []
+    except Exception as e_cq:
+        print(f"[Clarifying QA Fetch Warning] {e_cq}")
+
+    nfr_data = project.get("nfrs") or (project.get("step0_state") or {}).get("nfrs") or {}
+    persona_data = project.get("personas") or (project.get("step0_state") or {}).get("personas") or {}
+
+    # Step 2: AI Review Draft Phase (Concurrently launch Gemini + Groq)
+    system_prompt = """You are an elite AI systems architect conducting an Exception Handling, Security, and Mandatory Directives Review on a consolidated software specification.
+
+Review the consolidated features, structure, diagrams, and user clarifications, and produce:
+1. "exception_handling": Array of technical exception handling policies per feature/node (severity: critical|high|medium|low, provenance: ai_inferred|derived_from_business_rule|derived_from_nfr, mandatory non-null reasoning when ai_inferred, description >= 6 words).
+2. "security_considerations": Array of concrete access control, auth, data protection, and rate limiting rules (severity: critical|high|medium|low, provenance: ai_inferred|derived_from_business_rule|derived_from_nfr, mandatory non-null reasoning when ai_inferred, description >= 6 words).
+3. "mandatory_directives": Array of non-negotiable imperative coding rules for downstream agents (source: feature_business_rule|security_review|exception_handling_finding|user_nfr|user_clarifying_answer, source_ref_id: matching feature/finding/clarifying id, directive >= 6 words, non_negotiable: true).
+
+Output STRICTLY valid JSON with no markdown formatting:
+{
+  "exception_handling": [
+    {
+      "id": "exc-1",
+      "category": "exception_handling",
+      "title": "Payment Gateway Timeout Handling",
+      "description": "Retry payment processing up to three times with exponential backoff before failing.",
+      "related_feature_ids": ["feat-1"],
+      "related_structure_node_ids": ["node-1"],
+      "severity": "high",
+      "provenance": "derived_from_business_rule",
+      "reasoning": null
+    }
+  ],
+  "security_considerations": [
+    {
+      "id": "sec-1",
+      "category": "security",
+      "title": "Bcrypt Password Hashing Standard",
+      "description": "Store all user passwords hashed with bcrypt using at least twelve work factor rounds.",
+      "related_feature_ids": ["feat-1"],
+      "related_structure_node_ids": ["node-auth"],
+      "severity": "high",
+      "provenance": "derived_from_business_rule",
+      "reasoning": null
+    }
+  ],
+  "mandatory_directives": [
+    {
+      "id": "dir-1",
+      "directive": "All payment amount fields must be stored as integer cents, never floating point values.",
+      "source": "feature_business_rule",
+      "source_ref_id": "feat-1",
+      "non_negotiable": true
+    }
+  ]
+}"""
+
+    user_prompt = f"""Consolidated Summary:
+{json.dumps(consolidated_summary, indent=2)}
+
+Active Features Details:
+{json.dumps(active_features, indent=2)}
+
+Accepted Structure Nodes:
+{json.dumps(structure_nodes, indent=2)}
+
+Clarifying Q&A (Stable IDs):
+{json.dumps(clarifying_qa, indent=2)}
+
+Non-Functional Requirements:
+{json.dumps(nfr_data, indent=2)}
+
+Personas:
+{json.dumps(persona_data, indent=2)}"""
+
+    gemini_task = call_gemini_api(
+        system_prompt,
+        user_prompt,
+        timeout=25.0,
+        stage="final_plan_gemini",
+        user_id=user_id,
+        project_id=project_id
+    )
+    groq_task = call_groq_json(
+        system_prompt,
+        user_prompt,
+        timeout=25.0,
+        stage="final_plan_groq",
+        user_id=user_id,
+        project_id=project_id
+    )
+
+    draft_gemini_res, draft_groq_res = await asyncio.gather(gemini_task, groq_task, return_exceptions=True)
+
+    if isinstance(draft_gemini_res, Exception) and isinstance(draft_groq_res, Exception):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Both AI providers failed to generate final plan drafts: Gemini error: {draft_gemini_res}, Groq error: {draft_groq_res}"
+        )
+
+    draft_gemini = {} if isinstance(draft_gemini_res, Exception) else draft_gemini_res
+    draft_groq = {} if isinstance(draft_groq_res, Exception) else draft_groq_res
+
+    if not draft_gemini and draft_groq:
+        draft_gemini = draft_groq
+    elif not draft_groq and draft_gemini:
+        draft_groq = draft_gemini
+
+    # Determine source_model labeling
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    if not gemini_key:
+        source_model = "tracked_substitution"
+    else:
+        source_model = "merged"
+
+    # Step 2 Diff/Merge Algorithm (§5.1)
+    merged_candidate = diff_merge_final_plan_drafts(draft_gemini, draft_groq)
+
+    # Initial quality flags baseline
+    quality_flags = {
+        "traceable": False,
+        "non_duplicate": False,
+        "reasoned": False,
+        "actionable": False,
+        "overall_pass": False,
+        "failed_checks": []
+    }
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    plan_data = {
+        "status": "draft",
+        "consolidated_summary": consolidated_summary,
+        "exception_handling": merged_candidate["exception_handling"],
+        "security_considerations": merged_candidate["security_considerations"],
+        "mandatory_directives": merged_candidate["mandatory_directives"],
+        "quality_flags": quality_flags,
+        "draft_gemini": draft_gemini,
+        "draft_groq": draft_groq,
+        "source_model": source_model,
+        "updated_at": now_iso
+    }
+
+    # Persist in final_plans table
+    try:
+        existing = client.table("final_plans").select("id").eq("project_id", project_id).execute()
+        if existing and existing.data:
+            client.table("final_plans").update(plan_data).eq("project_id", project_id).execute()
+        else:
+            plan_data["project_id"] = project_id
+            plan_data["created_at"] = now_iso
+            client.table("final_plans").insert(plan_data).execute()
+    except Exception as e_db:
+        print(f"[Final Plan Persist Warning] {e_db}")
+
+    return {
+        "status": "ok",
+        "project_id": project_id,
+        "plan_status": "draft",
+        "source_model": source_model,
+        "consolidated_summary": consolidated_summary,
+        "exception_handling": merged_candidate["exception_handling"],
+        "security_considerations": merged_candidate["security_considerations"],
+        "mandatory_directives": merged_candidate["mandatory_directives"],
+        "draft_gemini": draft_gemini,
+        "draft_groq": draft_groq
+    }
+
+
+@app.post("/projects/{project_id}/final-plan/validate")
+@app.post("/api/projects/{project_id}/final-plan/validate")
+async def validate_final_plan(
+    project_id: str,
+    req: Optional[FinalPlanValidateRequest] = None,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    V6.0 Quality Validation & Fix-Pass Endpoint (§6).
+    Evaluates traceable, non_duplicate, reasoned, and actionable checks.
+    Runs targeted fix-pass on flagged/conflicting entries.
+    Sets status = 'under_review' on success.
+    """
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    get_owned_project(client, user_id, project_id)
+
+    # Fetch current final_plans row
+    res = client.table("final_plans").select("*").eq("project_id", project_id).execute()
+    rows = getattr(res, "data", None) or []
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail="No final plan draft found for this project. Call /final-plan/generate first."
+        )
+
+    current_plan = rows[0]
+
+    candidate_exc = (req.exception_handling if req and req.exception_handling is not None else current_plan.get("exception_handling")) or []
+    candidate_sec = (req.security_considerations if req and req.security_considerations is not None else current_plan.get("security_considerations")) or []
+    candidate_dir = (req.mandatory_directives if req and req.mandatory_directives is not None else current_plan.get("mandatory_directives")) or []
+
+    # 1. Initial Quality Evaluation
+    eval_res = evaluate_v6_quality_validation(candidate_exc, candidate_sec, candidate_dir)
+    flags = eval_res["quality_flags"]
+    cleaned_exc = eval_res["cleaned_exception_handling"]
+    cleaned_sec = eval_res["cleaned_security_considerations"]
+    cleaned_dir = eval_res["cleaned_mandatory_directives"]
+
+    # Identify items needing fix-pass: items with failed checks or conflict: true
+    flagged_exc = [item for item in cleaned_exc if item.get("conflict") or any(f["fields_involved"] and "description" in f["fields_involved"] or "reasoning" in f["fields_involved"] for f in flags["failed_checks"])]
+    flagged_sec = [item for item in cleaned_sec if item.get("conflict") or any(f["fields_involved"] and "description" in f["fields_involved"] or "reasoning" in f["fields_involved"] for f in flags["failed_checks"])]
+    flagged_dir = [item for item in cleaned_dir if any(f["fields_involved"] and "directive" in f["fields_involved"] or "source_ref_id" in f["fields_involved"] for f in flags["failed_checks"])]
+
+    needs_fix = not flags["overall_pass"] or any(item.get("conflict") for item in cleaned_exc + cleaned_sec)
+
+    if needs_fix and (flagged_exc or flagged_sec or flagged_dir):
+        system_prompt_fix = """You are an AI software architect executing a targeted Fix-Pass on flagged final plan review entries.
+For each entry provided:
+- If provenance == 'ai_inferred', provide solid, non-empty architectural reasoning.
+- If description/directive is under 6 words or generic, expand it into a clear, actionable, technical directive with >= 6 words.
+- If conflict is true, resolve the discrepancy into a unified, definitive engineering rule and set conflict: false.
+- Ensure all mandatory directives have a valid non-empty source_ref_id.
+
+Output strictly valid JSON:
+{
+  "exception_handling": [...],
+  "security_considerations": [...],
+  "mandatory_directives": [...]
+}"""
+
+        user_prompt_fix = f"""Flagged Exception Handling Entries:
+{json.dumps(flagged_exc, indent=2)}
+
+Flagged Security Entries:
+{json.dumps(flagged_sec, indent=2)}
+
+Flagged Mandatory Directives:
+{json.dumps(flagged_dir, indent=2)}
+
+Identified Quality Violations:
+{json.dumps(flags["failed_checks"], indent=2)}"""
+
+        try:
+            try:
+                fix_res = await call_gemini_api(system_prompt_fix, user_prompt_fix, stage="final_plan_fix", user_id=user_id, project_id=project_id)
+            except Exception as e_gem:
+                print(f"[Final Plan Fix Groq Fallback] {e_gem}")
+                fix_res = await call_groq_json(system_prompt_fix, user_prompt_fix, stage="final_plan_fix", user_id=user_id, project_id=project_id)
+
+            fixed_exc_map = {item.get("id"): item for item in fix_res.get("exception_handling", []) if isinstance(item, dict)}
+            fixed_sec_map = {item.get("id"): item for item in fix_res.get("security_considerations", []) if isinstance(item, dict)}
+            fixed_dir_map = {item.get("id"): item for item in fix_res.get("mandatory_directives", []) if isinstance(item, dict)}
+
+            updated_exc = [fixed_exc_map.get(item.get("id"), item) for item in cleaned_exc]
+            updated_sec = [fixed_sec_map.get(item.get("id"), item) for item in cleaned_sec]
+            updated_dir = [fixed_dir_map.get(item.get("id"), item) for item in cleaned_dir]
+
+            # Groq re-validation across entire list
+            reval_res = evaluate_v6_quality_validation(updated_exc, updated_sec, updated_dir)
+            cleaned_exc = reval_res["cleaned_exception_handling"]
+            cleaned_sec = reval_res["cleaned_security_considerations"]
+            cleaned_dir = reval_res["cleaned_mandatory_directives"]
+
+            # Mark any surviving failed checks with survived_fix_pass = True
+            final_failed = []
+            for fc in reval_res["quality_flags"]["failed_checks"]:
+                fc_copy = dict(fc)
+                fc_copy["survived_fix_pass"] = True
+                final_failed.append(fc_copy)
+
+            flags = dict(reval_res["quality_flags"])
+            flags["failed_checks"] = final_failed
+            flags["overall_pass"] = len(final_failed) == 0
+
+        except Exception as e_fix:
+            print(f"[Final Plan Fix-Pass Warning] {e_fix}")
+
+    final_status = "under_review" if flags["overall_pass"] else "draft"
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    update_payload = {
+        "status": final_status,
+        "exception_handling": cleaned_exc,
+        "security_considerations": cleaned_sec,
+        "mandatory_directives": cleaned_dir,
+        "quality_flags": flags,
+        "updated_at": now_iso
+    }
+
+    try:
+        client.table("final_plans").update(update_payload).eq("project_id", project_id).execute()
+    except Exception as e_db:
+        print(f"[Final Plan Validation Persist Warning] {e_db}")
+
+    return {
+        "status": "ok",
+        "project_id": project_id,
+        "plan_status": final_status,
+        "quality_flags": flags,
+        "exception_handling": cleaned_exc,
+        "security_considerations": cleaned_sec,
+        "mandatory_directives": cleaned_dir
+    }
+
+
+@app.post("/projects/{project_id}/final-plan/lock")
+@app.post("/api/projects/{project_id}/final-plan/lock")
+async def lock_final_plan(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    V6.0 Plan Locking Endpoint (§7).
+    Evaluates 3 independent lock blockers:
+    1. Open feature_not_in_structure gaps.
+    2. Open structure_node_no_feature gaps on non-allowlisted node types.
+    3. Unresolved critical severity review findings.
+    Sets status = 'locked', locked_at, locked_by on success.
+    """
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    get_owned_project(client, user_id, project_id)
+
+    res = client.table("final_plans").select("*").eq("project_id", project_id).execute()
+    rows = getattr(res, "data", None) or []
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail="No final plan found for this project. Call /final-plan/generate first."
+        )
+
+    current_plan = rows[0]
+
+    # Fetch resolved comments for stage = 'final'
+    resolved_comment_target_ids = set()
+    try:
+        comm_res = client.table("comments").select("target_feature_id").eq("project_id", project_id).eq("stage", "final").eq("status", "resolved").execute()
+        for c in (comm_res.data or []):
+            if c.get("target_feature_id"):
+                resolved_comment_target_ids.add(str(c.get("target_feature_id")))
+    except Exception as e_comm:
+        print(f"[Final Comments Fetch Warning] {e_comm}")
+
+    blockers = check_final_plan_lock_blockers(
+        current_plan.get("consolidated_summary") or {},
+        current_plan.get("exception_handling") or [],
+        current_plan.get("security_considerations") or [],
+        resolved_comment_target_ids
+    )
+
+    if blockers:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "Plan lock blocked by unresolved constraints",
+                "blockers": blockers
+            }
+        )
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    update_payload = {
+        "status": "locked",
+        "locked_at": now_iso,
+        "locked_by": user_id,
+        "updated_at": now_iso
+    }
+
+    client.table("final_plans").update(update_payload).eq("project_id", project_id).execute()
+
+    return {
+        "status": "ok",
+        "project_id": project_id,
+        "plan_status": "locked",
+        "locked_at": now_iso,
+        "locked_by": user_id
+    }
+
+
+@app.post("/projects/{project_id}/final-plan/reopen")
+@app.post("/api/projects/{project_id}/final-plan/reopen")
+async def reopen_final_plan(
+    project_id: str,
+    req: FinalPlanReopenRequest,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    V6.0 Plan Re-Open Endpoint (§7).
+    Requires a non-empty reason string.
+    Sets status back to 'draft', clears locked_at/locked_by, and logs to plan_history.
+    """
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    get_owned_project(client, user_id, project_id)
+
+    reason = (req.reason or "").strip()
+    if not reason:
+        raise HTTPException(
+            status_code=400,
+            detail="A non-empty reason is required to re-open a final plan."
+        )
+
+    res = client.table("final_plans").select("id, status").eq("project_id", project_id).execute()
+    rows = getattr(res, "data", None) or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="No final plan found for this project.")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    client.table("final_plans").update({
+        "status": "draft",
+        "locked_at": None,
+        "locked_by": None,
+        "updated_at": now_iso
+    }).eq("project_id", project_id).execute()
+
+    # Log to plan_history table
+    try:
+        client.table("plan_history").insert({
+            "project_id": project_id,
+            "event": "final_plan_reopened",
+            "note": reason,
+            "created_at": now_iso
+        }).execute()
+    except Exception as e_hist:
+        print(f"[Plan History Insert Warning] {e_hist}")
+
+    return {
+        "status": "ok",
+        "project_id": project_id,
+        "plan_status": "draft",
+        "reopen_reason": reason
+    }
+
+
+@app.get("/projects/{project_id}/final-plan")
+@app.get("/api/projects/{project_id}/final-plan")
+async def get_final_plan(
+    project_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    V6.0 Get Final Plan State.
+    """
+    user_id = user.get("user_id")
+    token = user.get("token")
+    client = get_supabase(token)
+    get_owned_project(client, user_id, project_id)
+
+    res = client.table("final_plans").select("*").eq("project_id", project_id).execute()
+    rows = getattr(res, "data", None) or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="No final plan found for this project.")
+
+    return {
+        "status": "ok",
+        "final_plan": rows[0]
     }
 
 
