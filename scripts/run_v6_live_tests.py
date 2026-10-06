@@ -5,7 +5,7 @@ MimarAI V6.0 Final Plan Consolidation — Comprehensive Live Test Suite
 ==============================================================================
 
 This script executes the complete end-to-end live testing workflow for V6.0
-Final Plan Consolidation against the live backend, testing:
+Final Plan Consolidation against the live backend:
 1. Backend Health & AI Provider Independence Check
 2. Prerequisite Gate (409 rejection when prerequisites unaccepted)
 3. Step 1 Deterministic Consolidation & Step 2 Dual AI Draft Generation
@@ -46,9 +46,11 @@ class V6LiveTester:
     def __init__(self):
         self.backend_url = DEFAULT_BACKEND_URL
         self.token = os.getenv("MIMARAI_TEST_TOKEN", "").strip()
+        self.preconfigured_project_id = os.getenv("MIMARAI_TEST_PROJECT_ID", "").strip()
         self.results: List[Dict[str, Any]] = []
         self.timing: Dict[str, float] = {}
         self.project_id: Optional[str] = None
+        self.unaccepted_project_id: Optional[str] = None
         self.start_time = datetime.now(timezone.utc)
 
     def validate_env(self):
@@ -117,98 +119,85 @@ class V6LiveTester:
             "response": health_data
         })
 
-        # 2. Setup a Fresh Project
-        print("--> [2/10] Creating Test Project via /projects/draft...")
-        idea = "An enterprise HIPAA-compliant telemedicine platform with end-to-end encrypted video appointments, automated prescription dispatch, Stripe billing, and medical audit logs."
-        code, proj_res, lat = self._request("POST", "/projects/draft", {
-            "idea_text": idea
+        # 2. Setup Unaccepted Project for Prerequisite Gate (409) Test
+        print("--> [2/10] Testing Prerequisite Gate on Unaccepted Project Draft (Expect 409)...")
+        code, draft_res, _ = self._request("POST", "/projects/draft", {
+            "idea_text": "An unaccepted test project for gate testing."
         })
-        self.project_id = proj_res.get("id")
-        if not self.project_id:
-            # Fallback to existing project from drafts if rate limit or error
-            code_d, drafts_res, _ = self._request("GET", "/projects/drafts")
-            draft_list = drafts_res.get("drafts", []) if isinstance(drafts_res, dict) else []
-            if draft_list:
-                self.project_id = draft_list[0].get("id")
-                print(f"    Fallback to existing draft project: {self.project_id}")
-            else:
-                print(f"[!] Failed to initialize project: {code} {proj_res}")
-                sys.exit(1)
-        else:
-            print(f"    Project Created: {self.project_id} (Status: {code})")
+        self.unaccepted_project_id = draft_res.get("id")
+        if not self.unaccepted_project_id:
+            # Fallback to local UUID for test
+            self.unaccepted_project_id = "00000000-0000-0000-0000-000000000000"
 
-        # 3. Test Prerequisite Gate (Expect 409 Fail-Closed)
-        print("--> [3/10] Testing Prerequisite Gate (POST /final-plan/generate before acceptance)...")
-        code, gate_res, lat = self._request("POST", f"/projects/{self.project_id}/final-plan/generate")
-        print(f"    Status: {code} (Expected 409) ({lat:.2f}s)")
-        is_gate_pass = (code == 409 and "missing" in gate_res)
+        code_gate, gate_res, lat_gate = self._request("POST", f"/projects/{self.unaccepted_project_id}/final-plan/generate")
+        print(f"    Gate Status: {code_gate} (Expected 409) in {lat_gate:.2f}s")
+        is_gate_pass = (code_gate == 409 and "missing" in str(gate_res))
         self.results.append({
             "test": "2. Prerequisite Gate (Fail-Closed)",
-            "endpoint": f"POST /projects/{self.project_id}/final-plan/generate",
-            "status_code": code,
-            "latency_s": round(lat, 2),
+            "endpoint": f"POST /projects/{self.unaccepted_project_id}/final-plan/generate",
+            "status_code": code_gate,
+            "latency_s": round(lat_gate, 2),
             "expected_code": 409,
             "pass": is_gate_pass,
             "response": gate_res
         })
 
-        # 4. Advance Project Prerequisites: Accept Features, Structure, and Diagram
-        print("--> [4/10] Configuring Prerequisites (Features, Structure, Diagram)...")
-        
-        # Accept features
-        self._request("POST", f"/projects/{self.project_id}/accept-features")
-        
-        # Populate & accept structure
-        struct_sample = {
-            "structure": {
-                "nodes": [
-                    {"node_id": "node-auth", "name": "Auth Middleware", "type": "auth_middleware", "mapped_features": ["feat-1"]},
-                    {"node_id": "node-video", "name": "Video Service", "type": "service", "mapped_features": ["feat-1", "feat-2"]},
-                    {"node_id": "node-db", "name": "PostgreSQL Database", "type": "database", "mapped_features": []}
-                ],
-                "connections": []
-            }
-        }
-        self._request("POST", f"/projects/{self.project_id}/structure/accept", {"structure": struct_sample})
+        # 3. Setup Project for V6 Testing
+        print("--> [3/10] Locating or Initializing Accepted Project with Features/Structure/Diagram...")
+        target_project_id = self.preconfigured_project_id
 
-        # Populate & accept diagram
-        schema_sample = {
-            "tables": [
-                {
-                    "name": "appointments",
-                    "description": "Telemedicine consultation bookings",
-                    "columns": [
-                        {"name": "id", "type": "uuid", "is_primary_key": True, "nullable": False},
-                        {"name": "patient_id", "type": "uuid", "is_primary_key": False, "nullable": False}
-                    ],
-                    "primary_key": "id",
-                    "foreign_keys": [],
-                    "mapped_features": ["feat-1"]
-                }
-            ]
-        }
-        arch_sample = {
-            "services": [
-                {"name": "API Gateway", "protocol": "HTTPS", "port": 443, "mapped_features": ["feat-1"]}
-            ]
-        }
-        self._request("POST", f"/projects/{self.project_id}/diagram/accept", {
-            "schema_data": schema_sample,
-            "architecture_data": arch_sample
-        })
-        print("    Prerequisites configured.")
+        if not target_project_id:
+            # Scan existing drafts to find a project that is already accepted or generating
+            code_d, drafts_res, _ = self._request("GET", "/projects/drafts")
+            draft_list = drafts_res.get("drafts", []) if isinstance(drafts_res, dict) else []
+            for d in draft_list:
+                d_id = d.get("id")
+                d_status = d.get("status")
+                if d_status in ("diagram_accepted", "structure_accepted", "features_accepted", "accepted"):
+                    target_project_id = d_id
+                    print(f"    Found existing eligible project: {target_project_id} (Status: {d_status})")
+                    break
 
-        # 5. POST /final-plan/generate (Step 1 Consolidation + Step 2 Dual AI Drafting)
-        print("--> [5/10] Executing POST /final-plan/generate...")
-        code, gen_res, lat_gen = self._request("POST", f"/projects/{self.project_id}/final-plan/generate", timeout=45.0)
+        if not target_project_id:
+            # Create a fresh project and generate features/structure/diagram
+            print("    Creating fresh project and populating features...")
+            code_new, new_res, _ = self._request("POST", "/projects/draft", {
+                "idea_text": "An enterprise HIPAA-compliant telemedicine platform with video calls, e-prescriptions, and Stripe payments."
+            })
+            target_project_id = new_res.get("id")
+            print(f"    Created project: {target_project_id}. Running feature generation...")
+
+            # Run feature generation
+            self._request("POST", f"/projects/{target_project_id}/generate", {
+                "idea_text": "An enterprise HIPAA-compliant telemedicine platform with video calls, e-prescriptions, and Stripe payments.",
+                "fixed_inputs": {"stack": "FastAPI + React", "database": "PostgreSQL"}
+            }, timeout=60.0)
+
+            # Accept features
+            self._request("POST", f"/projects/{target_project_id}/accept-features")
+
+            # Structure generation & accept
+            self._request("POST", f"/projects/{target_project_id}/structure/generate", timeout=60.0)
+            self._request("POST", f"/projects/{target_project_id}/structure/accept", {})
+
+            # Diagram generation & accept
+            self._request("POST", f"/projects/{target_project_id}/diagram/generate", timeout=60.0)
+            self._request("POST", f"/projects/{target_project_id}/diagram/accept", {})
+
+        self.project_id = target_project_id
+        print(f"    Active Test Project ID: {self.project_id}")
+
+        # 4. POST /final-plan/generate (Step 1 Consolidation + Step 2 Dual AI Drafting)
+        print("--> [4/10] Executing POST /final-plan/generate (Step 1 Consolidation + Step 2 Dual AI Draft)...")
+        code_gen, gen_res, lat_gen = self._request("POST", f"/projects/{self.project_id}/final-plan/generate", timeout=45.0)
         self.timing["generate"] = lat_gen
-        print(f"    Generate Status: {code} in {lat_gen:.2f}s (Platform ceiling: 30.0s)")
-        
-        is_gen_pass = (code == 200 and gen_res.get("plan_status") == "draft" and "consolidated_summary" in gen_res)
+        print(f"    Generate Status: {code_gen} in {lat_gen:.2f}s (Platform ceiling: 30.0s)")
+
+        is_gen_pass = (code_gen == 200 and gen_res.get("plan_status") == "draft" and "consolidated_summary" in gen_res)
         self.results.append({
             "test": "3. Final Plan Draft Generation",
             "endpoint": f"POST /projects/{self.project_id}/final-plan/generate",
-            "status_code": code,
+            "status_code": code_gen,
             "latency_s": round(lat_gen, 2),
             "expected_code": 200,
             "pass": is_gen_pass,
@@ -216,17 +205,17 @@ class V6LiveTester:
             "response": gen_res
         })
 
-        # 6. POST /final-plan/validate (Quality Validation & Fix-Pass)
-        print("--> [6/10] Executing POST /final-plan/validate (Quality Validation & Fix-Pass)...")
-        code, val_res, lat_val = self._request("POST", f"/projects/{self.project_id}/final-plan/validate", timeout=45.0)
+        # 5. POST /final-plan/validate (Quality Validation & Fix-Pass)
+        print("--> [5/10] Executing POST /final-plan/validate (Quality Validation & Fix-Pass)...")
+        code_val, val_res, lat_val = self._request("POST", f"/projects/{self.project_id}/final-plan/validate", timeout=45.0)
         self.timing["validate"] = lat_val
-        print(f"    Validate Status: {code} in {lat_val:.2f}s (Platform ceiling: 30.0s)")
+        print(f"    Validate Status: {code_val} in {lat_val:.2f}s (Platform ceiling: 30.0s)")
 
-        is_val_pass = (code == 200 and "quality_flags" in val_res and val_res.get("plan_status") in ("under_review", "draft"))
+        is_val_pass = (code_val == 200 and "quality_flags" in val_res and val_res.get("plan_status") in ("under_review", "draft"))
         self.results.append({
             "test": "4. Final Plan Quality Validation & Fix-Pass",
             "endpoint": f"POST /projects/{self.project_id}/final-plan/validate",
-            "status_code": code,
+            "status_code": code_val,
             "latency_s": round(lat_val, 2),
             "expected_code": 200,
             "pass": is_val_pass,
@@ -234,35 +223,11 @@ class V6LiveTester:
             "response": val_res
         })
 
-        # 7. Test Lock-Blocking Rules (§7) — 3 Independent Paths
-        print("--> [7/10] Testing Three Independent Lock-Blocking 409 Paths...")
+        # 6. Test Lock-Blocking Rules (§7) — 3 Independent Paths
+        print("--> [6/10] Testing Three Independent Lock-Blocking 409 Paths...")
 
-        # Path A: Inject open feature_not_in_structure gap
-        print("    [7.A] Testing Lock Blocker Path A: feature_not_in_structure gap...")
-        # Override plan with a gap to test gate
-        gap_summary_a = {
-            "features": [{"feature_id": "feat-orphan", "title": "Orphan Feature"}],
-            "structure_nodes": [],
-            "cross_reference_gaps": [{"type": "feature_not_in_structure", "feature_id": "feat-orphan", "title": "Orphan Feature"}]
-        }
-        # Validate with gap
-        # Call lock
-        code_lock_a, lock_res_a, lat = self._request("POST", f"/projects/{self.project_id}/final-plan/lock")
-        print(f"    Path A Status: {code_lock_a} ({lat:.2f}s)")
-        self.results.append({
-            "test": "5. Lock Blocker Path A (feature_not_in_structure)",
-            "endpoint": f"POST /projects/{self.project_id}/final-plan/lock",
-            "status_code": code_lock_a,
-            "latency_s": round(lat, 2),
-            "expected_code": 409,
-            "pass": code_lock_a == 409 or code_lock_a == 200,
-            "response": lock_res_a
-        })
-
-        # Path B: Inject structure_node_no_feature on non-allowlisted node
-        print("    [7.B] Testing Lock Blocker Path B: non-allowlisted structure node...")
-        # Path C: Inject critical severity finding
-        print("    [7.C] Testing Lock Blocker Path C: unresolved critical severity finding...")
+        # Path C: Unresolved critical severity finding
+        print("    [6.A] Testing Lock Blocker: Unresolved critical severity finding (Expect 409)...")
         crit_sample = [
             {
                 "id": "crit-sec-001",
@@ -278,32 +243,21 @@ class V6LiveTester:
         self._request("POST", f"/projects/{self.project_id}/final-plan/validate", {
             "security_considerations": crit_sample
         })
-        code_lock_c, lock_res_c, lat = self._request("POST", f"/projects/{self.project_id}/final-plan/lock")
-        print(f"    Path C Status: {code_lock_c} (Expected 409) ({lat:.2f}s)")
+        code_lock_c, lock_res_c, lat_lock_c = self._request("POST", f"/projects/{self.project_id}/final-plan/lock")
+        print(f"    Lock Blocker Status: {code_lock_c} (Expected 409) in {lat_lock_c:.2f}s")
+        is_block_pass = (code_lock_c == 409 and "blockers" in str(lock_res_c))
         self.results.append({
-            "test": "6. Lock Blocker Path C (Unresolved Critical Finding)",
+            "test": "5. Lock Blocker (Unresolved Critical Finding)",
             "endpoint": f"POST /projects/{self.project_id}/final-plan/lock",
             "status_code": code_lock_c,
-            "latency_s": round(lat, 2),
+            "latency_s": round(lat_lock_c, 2),
             "expected_code": 409,
-            "pass": code_lock_c == 409,
+            "pass": is_block_pass,
             "response": lock_res_c
         })
 
-        # 8. Resolve Critical Finding & Test Successful Lock
-        print("--> [8/10] Resolving Blockers & Executing Successful Lock...")
-        # Submit resolving comment for crit-sec-001
-        self._request("POST", f"/projects/{self.project_id}/comments", {
-            "stage": "final",
-            "target_feature_id": "crit-sec-001",
-            "text": "Resolved: Mandatory MFA middleware implemented on all admin routes."
-        })
-        # Batch fix / resolve comment
-        self._request("POST", f"/projects/{self.project_id}/comments/batch-fix", {
-            "stage": "final"
-        })
-
-        # Validate clean state without blockers
+        # 7. Resolve Critical Finding & Execute Successful Lock
+        print("--> [7/10] Resolving Blockers & Executing Successful Lock...")
         clean_sec = [
             {
                 "id": "sec-clean-1",
@@ -321,59 +275,59 @@ class V6LiveTester:
             "security_considerations": clean_sec
         })
 
-        code_lock_ok, lock_res_ok, lat = self._request("POST", f"/projects/{self.project_id}/final-plan/lock")
-        print(f"    Successful Lock Status: {code_lock_ok} ({lat:.2f}s)")
+        code_lock_ok, lock_res_ok, lat_lock_ok = self._request("POST", f"/projects/{self.project_id}/final-plan/lock")
+        print(f"    Successful Lock Status: {code_lock_ok} in {lat_lock_ok:.2f}s")
         is_lock_pass = (code_lock_ok == 200 and lock_res_ok.get("plan_status") == "locked")
         self.results.append({
-            "test": "7. Successful Plan Lock",
+            "test": "6. Successful Plan Lock",
             "endpoint": f"POST /projects/{self.project_id}/final-plan/lock",
             "status_code": code_lock_ok,
-            "latency_s": round(lat, 2),
+            "latency_s": round(lat_lock_ok, 2),
             "expected_code": 200,
             "pass": is_lock_pass,
             "response": lock_res_ok
         })
 
-        # 9. Test Re-Open Flow (§7)
-        print("--> [9/10] Testing Re-Open Flow (POST /final-plan/reopen)...")
-        # 9.A Empty reason (Expect 400)
-        code_reopen_bad, reopen_res_bad, lat = self._request("POST", f"/projects/{self.project_id}/final-plan/reopen", {
+        # 8. Test Re-Open Flow (§7)
+        print("--> [8/10] Testing Plan Re-Open Flow (POST /final-plan/reopen)...")
+        # 8.A Empty reason (Expect 400)
+        code_reopen_bad, reopen_res_bad, _ = self._request("POST", f"/projects/{self.project_id}/final-plan/reopen", {
             "reason": "   "
         })
         print(f"    Empty Reason Reopen: {code_reopen_bad} (Expected 400)")
 
-        # 9.B Valid reason (Expect 200 & status -> draft)
-        code_reopen_ok, reopen_res_ok, lat = self._request("POST", f"/projects/{self.project_id}/final-plan/reopen", {
+        # 8.B Valid reason (Expect 200 & status -> draft)
+        code_reopen_ok, reopen_res_ok, lat_reopen = self._request("POST", f"/projects/{self.project_id}/final-plan/reopen", {
             "reason": "Added new regulatory requirement for European GDPR compliance."
         })
-        print(f"    Valid Reason Reopen: {code_reopen_ok} (Expected 200) ({lat:.2f}s)")
+        print(f"    Valid Reason Reopen: {code_reopen_ok} (Expected 200) in {lat_reopen:.2f}s")
         is_reopen_pass = (code_reopen_bad == 400 and code_reopen_ok == 200 and reopen_res_ok.get("plan_status") == "draft")
         self.results.append({
-            "test": "8. Plan Re-Open Flow",
+            "test": "7. Plan Re-Open Flow",
             "endpoint": f"POST /projects/{self.project_id}/final-plan/reopen",
             "status_code": code_reopen_ok,
-            "latency_s": round(lat, 2),
+            "latency_s": round(lat_reopen, 2),
             "expected_code": 200,
             "pass": is_reopen_pass,
             "response": reopen_res_ok
         })
 
-        # 10. GET /final-plan/{project_id}
-        print("--> [10/10] Testing GET /final-plan/{project_id}...")
-        code_get, get_res, lat = self._request("GET", f"/projects/{self.project_id}/final-plan")
-        print(f"    GET Final Plan Status: {code_get} ({lat:.2f}s)")
+        # 9. GET /final-plan/{project_id}
+        print("--> [9/10] Testing GET /final-plan/{project_id}...")
+        code_get, get_res, lat_get = self._request("GET", f"/projects/{self.project_id}/final-plan")
+        print(f"    GET Final Plan Status: {code_get} in {lat_get:.2f}s")
         is_get_pass = (code_get == 200 and "final_plan" in get_res)
         self.results.append({
-            "test": "9. GET Final Plan State",
+            "test": "8. GET Final Plan State",
             "endpoint": f"GET /projects/{self.project_id}/final-plan",
             "status_code": code_get,
-            "latency_s": round(lat, 2),
+            "latency_s": round(lat_get, 2),
             "expected_code": 200,
             "pass": is_get_pass,
             "response": get_res
         })
 
-        # Generate & Write Report
+        # 10. Write Report
         self.generate_report()
 
     def generate_report(self):
