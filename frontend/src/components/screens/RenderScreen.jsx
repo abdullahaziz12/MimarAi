@@ -7,7 +7,6 @@ import { useAuth } from '../../context/AuthContext';
 export default function RenderScreen() {
   const { session } = useAuth();
   const {
-  const {
     currentScreen,
     diagramData,
     mermaidErd,
