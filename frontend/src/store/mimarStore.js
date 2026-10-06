@@ -1,5 +1,21 @@
 import { create } from "zustand";
 import { getBackendApiUrl, getBackendUrlStatus } from "../lib/backendConfig";
+import { supabase } from "../lib/supabaseClient";
+
+export async function getActiveSessionToken(explicitToken = null) {
+  if (explicitToken && typeof explicitToken === 'string' && explicitToken.trim()) {
+    return explicitToken.trim();
+  }
+  try {
+    const { data } = await supabase.auth.getSession();
+    if (data?.session?.access_token) {
+      return data.session.access_token;
+    }
+  } catch (e) {
+    console.warn("Could not retrieve active session token:", e);
+  }
+  return null;
+}
 
 export const SCREEN_ORDER = [
   "interview",
@@ -147,6 +163,7 @@ const initialMimarState = {
   diagramGenerating: false,
   mermaidErd: null,
   mermaidArchitecture: null,
+  askAiHistory: [],
 
   workingDiagramJson: null,
   diagramRendered: false,
@@ -1889,6 +1906,8 @@ export const useMimarStore = create((set, get) => ({
       return;
     }
 
+    const token = await getActiveSessionToken(sessionToken);
+
     let backendUrl = "";
     try {
       backendUrl = getBackendApiUrl("").replace(/\/$/, "");
@@ -1905,7 +1924,7 @@ export const useMimarStore = create((set, get) => ({
 
     const authHeaders = {
       "Content-Type": "application/json",
-      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     };
 
     try {
@@ -1956,6 +1975,8 @@ export const useMimarStore = create((set, get) => ({
     }
     set({ operationRunning: true, operationLabel: "Locking Structure…" });
 
+    const token = await getActiveSessionToken(sessionToken);
+
     let backendUrl = "";
     try {
       backendUrl = getBackendApiUrl("").replace(/\/$/, "");
@@ -1967,7 +1988,7 @@ export const useMimarStore = create((set, get) => ({
       try {
         const authHeaders = {
           "Content-Type": "application/json",
-          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         };
         await fetch(`${backendUrl}/api/projects/${s.projectId}/structure/accept`, {
           method: "POST",
@@ -1989,7 +2010,7 @@ export const useMimarStore = create((set, get) => ({
     s.showScreen("diagram");
     get().saveProjectState();
     if (!get().diagramData && !get().diagramJsonGenerated) {
-      get().generateDiagram(sessionToken);
+      get().generateDiagram(token);
     }
   },
 
@@ -2000,6 +2021,8 @@ export const useMimarStore = create((set, get) => ({
       s.showToast("No active project ID found.");
       return;
     }
+
+    const token = await getActiveSessionToken(sessionToken);
 
     let backendUrl = "";
     try {
@@ -2017,7 +2040,7 @@ export const useMimarStore = create((set, get) => ({
 
     const authHeaders = {
       "Content-Type": "application/json",
-      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     };
 
     try {
@@ -2084,6 +2107,8 @@ export const useMimarStore = create((set, get) => ({
     }
     set({ operationRunning: true, operationLabel: "Accepting & Rendering Blueprint…" });
 
+    const token = await getActiveSessionToken(sessionToken);
+
     let backendUrl = "";
     try {
       backendUrl = getBackendApiUrl("").replace(/\/$/, "");
@@ -2098,7 +2123,7 @@ export const useMimarStore = create((set, get) => ({
       try {
         const authHeaders = {
           "Content-Type": "application/json",
-          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         };
         const res = await fetch(`${backendUrl}/api/projects/${s.projectId}/diagram/accept`, {
           method: "POST",
@@ -2131,6 +2156,101 @@ export const useMimarStore = create((set, get) => ({
     s.showToast("Schema & Architecture JSON locked as accepted. Rendered blueprints on Step 05.");
     s.showScreen("render");
     get().saveProjectState();
+  },
+
+  askAiDiagram: async (message, confirmOverride = false, sessionToken = null) => {
+    const s = get();
+    if (!message || !message.trim()) return;
+    if (s.operationRunning || s.askAiRunning) return;
+
+    set({
+      askAiRunning: true,
+      operationRunning: true,
+      operationLabel: confirmOverride ? "Propagating Forced Override into Specifications…" : "Classifying & Processing Diagram Edit (AI)…"
+    });
+
+    const token = await getActiveSessionToken(sessionToken);
+
+    let backendUrl = "";
+    try {
+      backendUrl = getBackendApiUrl("").replace(/\/$/, "");
+    } catch (err) {
+      s.showToast("Backend not configured. Set NEXT_PUBLIC_BACKEND_URL before continuing.");
+      set({ askAiRunning: false, operationRunning: false });
+      return;
+    }
+
+    const authHeaders = {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+
+    try {
+      const res = await fetch(`${backendUrl}/api/projects/${s.projectId}/diagram/ask-ai`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          message: message.trim(),
+          confirm_override: confirmOverride
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || errData.detail || "Failed to process Ask AI request.");
+      }
+
+      const data = await res.json();
+      
+      if (data.status === "refused" || data.refused) {
+        set({
+          askAiRunning: false,
+          operationRunning: false,
+          askAiHistory: data.ask_ai_history || s.askAiHistory || []
+        });
+        return data;
+      }
+
+      // Applied changes (cosmetic or confirmed structural override)
+      const newDiagramData = {
+        ...(s.diagramData || {}),
+        schema: data.schema || s.diagramData?.schema,
+        architecture: data.architecture || s.diagramData?.architecture
+      };
+
+      const updates = {
+        diagramData: newDiagramData,
+        mermaidErd: data.mermaid_erd || s.mermaidErd,
+        mermaidArchitecture: data.mermaid_architecture || s.mermaidArchitecture,
+        askAiHistory: data.ask_ai_history || s.askAiHistory || [],
+        askAiRunning: false,
+        operationRunning: false,
+      };
+
+      if (data.classification === "structural_conflict" && data.forced_override_confirmed) {
+        updates.manuallyAmended = true;
+        if (data.features && s.generationState) {
+          updates.generationState = {
+            ...s.generationState,
+            features: data.features,
+            manually_amended: true
+          };
+        }
+        if (data.structure) {
+          updates.structureData = data.structure;
+        }
+      }
+
+      set(updates);
+      s.showToast(data.explanation || (confirmOverride ? "Forced override applied and propagated." : "Cosmetic edit applied."));
+      get().saveProjectState();
+      return data;
+    } catch (err) {
+      console.error("Ask AI diagram error:", err);
+      set({ askAiRunning: false, operationRunning: false });
+      s.showToast(`Ask AI request failed: ${err.message}`);
+      throw err;
+    }
   },
 
   acceptRenderDiagram: async () => {

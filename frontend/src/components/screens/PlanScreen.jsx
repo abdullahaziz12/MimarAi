@@ -523,6 +523,26 @@ export default function PlanScreen() {
                     <div className="feature-row">
                       <span className="feature-name">{feat.name}</span>
                       {isAiAdded && <span className="ai-tag">AI-added</span>}
+                      {feat.manually_amended && (
+                        <span
+                          className="quality-flag-chip"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            fontSize: "11px",
+                            fontWeight: "600",
+                            padding: "2px 8px",
+                            borderRadius: "12px",
+                            backgroundColor: "rgba(16, 185, 129, 0.15)",
+                            color: "#10B981",
+                            border: "1px solid #10B981",
+                            marginLeft: "8px",
+                          }}
+                        >
+                          ✓ Manually Amended
+                        </span>
+                      )}
                       {failedChecks.length > 0 && (
                         <span
                           className="quality-flag-chip"
