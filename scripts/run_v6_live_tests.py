@@ -437,6 +437,19 @@ class V6LiveTester:
         # ---------------------------------------------------------------------
         # Step 9: Blocker Resolution & Successful Plan Lock (200 OK)
         # ---------------------------------------------------------------------
+        clean_exc = [
+            {
+                "id": "exc-clean-001",
+                "category": "exception_handling",
+                "title": "Payment Gateway Timeout Handling",
+                "description": "Retry payment processing up to three times with exponential backoff before failing.",
+                "related_feature_ids": ["feat-1"],
+                "related_structure_node_ids": ["node-auth"],
+                "severity": "high",
+                "provenance": "derived_from_business_rule",
+                "reasoning": None
+            }
+        ]
         clean_sec = [
             {
                 "id": "sec-clean-001",
@@ -450,8 +463,11 @@ class V6LiveTester:
                 "reasoning": None
             }
         ]
-        # Validate clean state
-        self._request("POST", val_endpoint, {"security_considerations": clean_sec})
+        # Validate clean state (no critical severity findings)
+        self._request("POST", val_endpoint, {
+            "exception_handling": clean_exc,
+            "security_considerations": clean_sec
+        })
 
         code_lock_ok, resp_lock_ok, lat_lock_ok = self._request("POST", lock_endpoint)
         is_lock_pass = (
