@@ -6389,8 +6389,16 @@ async def generate_final_plan(
     active_features = [f for f in features if f.get("id") not in rejected]
 
     struct_state = project.get("structure_state") or {}
-    accepted_struct = (struct_state.get("accepted_structure") or {}).get("structure") or {}
-    structure_nodes = accepted_struct.get("nodes", [])
+    raw_accepted = struct_state.get("accepted_structure") or struct_state.get("candidate_structure") or struct_state.get("structure") or {}
+    if isinstance(raw_accepted, dict):
+        if "structure" in raw_accepted and isinstance(raw_accepted["structure"], dict):
+            structure_nodes = raw_accepted["structure"].get("nodes", [])
+        elif "nodes" in raw_accepted:
+            structure_nodes = raw_accepted.get("nodes", [])
+        else:
+            structure_nodes = []
+    else:
+        structure_nodes = []
 
     diag_state = project.get("diagram_state") or {}
 

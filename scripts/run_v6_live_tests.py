@@ -249,6 +249,21 @@ class V6LiveTester:
                 has_struct = bool(p_data.get("structure_state") or (p_data.get("structure_state", {}).get("accepted_structure")))
                 has_diag = bool((p_data.get("diagram_state") or {}).get("accepted_schema") or (p_data.get("diagram_state") or {}).get("candidate_draft"))
                 if has_feats and has_struct and has_diag:
+                    feats = (p_data.get("generation_state") or {}).get("features", [])
+                    raw_struct = (p_data.get("structure_state") or {}).get("accepted_structure") or {}
+                    nodes = (raw_struct.get("structure") or raw_struct).get("nodes", []) if isinstance(raw_struct, dict) else []
+                    if not nodes and feats:
+                        service_nodes = [
+                            {
+                                "node_id": f"node-{f.get('id', f'svc-{idx}')}",
+                                "type": "service",
+                                "mapped_features": [f.get("id"), f.get("name")]
+                            }
+                            for idx, f in enumerate(feats, 1)
+                        ]
+                        self._request("POST", f"/api/projects/{target_id}/structure/accept", {
+                            "structure": {"nodes": service_nodes}
+                        })
                     self.project_id = target_id
                     is_prereq_ready = True
                     print(f"[*] Verified preconfigured project {self.project_id} has all prerequisites ready.")
