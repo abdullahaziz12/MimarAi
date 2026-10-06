@@ -343,40 +343,27 @@ class V6LiveTester:
             notes=f"Evaluated traceable, non_duplicate, reasoned, and actionable checks. Quality flags overall_pass: {q_flags.get('overall_pass')}. Latency: {lat_val:.2f}s."
         )
 
+        # Fetch active features on the validated project
+        code_proj_info, resp_proj_info, _ = self._request("GET", f"/api/projects/{self.project_id}")
+        proj_dict = resp_proj_info.get("project") or resp_proj_info
+        active_feats = (proj_dict.get("generation_state") or {}).get("features", [])
+
         # ---------------------------------------------------------------------
         # Step 6: Real Lock Blocker 1 — Open feature_not_in_structure Gap (409)
         # ---------------------------------------------------------------------
-        # Create a dedicated real project draft with an unmapped feature in structure
-        gap1_payload = {
-            "idea_text": "An enterprise gap-testing project with an unmapped feature to test real lock blocker Rule 1."
-        }
-        _, resp_g1, _ = self._request("POST", "/api/projects/draft", gap1_payload)
-        gap1_id = resp_g1.get("id") or (resp_g1.get("project") or {}).get("id") or str(uuid.uuid4())
-        
-        # Advance gap project with 2 features but only 1 mapped in structure
-        self._request("POST", f"/api/projects/{gap1_id}/generate", {
-            "idea_text": "An enterprise gap-testing project with an unmapped feature.",
-            "fixed_inputs": {"stack": "FastAPI + React", "database": "PostgreSQL", "deployment": "Docker", "apis": "Stripe"}
-        }, timeout=45.0)
-        self._request("POST", f"/api/projects/{gap1_id}/accept-features")
-        
-        # Structure maps only feat-1, leaving other features unmapped
-        self._request("POST", f"/api/projects/{gap1_id}/structure/accept", {
-            "structure": {
-                "nodes": [{"node_id": "node-auth-only", "type": "service", "mapped_features": ["feat-1"]}]
-            }
-        })
-        self._request("POST", f"/api/projects/{gap1_id}/diagram/generate", timeout=45.0)
-        self._request("POST", f"/api/projects/{gap1_id}/diagram/accept", {})
-        self._request("POST", f"/projects/{gap1_id}/final-plan/generate", timeout=45.0)
-        self._request("POST", f"/projects/{gap1_id}/final-plan/validate")
+        # Set structure that maps only 1 feature, leaving other active features unmapped
+        partial_nodes = [
+            {"node_id": "node-partial-svc", "type": "service", "mapped_features": [active_feats[0].get("id", "feat-1")]}
+        ]
+        self._request("POST", f"/api/projects/{self.project_id}/structure/accept", {"structure": {"nodes": partial_nodes}})
+        self._request("POST", gen_endpoint, timeout=50.0)
+        self._request("POST", val_endpoint, timeout=50.0)
 
-        # Now test real lock blocker Rule 1
-        code_gap1, resp_gap1, lat_gap1 = self._request("POST", f"/projects/{gap1_id}/final-plan/lock")
+        code_gap1, resp_gap1, lat_gap1 = self._request("POST", f"/projects/{self.project_id}/final-plan/lock")
         is_gap1_pass = (code_gap1 == 409 and "feature_not_in_structure" in str(resp_gap1))
         self.record_step(
             5, "Real Lock Blocker Rule 1: Open feature_not_in_structure Gap",
-            "POST", f"/projects/{gap1_id}/final-plan/lock", None,
+            "POST", f"/projects/{self.project_id}/final-plan/lock", None,
             code_gap1, 409, resp_gap1, lat_gap1, is_gap1_pass,
             notes="Live backend evaluated real project state, detected unmapped feature in structure, and blocked lock with 409 Conflict."
         )
@@ -384,22 +371,22 @@ class V6LiveTester:
         # ---------------------------------------------------------------------
         # Step 7: Real Lock Blocker 2 — Open structure_node_no_feature Gap (409)
         # ---------------------------------------------------------------------
-        # Update structure on gap project to include a non-allowlisted node with 0 features
-        self._request("POST", f"/api/projects/{gap1_id}/structure/accept", {
-            "structure": {
-                "nodes": [
-                    {"node_id": "node-custom-analytics", "type": "custom_analytics", "mapped_features": []}
-                ]
-            }
-        })
-        self._request("POST", f"/projects/{gap1_id}/final-plan/generate", timeout=45.0)
-        self._request("POST", f"/projects/{gap1_id}/final-plan/validate")
+        # Set structure to include an unmapped non-allowlisted custom node
+        unmapped_nodes = [
+            {"node_id": f"node-{f.get('id', idx)}", "type": "service", "mapped_features": [f.get("id")]}
+            for idx, f in enumerate(active_feats, 1)
+        ] + [
+            {"node_id": "node-custom-analytics", "type": "custom_analytics", "mapped_features": []}
+        ]
+        self._request("POST", f"/api/projects/{self.project_id}/structure/accept", {"structure": {"nodes": unmapped_nodes}})
+        self._request("POST", gen_endpoint, timeout=50.0)
+        self._request("POST", val_endpoint, timeout=50.0)
 
-        code_gap2, resp_gap2, lat_gap2 = self._request("POST", f"/projects/{gap1_id}/final-plan/lock")
+        code_gap2, resp_gap2, lat_gap2 = self._request("POST", f"/projects/{self.project_id}/final-plan/lock")
         is_gap2_pass = (code_gap2 == 409 and "structure_node_no_feature" in str(resp_gap2))
         self.record_step(
             6, "Real Lock Blocker Rule 2: Open structure_node_no_feature Gap (Non-Allowlisted)",
-            "POST", f"/projects/{gap1_id}/final-plan/lock", None,
+            "POST", f"/projects/{self.project_id}/final-plan/lock", None,
             code_gap2, 409, resp_gap2, lat_gap2, is_gap2_pass,
             notes="Live backend evaluated real project state, detected non-allowlisted unmapped node 'custom_analytics', and blocked lock with 409 Conflict."
         )
@@ -407,19 +394,27 @@ class V6LiveTester:
         # ---------------------------------------------------------------------
         # Step 8: Real Lock Blocker 3 — Unresolved Critical Severity Finding (409)
         # ---------------------------------------------------------------------
+        # First restore clean structure covering all features
+        all_mapped_nodes = [
+            {"node_id": f"node-{f.get('id', idx)}", "type": "service", "mapped_features": [f.get("id"), f.get("name")]}
+            for idx, f in enumerate(active_feats, 1)
+        ]
+        self._request("POST", f"/api/projects/{self.project_id}/structure/accept", {"structure": {"nodes": all_mapped_nodes}})
+        self._request("POST", gen_endpoint, timeout=50.0)
+
         crit_finding = [
             {
                 "id": "crit-sec-001",
                 "category": "security",
                 "title": "Unauthenticated Administrative API Access Vulnerability",
                 "description": "Administrative routes must strictly require multi-factor authentication and role verification.",
-                "related_feature_ids": ["feat-1"],
-                "related_structure_node_ids": ["node-auth"],
+                "related_feature_ids": [active_feats[0].get("id", "feat-1")] if active_feats else ["feat-1"],
+                "related_structure_node_ids": ["node-1"],
                 "severity": "critical",
                 "provenance": "derived_from_business_rule"
             }
         ]
-        # Invalidate with real critical finding on the main project
+        # Invalidate with real critical finding
         self._request("POST", val_endpoint, {"security_considerations": crit_finding})
         
         lock_endpoint = f"/projects/{self.project_id}/final-plan/lock"
@@ -436,25 +431,6 @@ class V6LiveTester:
         # ---------------------------------------------------------------------
         # Step 9: Real Successful Plan Lock (All Blockers Resolved -> 200 OK)
         # ---------------------------------------------------------------------
-        # Fetch current active features to ensure clean mapping
-        code_proj_info, resp_proj_info, _ = self._request("GET", f"/api/projects/{self.project_id}")
-        proj_dict = resp_proj_info.get("project") or resp_proj_info
-        active_feats = (proj_dict.get("generation_state") or {}).get("features", [])
-        
-        # Ensure structure maps all active features
-        clean_nodes = [
-            {
-                "node_id": f"node-{f.get('id', f'svc-{idx}')}",
-                "type": "service",
-                "mapped_features": [f.get("id"), f.get("name")]
-            }
-            for idx, f in enumerate(active_feats, 1)
-        ]
-        self._request("POST", f"/api/projects/{self.project_id}/structure/accept", {
-            "structure": {"nodes": clean_nodes}
-        })
-        self._request("POST", gen_endpoint, timeout=45.0)
-
         # Validate with clean non-critical findings
         clean_exc = [
             {
@@ -463,7 +439,7 @@ class V6LiveTester:
                 "title": "Payment Gateway Timeout Handling",
                 "description": "Retry payment processing up to three times with exponential backoff before failing.",
                 "related_feature_ids": [active_feats[0].get("id", "feat-1")] if active_feats else ["feat-1"],
-                "related_structure_node_ids": ["node-auth"],
+                "related_structure_node_ids": ["node-1"],
                 "severity": "high",
                 "provenance": "derived_from_business_rule",
                 "reasoning": None
@@ -476,7 +452,7 @@ class V6LiveTester:
                 "title": "Bcrypt Password Hashing Standard",
                 "description": "Store all user passwords hashed with bcrypt using at least twelve work factor rounds.",
                 "related_feature_ids": [active_feats[0].get("id", "feat-1")] if active_feats else ["feat-1"],
-                "related_structure_node_ids": ["node-auth"],
+                "related_structure_node_ids": ["node-1"],
                 "severity": "high",
                 "provenance": "derived_from_business_rule",
                 "reasoning": None
@@ -504,19 +480,10 @@ class V6LiveTester:
         # ---------------------------------------------------------------------
         # Step 10: Real Plan Re-Open Precondition Check (Cannot Reopen Non-Locked Plan)
         # ---------------------------------------------------------------------
-        # gap1 project is still in draft status; test reopen rejection
+        # First test reopen precondition on the unaccepted project draft (which is not locked)
         reopen_unlocked_payload = {"reason": "Attempting to reopen an unlocked draft."}
-        code_reopen_unlocked, resp_reopen_unlocked, lat_reopen_unlocked = self._request(
-            "POST", f"/projects/{gap1_id}/final-plan/reopen", reopen_unlocked_payload
-        )
-        is_reopen_precondition_pass = (code_reopen_unlocked == 409 and "locked" in str(resp_reopen_unlocked).lower())
-        self.record_step(
-            9, "Plan Re-Open Precondition (Rejection on Non-Locked Plan)",
-            "POST", f"/projects/{gap1_id}/final-plan/reopen", reopen_unlocked_payload,
-            code_reopen_unlocked, 409, resp_reopen_unlocked, lat_reopen_unlocked, is_reopen_precondition_pass,
-            notes="Correctly rejected re-opening a draft plan with 409 Conflict. Only 'locked' plans can be reopened."
-        )
-
+        # Step 1: Ensure unaccepted project has a draft final plan row in 'draft' status
+        # Or test reopen on project after it is reopened back to draft
         # ---------------------------------------------------------------------
         # Step 11: Plan Re-Open Empty Reason Rejection (400)
         # ---------------------------------------------------------------------
@@ -525,7 +492,7 @@ class V6LiveTester:
         code_reopen_bad, resp_reopen_bad, lat_reopen_bad = self._request("POST", reopen_endpoint, bad_reopen_payload)
         is_empty_reopen_pass = (code_reopen_bad == 400)
         self.record_step(
-            10, "Plan Re-Open Validation (Empty Reason Rejection)",
+            9, "Plan Re-Open Validation (Empty Reason Rejection)",
             "POST", reopen_endpoint, bad_reopen_payload,
             code_reopen_bad, 400, resp_reopen_bad, lat_reopen_bad, is_empty_reopen_pass,
             notes="Correctly rejected empty re-open reason with HTTP 400 Bad Request."
@@ -542,10 +509,23 @@ class V6LiveTester:
             resp_reopen_ok.get("reopen_reason") == valid_reopen_payload["reason"]
         )
         self.record_step(
-            11, "Plan Re-Open Flow (Valid Reason & Audit Trail in plan_history)",
+            10, "Plan Re-Open Flow (Valid Reason & Audit Trail in plan_history)",
             "POST", reopen_endpoint, valid_reopen_payload,
             code_reopen_ok, 200, resp_reopen_ok, lat_reopen_ok, is_reopen_pass,
             notes="Plan unlocked and transitioned back to 'draft' status; audit log event recorded in plan_history."
+        )
+
+        # ---------------------------------------------------------------------
+        # Step 13: Plan Re-Open Precondition (Cannot Reopen Already-Draft Plan -> 409)
+        # ---------------------------------------------------------------------
+        # Now that self.project_id plan is back in 'draft' status, attempting to reopen again MUST return 409
+        code_reopen_again, resp_reopen_again, lat_reopen_again = self._request("POST", reopen_endpoint, valid_reopen_payload)
+        is_reopen_precondition_pass = (code_reopen_again == 409 and "locked" in str(resp_reopen_again).lower())
+        self.record_step(
+            11, "Plan Re-Open Precondition (Rejection on Already-Draft Plan)",
+            "POST", reopen_endpoint, valid_reopen_payload,
+            code_reopen_again, 409, resp_reopen_again, lat_reopen_again, is_reopen_precondition_pass,
+            notes="Correctly rejected re-opening a draft plan with 409 Conflict. Only 'locked' plans can be reopened."
         )
 
         # ---------------------------------------------------------------------

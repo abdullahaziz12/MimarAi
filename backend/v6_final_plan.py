@@ -342,7 +342,16 @@ def step1_consolidate_plan(
                 resolved_maps.append(resolved_fid)
                 mapped_feature_ids_overall.add(resolved_fid)
             else:
-                resolved_maps.append(m_str)
+                found_match = None
+                for fname, fid in feature_name_map.items():
+                    if fname and (fname in m_str.lower() or m_str.lower() in fname):
+                        found_match = fid
+                        break
+                if found_match:
+                    resolved_maps.append(found_match)
+                    mapped_feature_ids_overall.add(found_match)
+                else:
+                    resolved_maps.append(m_str)
 
         node_summaries.append({
             "node_id": nid,
