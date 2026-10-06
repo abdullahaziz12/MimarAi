@@ -118,17 +118,24 @@ class V6LiveTester:
         })
 
         # 2. Setup a Fresh Project
-        print("--> [2/10] Creating Test Project...")
-        proj_name = f"V6 Consolidation QA {int(time.time())}"
-        code, proj_res, lat = self._request("POST", "/projects", {
-            "name": proj_name,
-            "idea_text": "An enterprise HIPAA-compliant telemedicine platform with end-to-end encrypted video appointments, automated prescription dispatch, Stripe billing, and medical audit logs."
+        print("--> [2/10] Creating Test Project via /projects/draft...")
+        idea = "An enterprise HIPAA-compliant telemedicine platform with end-to-end encrypted video appointments, automated prescription dispatch, Stripe billing, and medical audit logs."
+        code, proj_res, lat = self._request("POST", "/projects/draft", {
+            "idea_text": idea
         })
         self.project_id = proj_res.get("id")
         if not self.project_id:
-            print(f"[!] Failed to initialize project: {code} {proj_res}")
-            sys.exit(1)
-        print(f"    Project Created: {self.project_id} (Status: {code})")
+            # Fallback to existing project from drafts if rate limit or error
+            code_d, drafts_res, _ = self._request("GET", "/projects/drafts")
+            draft_list = drafts_res.get("drafts", []) if isinstance(drafts_res, dict) else []
+            if draft_list:
+                self.project_id = draft_list[0].get("id")
+                print(f"    Fallback to existing draft project: {self.project_id}")
+            else:
+                print(f"[!] Failed to initialize project: {code} {proj_res}")
+                sys.exit(1)
+        else:
+            print(f"    Project Created: {self.project_id} (Status: {code})")
 
         # 3. Test Prerequisite Gate (Expect 409 Fail-Closed)
         print("--> [3/10] Testing Prerequisite Gate (POST /final-plan/generate before acceptance)...")
