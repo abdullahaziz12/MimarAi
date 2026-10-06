@@ -296,6 +296,37 @@ def evaluate_v6_quality_validation(
 # Step 1 — Deterministic Consolidation (§4)
 # ============================================================================
 
+def parse_v4_structure_to_nodes(raw_accepted: Any) -> List[Dict[str, Any]]:
+    """
+    Parses real V4 accepted structure ({filepath: [features]}) into a list of structure nodes:
+    one node per file path: node_id = <file path>, mapped_features = <its features array>.
+    No type field is synthesized or guessed from filenames (§4).
+    """
+    if not isinstance(raw_accepted, dict):
+        return []
+
+    struct_dict = raw_accepted
+    if "structure" in struct_dict and isinstance(struct_dict["structure"], dict):
+        struct_dict = struct_dict["structure"]
+
+    nodes: List[Dict[str, Any]] = []
+    for filepath, features in struct_dict.items():
+        if not isinstance(filepath, str) or not filepath.strip():
+            continue
+        cleaned_path = filepath.strip()
+        if isinstance(features, list):
+            mapped = [str(f).strip() for f in features if f is not None and not isinstance(f, dict) and str(f).strip()]
+        elif isinstance(features, str) and features.strip():
+            mapped = [features.strip()]
+        else:
+            mapped = []
+        nodes.append({
+            "node_id": cleaned_path,
+            "mapped_features": mapped
+        })
+    return nodes
+
+
 def step1_consolidate_plan(
     features: List[Dict[str, Any]],
     structure_nodes: List[Dict[str, Any]],
@@ -304,8 +335,8 @@ def step1_consolidate_plan(
     """
     Pure Python deterministic consolidation.
     Builds consolidated_summary and computes cross_reference_gaps:
-    - feature_not_in_structure: active feature maps to 0 structure nodes
-    - structure_node_no_feature: structure node maps to 0 features
+    - feature_not_in_structure: active feature maps to 0 structure nodes (hard blocker)
+    - structure_node_no_feature: structure node maps to 0 features (informational-only)
     """
     feature_summaries = []
     feature_id_set = set()
@@ -329,7 +360,6 @@ def step1_consolidate_plan(
 
     for n in structure_nodes:
         nid = str(n.get("node_id") or n.get("id") or "")
-        ntype = str(n.get("type") or "service").lower()
         raw_maps = n.get("mapped_features") or n.get("maps_to_features") or []
         resolved_maps = []
         for m in raw_maps:
@@ -353,16 +383,18 @@ def step1_consolidate_plan(
                 else:
                     resolved_maps.append(m_str)
 
-        node_summaries.append({
+        node_entry: Dict[str, Any] = {
             "node_id": nid,
-            "type": ntype,
             "maps_to_features": resolved_maps
-        })
+        }
+        if n.get("type"):
+            node_entry["type"] = str(n["type"]).lower()
+        node_summaries.append(node_entry)
 
     # Cross-reference gaps detection
     gaps = []
 
-    # 1. feature_not_in_structure
+    # 1. feature_not_in_structure (hard blocker)
     for f in features:
         fid = str(f.get("id") or "")
         fname = str(f.get("name") or "")
@@ -373,14 +405,16 @@ def step1_consolidate_plan(
                 "title": fname
             })
 
-    # 2. structure_node_no_feature
+    # 2. structure_node_no_feature (informational-only)
     for n in node_summaries:
         if not n["maps_to_features"]:
-            gaps.append({
+            gap_item: Dict[str, Any] = {
                 "type": "structure_node_no_feature",
-                "node_id": n["node_id"],
-                "node_type": n["type"]
-            })
+                "node_id": n["node_id"]
+            }
+            if "type" in n:
+                gap_item["node_type"] = n["type"]
+            gaps.append(gap_item)
 
     diagram_refs = {
         "erd_id": diagram_state.get("accepted_schema_id") or "erd-v5",
@@ -589,15 +623,15 @@ def check_final_plan_lock_blockers(
     resolved_comment_ids: Set[str]
 ) -> List[str]:
     """
-    Evaluates the three §7 lock-blocking conditions independently:
+    Evaluates lock-blocking conditions independently (§7):
     1. Any feature_not_in_structure gap is open.
-    2. Any structure_node_no_feature gap is open for non-allowlisted node type.
-    3. Any exception_handling or security_considerations entry with severity = critical
+    2. Any exception_handling or security_considerations entry with severity = critical
        is not marked resolved via comments.
+    (structure_node_no_feature gaps are informational-only and never block lock).
     """
     blockers: List[str] = []
 
-    # 1 & 2: Evaluate cross_reference_gaps
+    # 1: Evaluate cross_reference_gaps (ONLY feature_not_in_structure blocks)
     gaps = consolidated_summary.get("cross_reference_gaps") or []
     for gap in gaps:
         gap_type = gap.get("type")
@@ -605,13 +639,8 @@ def check_final_plan_lock_blockers(
             fid = gap.get("feature_id") or "unknown"
             ftitle = gap.get("title") or ""
             blockers.append(f"Open feature_not_in_structure gap: Feature '{fid}' ({ftitle}) is not mapped to any structure node.")
-        elif gap_type == "structure_node_no_feature":
-            nid = gap.get("node_id") or "unknown"
-            ntype = str(gap.get("node_type") or "").lower()
-            if ntype not in INFRA_ALLOWLIST:
-                blockers.append(f"Open structure_node_no_feature gap: Node '{nid}' of non-allowlisted type '{ntype}' has no mapped features.")
 
-    # 3: Evaluate unresolved critical severity findings
+    # 2: Evaluate unresolved critical severity findings
     for item in (exception_handling or []) + (security_considerations or []):
         sev = str(item.get("severity") or "").lower()
         if sev == "critical":

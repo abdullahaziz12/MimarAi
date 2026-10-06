@@ -17,7 +17,7 @@ All tests run against REAL project data in the database with zero mock stubs:
 6.  Quality Validation & Targeted Fix-Pass (POST /final-plan/validate)
 7.  Timing Benchmarks for /final-plan/validate (< 30s Platform Ceiling)
 8.  Real Lock Blocker Rule 1: Open feature_not_in_structure gap (POST /final-plan/lock -> 409)
-9.  Real Lock Blocker Rule 2: Open structure_node_no_feature on non-allowlisted node (POST /final-plan/lock -> 409)
+9.  Informational Gap: structure_node_no_feature Present & Lock Allowed (POST /final-plan/lock -> 200)
 10. Real Lock Blocker Rule 3: Unresolved critical severity finding (POST /final-plan/lock -> 409)
 11. Real Successful Plan Lock: All blockers resolved (POST /final-plan/lock -> 200, status='locked', non-null locked_at & locked_by)
 12. Real Plan Re-Open Precondition Rejection: Reopen non-locked plan (POST /final-plan/reopen -> 409)
@@ -245,17 +245,13 @@ class V6LiveTester:
                 has_struct = bool(p_data.get("structure_state") or (p_data.get("structure_state", {}).get("accepted_structure")))
                 has_diag = bool((p_data.get("diagram_state") or {}).get("accepted_schema") or (p_data.get("diagram_state") or {}).get("candidate_draft"))
                 if has_feats and has_struct and has_diag:
-                    # Sync structure nodes to map cleanly to all features
-                    service_nodes = [
-                        {
-                            "node_id": f"node-{f.get('id', f'svc-{idx}')}",
-                            "type": "service",
-                            "mapped_features": [f.get("id"), f.get("name")]
-                        }
+                    # Sync structure nodes to map cleanly to all features using real V4 flat dict shape (§4)
+                    v4_structure = {
+                        f"src/services/service_{idx}.py": [f.get("name") or f.get("id")]
                         for idx, f in enumerate(feats, 1)
-                    ]
+                    }
                     self._request("POST", f"/api/projects/{target_id}/structure/accept", {
-                        "structure": {"nodes": service_nodes}
+                        "structure": v4_structure
                     })
                     self.project_id = target_id
                     is_prereq_ready = True
@@ -349,13 +345,13 @@ class V6LiveTester:
         active_feats = (proj_dict.get("generation_state") or {}).get("features", [])
 
         # ---------------------------------------------------------------------
-        # Step 6: Real Lock Blocker 1 — Open feature_not_in_structure Gap (409)
+        # Step 5: Real Lock Blocker Rule 1: Open feature_not_in_structure Gap (409)
         # ---------------------------------------------------------------------
         # Set structure that maps only 1 feature, leaving other active features unmapped
-        partial_nodes = [
-            {"node_id": "node-partial-svc", "type": "service", "mapped_features": [active_feats[0].get("id", "feat-1")]}
-        ]
-        self._request("POST", f"/api/projects/{self.project_id}/structure/accept", {"structure": {"nodes": partial_nodes}})
+        partial_structure = {
+            "src/services/partial_service.py": [active_feats[0].get("name") or active_feats[0].get("id", "feat-1")]
+        }
+        self._request("POST", f"/api/projects/{self.project_id}/structure/accept", {"structure": partial_structure})
         self._request("POST", gen_endpoint, timeout=50.0)
         self._request("POST", val_endpoint, timeout=50.0)
 
@@ -369,37 +365,76 @@ class V6LiveTester:
         )
 
         # ---------------------------------------------------------------------
-        # Step 7: Real Lock Blocker 2 — Open structure_node_no_feature Gap (409)
+        # Step 6: Informational Gap: structure_node_no_feature Present & Lock Allowed (200 OK)
         # ---------------------------------------------------------------------
-        # Set structure to include an unmapped non-allowlisted custom node
-        unmapped_nodes = [
-            {"node_id": f"node-{f.get('id', idx)}", "type": "service", "mapped_features": [f.get("id")]}
+        # Set structure mapping all features to files, plus an unmapped file (structure_node_no_feature)
+        info_structure = {
+            f"src/services/svc_{idx}.py": [f.get("name") or f.get("id")]
             for idx, f in enumerate(active_feats, 1)
-        ] + [
-            {"node_id": "node-custom-analytics", "type": "custom_analytics", "mapped_features": []}
-        ]
-        self._request("POST", f"/api/projects/{self.project_id}/structure/accept", {"structure": {"nodes": unmapped_nodes}})
+        }
+        info_structure["src/utils/custom_analytics.py"] = []
+        self._request("POST", f"/api/projects/{self.project_id}/structure/accept", {"structure": info_structure})
         self._request("POST", gen_endpoint, timeout=50.0)
-        self._request("POST", val_endpoint, timeout=50.0)
+        
+        # Clean non-critical findings for informational gap test
+        clean_exc_info = [
+            {
+                "id": "exc-info-001",
+                "category": "exception_handling",
+                "title": "Payment Gateway Timeout Handling",
+                "description": "Retry payment processing up to three times with exponential backoff before failing.",
+                "related_feature_ids": [active_feats[0].get("id", "feat-1")] if active_feats else ["feat-1"],
+                "related_structure_node_ids": ["src/services/svc_1.py"],
+                "severity": "high",
+                "provenance": "derived_from_business_rule",
+                "reasoning": None
+            }
+        ]
+        clean_sec_info = [
+            {
+                "id": "sec-info-001",
+                "category": "security",
+                "title": "Bcrypt Password Hashing Standard",
+                "description": "Store all user passwords hashed with bcrypt using at least twelve work factor rounds.",
+                "related_feature_ids": [active_feats[0].get("id", "feat-1")] if active_feats else ["feat-1"],
+                "related_structure_node_ids": ["src/services/svc_1.py"],
+                "severity": "high",
+                "provenance": "derived_from_business_rule",
+                "reasoning": None
+            }
+        ]
+        self._request("POST", val_endpoint, {
+            "exception_handling": clean_exc_info,
+            "security_considerations": clean_sec_info
+        })
 
+        # Confirm structure_node_no_feature gap is present in consolidated_summary via GET /final-plan
+        _, resp_get_info, _ = self._request("GET", f"/projects/{self.project_id}/final-plan")
+        plan_summary = (resp_get_info.get("final_plan") or {}).get("consolidated_summary", {})
+        has_node_gap = any(g.get("type") == "structure_node_no_feature" and g.get("node_id") == "src/utils/custom_analytics.py" for g in plan_summary.get("cross_reference_gaps", []))
+
+        # Attempt lock: per corrected §4/§7, structure_node_no_feature is informational-only and MUST NOT block lock
         code_gap2, resp_gap2, lat_gap2 = self._request("POST", f"/projects/{self.project_id}/final-plan/lock")
-        is_gap2_pass = (code_gap2 == 409 and "structure_node_no_feature" in str(resp_gap2))
+        is_gap2_pass = (code_gap2 == 200 and has_node_gap and resp_gap2.get("plan_status") == "locked")
         self.record_step(
-            6, "Real Lock Blocker Rule 2: Open structure_node_no_feature Gap (Non-Allowlisted)",
+            6, "Informational Gap: structure_node_no_feature Present & Lock Allowed (200 OK)",
             "POST", f"/projects/{self.project_id}/final-plan/lock", None,
-            code_gap2, 409, resp_gap2, lat_gap2, is_gap2_pass,
-            notes="Live backend evaluated real project state, detected non-allowlisted unmapped node 'custom_analytics', and blocked lock with 409 Conflict."
+            code_gap2, 200, resp_gap2, lat_gap2, is_gap2_pass,
+            notes="Confirmed structure_node_no_feature gap is present in consolidated_summary as informational-only, and plan lock succeeded with 200 OK."
         )
 
+        # Reopen plan back to draft so subsequent blocker and lock tests can execute cleanly
+        self._request("POST", f"/projects/{self.project_id}/final-plan/reopen", {"reason": "Resetting to draft for critical finding blocker test."})
+
         # ---------------------------------------------------------------------
-        # Step 8: Real Lock Blocker 3 — Unresolved Critical Severity Finding (409)
+        # Step 7: Real Lock Blocker Rule 3: Unresolved Critical Severity Finding (409)
         # ---------------------------------------------------------------------
         # First restore clean structure covering all features
-        all_mapped_nodes = [
-            {"node_id": f"node-{f.get('id', idx)}", "type": "service", "mapped_features": [f.get("id"), f.get("name")]}
+        all_mapped_structure = {
+            f"src/services/svc_{idx}.py": [f.get("name") or f.get("id")]
             for idx, f in enumerate(active_feats, 1)
-        ]
-        self._request("POST", f"/api/projects/{self.project_id}/structure/accept", {"structure": {"nodes": all_mapped_nodes}})
+        }
+        self._request("POST", f"/api/projects/{self.project_id}/structure/accept", {"structure": all_mapped_structure})
         self._request("POST", gen_endpoint, timeout=50.0)
 
         crit_finding = [
@@ -409,7 +444,7 @@ class V6LiveTester:
                 "title": "Unauthenticated Administrative API Access Vulnerability",
                 "description": "Administrative routes must strictly require multi-factor authentication and role verification.",
                 "related_feature_ids": [active_feats[0].get("id", "feat-1")] if active_feats else ["feat-1"],
-                "related_structure_node_ids": ["node-1"],
+                "related_structure_node_ids": ["src/services/svc_1.py"],
                 "severity": "critical",
                 "provenance": "derived_from_business_rule"
             }
@@ -419,7 +454,7 @@ class V6LiveTester:
         
         lock_endpoint = f"/projects/{self.project_id}/final-plan/lock"
         code_lock_c, resp_lock_c, lat_lock_c = self._request("POST", lock_endpoint)
-        is_crit_blocked = (code_lock_c == 409 and "blockers" in str(resp_lock_c))
+        is_crit_blocked = (code_lock_c == 409 and "blockers" in str(resp_lock_c) and "crit-sec-001" in str(resp_lock_c))
         
         self.record_step(
             7, "Real Lock Blocker Rule 3: Unresolved Critical Severity Finding",
@@ -429,8 +464,18 @@ class V6LiveTester:
         )
 
         # ---------------------------------------------------------------------
-        # Step 9: Real Successful Plan Lock (All Blockers Resolved -> 200 OK)
+        # Step 8: Real Successful Plan Lock (All Blockers Resolved -> 200 OK)
         # ---------------------------------------------------------------------
+        # Map all real features into real V4 structure
+        clean_v4_structure = {
+            f"src/services/service_{idx}.py": [f.get("name") or f.get("id")]
+            for idx, f in enumerate(active_feats, 1)
+        }
+        self._request("POST", f"/api/projects/{self.project_id}/structure/accept", {"structure": clean_v4_structure})
+        
+        # Explicitly call /final-plan/generate AFTER structure sync so consolidated_summary has zero gaps
+        self._request("POST", gen_endpoint, timeout=50.0)
+
         # Validate with clean non-critical findings
         clean_exc = [
             {
@@ -439,7 +484,7 @@ class V6LiveTester:
                 "title": "Payment Gateway Timeout Handling",
                 "description": "Retry payment processing up to three times with exponential backoff before failing.",
                 "related_feature_ids": [active_feats[0].get("id", "feat-1")] if active_feats else ["feat-1"],
-                "related_structure_node_ids": ["node-1"],
+                "related_structure_node_ids": ["src/services/service_1.py"],
                 "severity": "high",
                 "provenance": "derived_from_business_rule",
                 "reasoning": None
@@ -452,7 +497,7 @@ class V6LiveTester:
                 "title": "Bcrypt Password Hashing Standard",
                 "description": "Store all user passwords hashed with bcrypt using at least twelve work factor rounds.",
                 "related_feature_ids": [active_feats[0].get("id", "feat-1")] if active_feats else ["feat-1"],
-                "related_structure_node_ids": ["node-1"],
+                "related_structure_node_ids": ["src/services/service_1.py"],
                 "severity": "high",
                 "provenance": "derived_from_business_rule",
                 "reasoning": None

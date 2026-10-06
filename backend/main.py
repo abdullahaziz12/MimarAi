@@ -289,7 +289,7 @@ class ContactMessage(BaseModel):
 
 # --- V4 Project Structure Generation Schemas ---
 class StructureAcceptRequest(BaseModel):
-    structure: Optional[Dict[str, List[str]]] = None
+    structure: Optional[Union[Dict[str, List[str]], Dict[str, Any]]] = None
 
 
 # --- V5 Diagram Generation Schemas ---
@@ -6283,6 +6283,7 @@ async def get_rate_limits_status(user: Dict[str, Any] = Depends(get_current_user
 try:
     from backend.v6_final_plan import (
         step1_consolidate_plan,
+        parse_v4_structure_to_nodes,
         diff_merge_final_plan_drafts,
         evaluate_v6_quality_validation,
         check_final_plan_lock_blockers,
@@ -6292,6 +6293,7 @@ try:
 except ImportError:
     from v6_final_plan import (
         step1_consolidate_plan,
+        parse_v4_structure_to_nodes,
         diff_merge_final_plan_drafts,
         evaluate_v6_quality_validation,
         check_final_plan_lock_blockers,
@@ -6390,15 +6392,7 @@ async def generate_final_plan(
 
     struct_state = project.get("structure_state") or {}
     raw_accepted = struct_state.get("accepted_structure") or struct_state.get("candidate_structure") or struct_state.get("structure") or {}
-    if isinstance(raw_accepted, dict):
-        if "structure" in raw_accepted and isinstance(raw_accepted["structure"], dict):
-            structure_nodes = raw_accepted["structure"].get("nodes", [])
-        elif "nodes" in raw_accepted:
-            structure_nodes = raw_accepted.get("nodes", [])
-        else:
-            structure_nodes = []
-    else:
-        structure_nodes = []
+    structure_nodes = parse_v4_structure_to_nodes(raw_accepted)
 
     diag_state = project.get("diagram_state") or {}
 

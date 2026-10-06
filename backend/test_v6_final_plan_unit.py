@@ -14,6 +14,7 @@ from backend.v6_final_plan import (
     validate_v6_list_non_duplicate,
     evaluate_v6_quality_validation,
     step1_consolidate_plan,
+    parse_v4_structure_to_nodes,
     diff_merge_findings,
     diff_merge_directives,
     diff_merge_final_plan_drafts,
@@ -214,7 +215,23 @@ class TestStep1ConsolidationAndGaps(unittest.TestCase):
         self.assertEqual(len(gaps), 1)
         self.assertEqual(gaps[0]["type"], "structure_node_no_feature")
         self.assertEqual(gaps[0]["node_id"], "node-analytics")
-        self.assertEqual(gaps[0]["node_type"], "analytics_engine")
+
+    def test_parse_v4_structure_to_nodes(self):
+        """Parses flat V4 structure dict into nodes without synthesizing types (§4)."""
+        v4_dict = {
+            "structure": {
+                "src/routes/patient.py": ["Patient Intake", "feat-1"],
+                "src/services/billing.py": ["Stripe Billing"],
+                "src/utils/config.py": []
+            }
+        }
+        nodes = parse_v4_structure_to_nodes(v4_dict)
+        self.assertEqual(len(nodes), 3)
+        self.assertEqual(nodes[0]["node_id"], "src/routes/patient.py")
+        self.assertEqual(nodes[0]["mapped_features"], ["Patient Intake", "feat-1"])
+        self.assertNotIn("type", nodes[0])
+        self.assertEqual(nodes[2]["node_id"], "src/utils/config.py")
+        self.assertEqual(nodes[2]["mapped_features"], [])
 
 
 class TestDiffMergeAlgorithm(unittest.TestCase):
@@ -326,27 +343,15 @@ class TestLockBlockingRules(unittest.TestCase):
         self.assertEqual(len(blockers), 1)
         self.assertIn("feature_not_in_structure", blockers[0])
 
-    def test_lock_blocked_by_non_allowlisted_node_without_feature(self):
-        """Open structure_node_no_feature gap on non-allowlisted type blocks lock."""
+    def test_structure_node_no_feature_is_informational_and_does_not_block_lock(self):
+        """structure_node_no_feature is informational-only (§4, §7) and never blocks lock."""
         summary = {
             "cross_reference_gaps": [
-                {"type": "structure_node_no_feature", "node_id": "node-custom", "node_type": "custom_analytics"}
+                {"type": "structure_node_no_feature", "node_id": "src/utils/config.py"}
             ]
         }
         blockers = check_final_plan_lock_blockers(summary, [], [], set())
-        self.assertEqual(len(blockers), 1)
-        self.assertIn("structure_node_no_feature", blockers[0])
-
-    def test_lock_allowed_for_allowlisted_infra_nodes(self):
-        """Structure nodes in INFRA_ALLOWLIST without features do NOT block lock."""
-        for infra_type in ["database", "auth_middleware", "api_gateway", "cache", "queue", "logging", "deployment_config"]:
-            summary = {
-                "cross_reference_gaps": [
-                    {"type": "structure_node_no_feature", "node_id": f"node-{infra_type}", "node_type": infra_type}
-                ]
-            }
-            blockers = check_final_plan_lock_blockers(summary, [], [], set())
-            self.assertEqual(len(blockers), 0)
+        self.assertEqual(len(blockers), 0)
 
     def test_lock_blocked_by_unresolved_critical_finding(self):
         """Unresolved critical finding blocks lock until comment resolved."""

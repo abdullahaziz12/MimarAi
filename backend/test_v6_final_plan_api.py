@@ -83,9 +83,7 @@ class TestV6FinalPlanApi(unittest.IsolatedAsyncioTestCase):
                 "status": "accepted",
                 "accepted_structure": {
                     "structure": {
-                        "nodes": [
-                            {"node_id": "node-pay", "type": "service", "mapped_features": ["feat-1"]}
-                        ]
+                        "src/services/pay.py": ["feat-1"]
                     }
                 }
             },
@@ -283,12 +281,12 @@ class TestV6FinalPlanApi(unittest.IsolatedAsyncioTestCase):
 
     @patch("backend.main.get_owned_project")
     @patch("backend.main.get_supabase")
-    def test_lock_blocked_by_non_allowlisted_node_409(
+    def test_lock_not_blocked_by_structure_node_no_feature_200(
         self,
         mock_get_supabase,
         mock_get_owned_project
     ):
-        """Rule 2: Open structure_node_no_feature on non-allowlisted node blocks lock with 409."""
+        """structure_node_no_feature is informational-only (§4, §7) and does NOT block lock (200 OK)."""
         mock_get_owned_project.return_value = {"id": self.project_id, "status": "diagram_accepted"}
 
         plan_record = {
@@ -297,7 +295,7 @@ class TestV6FinalPlanApi(unittest.IsolatedAsyncioTestCase):
             "status": "under_review",
             "consolidated_summary": {
                 "cross_reference_gaps": [
-                    {"type": "structure_node_no_feature", "node_id": "node-crawler", "node_type": "web_crawler"}
+                    {"type": "structure_node_no_feature", "node_id": "src/utils/config.py"}
                 ]
             },
             "exception_handling": [],
@@ -311,6 +309,7 @@ class TestV6FinalPlanApi(unittest.IsolatedAsyncioTestCase):
         mock_eq.execute.return_value = MagicMock(data=[plan_record])
         mock_select.eq.return_value = mock_eq
         mock_table.select.return_value = mock_select
+        mock_table.update.return_value = mock_eq
         mock_client.table.return_value = mock_table
         mock_get_supabase.return_value = mock_client
 
@@ -318,10 +317,10 @@ class TestV6FinalPlanApi(unittest.IsolatedAsyncioTestCase):
             f"/api/projects/{self.project_id}/final-plan/lock",
             headers=self.auth_headers
         )
-        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertIn("blockers", data)
-        self.assertTrue(any("structure_node_no_feature" in b for b in data["blockers"]))
+        self.assertEqual(data["plan_status"], "locked")
+        self.assertIsNotNone(data["locked_at"])
 
     @patch("backend.main.get_owned_project")
     @patch("backend.main.get_supabase")
