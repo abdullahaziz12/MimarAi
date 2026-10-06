@@ -508,6 +508,36 @@ class TestV6FinalPlanApi(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["plan_status"], "draft")
         self.assertEqual(data["reopen_reason"], "Client requested additional HIPAA compliance safeguards.")
 
+    @patch("backend.main.get_owned_project")
+    @patch("backend.main.get_supabase")
+    def test_reopen_fails_with_409_when_not_locked(
+        self,
+        mock_get_supabase,
+        mock_get_owned_project
+    ):
+        """Re-open on a plan with status != 'locked' (e.g. 'draft' or 'under_review') returns 409."""
+        mock_get_owned_project.return_value = {"id": self.project_id, "status": "diagram_accepted"}
+
+        plan_record = {"id": str(uuid.uuid4()), "project_id": self.project_id, "status": "under_review"}
+
+        mock_client = MagicMock()
+        mock_table = MagicMock()
+        mock_select = MagicMock()
+        mock_eq = MagicMock()
+        mock_eq.execute.return_value = MagicMock(data=[plan_record])
+        mock_select.eq.return_value = mock_eq
+        mock_table.select.return_value = mock_select
+        mock_client.table.return_value = mock_table
+        mock_get_supabase.return_value = mock_client
+
+        response = self.client.post(
+            f"/api/projects/{self.project_id}/final-plan/reopen",
+            headers=self.auth_headers,
+            json={"reason": "Attempting to reopen a draft plan."}
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("locked", response.json()["message"].lower())
+
     # =========================================================================
     # 7. GET FINAL PLAN ENDPOINT
     # =========================================================================

@@ -6813,6 +6813,13 @@ async def reopen_final_plan(
     if not rows:
         raise HTTPException(status_code=404, detail="No final plan found for this project.")
 
+    current_status = rows[0].get("status")
+    if current_status != "locked":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot reopen a final plan with status '{current_status}'. Only plans in 'locked' status can be reopened."
+        )
+
     now_iso = datetime.now(timezone.utc).isoformat()
     client.table("final_plans").update({
         "status": "draft",

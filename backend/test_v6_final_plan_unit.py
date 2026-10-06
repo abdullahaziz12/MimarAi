@@ -262,6 +262,57 @@ class TestDiffMergeAlgorithm(unittest.TestCase):
         # Severities critical vs medium + opposing guidance -> conflict should be True
         self.assertTrue(merged_exc[0]["conflict"])
 
+    def test_diff_merge_guarantees_unique_ids_no_collisions(self):
+        """Diff/merge guarantees fresh, distinct, sequential IDs with zero ID collisions across all 3 lists."""
+        draft_a = {
+            "exception_handling": [
+                {"id": "exc-1", "title": "Database Connection Timeout Handling", "related_feature_ids": ["feat-1"], "severity": "high"},
+                {"id": "exc-2", "title": "Kafka Consumer Lag Exception Recovery", "related_feature_ids": ["feat-2"], "severity": "medium"}
+            ],
+            "security_considerations": [
+                {"id": "sec-1", "title": "JWT Token Signature Verification Policy", "related_feature_ids": ["feat-1"], "severity": "high"},
+                {"id": "sec-2", "title": "Rate Limiting on Authentication Endpoints", "related_feature_ids": ["feat-1"], "severity": "medium"}
+            ],
+            "mandatory_directives": [
+                {"id": "dir-1", "directive": "Store all monetary amounts as integer cents.", "source_ref_id": "feat-1", "non_negotiable": True},
+                {"id": "dir-2", "directive": "Use parameterized queries for all database interactions.", "source_ref_id": "feat-1", "non_negotiable": True}
+            ]
+        }
+        draft_b = {
+            "exception_handling": [
+                {"id": "exc-1", "title": "Redis Cache Eviction Failure Handler", "related_feature_ids": ["feat-3"], "severity": "low"},
+                {"id": "exc-2", "title": "Stripe Webhook Delivery Failure Handler", "related_feature_ids": ["feat-4"], "severity": "high"}
+            ],
+            "security_considerations": [
+                {"id": "sec-1", "title": "CORS Allowed Origins Restriction Standard", "related_feature_ids": ["feat-3"], "severity": "medium"},
+                {"id": "sec-2", "title": "Strict Content Security Policy Header", "related_feature_ids": ["feat-4"], "severity": "high"}
+            ],
+            "mandatory_directives": [
+                {"id": "dir-1", "directive": "Enforce TLS 1.3 encryption on all external network communication.", "source_ref_id": "feat-3", "non_negotiable": True},
+                {"id": "dir-2", "directive": "Log all administrative actions into immutable audit trail.", "source_ref_id": "feat-4", "non_negotiable": True}
+            ]
+        }
+
+        merged = diff_merge_final_plan_drafts(draft_a, draft_b)
+
+        # 1. Exception handling IDs
+        exc_ids = [item["id"] for item in merged["exception_handling"]]
+        self.assertEqual(len(exc_ids), 4)
+        self.assertEqual(len(set(exc_ids)), 4, "Exception handling list contains duplicate IDs!")
+        self.assertEqual(exc_ids, ["exc-1", "exc-2", "exc-3", "exc-4"])
+
+        # 2. Security consideration IDs
+        sec_ids = [item["id"] for item in merged["security_considerations"]]
+        self.assertEqual(len(sec_ids), 4)
+        self.assertEqual(len(set(sec_ids)), 4, "Security considerations list contains duplicate IDs!")
+        self.assertEqual(sec_ids, ["sec-1", "sec-2", "sec-3", "sec-4"])
+
+        # 3. Mandatory directive IDs
+        dir_ids = [item["id"] for item in merged["mandatory_directives"]]
+        self.assertEqual(len(dir_ids), 4)
+        self.assertEqual(len(set(dir_ids)), 4, "Mandatory directives list contains duplicate IDs!")
+        self.assertEqual(dir_ids, ["dir-1", "dir-2", "dir-3", "dir-4"])
+
 
 class TestLockBlockingRules(unittest.TestCase):
     def test_lock_blocked_by_feature_not_in_structure(self):

@@ -537,6 +537,8 @@ def diff_merge_final_plan_drafts(
 ) -> Dict[str, Any]:
     """
     Merges independent AI drafts into a single candidate final plan.
+    Assigns fresh, guaranteed-unique sequential IDs to every entry in each list
+    (exc-1..N, sec-1..N, dir-1..N) to prevent ID collisions from independent drafts.
     """
     exc_a = draft_a.get("exception_handling") or []
     exc_b = draft_b.get("exception_handling") or []
@@ -549,6 +551,16 @@ def diff_merge_final_plan_drafts(
     dir_a = draft_a.get("mandatory_directives") or []
     dir_b = draft_b.get("mandatory_directives") or []
     merged_dir = diff_merge_directives(dir_a, dir_b)
+
+    # Reassign fresh guaranteed-unique IDs to prevent collisions between drafts
+    for idx, item in enumerate(merged_exc, start=1):
+        item["id"] = f"exc-{idx}"
+
+    for idx, item in enumerate(merged_sec, start=1):
+        item["id"] = f"sec-{idx}"
+
+    for idx, item in enumerate(merged_dir, start=1):
+        item["id"] = f"dir-{idx}"
 
     return {
         "exception_handling": merged_exc,
