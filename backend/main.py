@@ -766,11 +766,32 @@ def check_regex_prefilter(text: str) -> bool:
         return True
     return False
 
-def _update_project_step0_state(client, project_id, classification_result, current_state):
+def append_transcript_entries(step0_state: dict, new_entries: list) -> list:
+    """Appends entries to conversation_transcript inside step0_state and caps at 200 entries."""
+    if not isinstance(step0_state, dict):
+        return []
+    transcript = list(step0_state.get("conversation_transcript") or [])
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for entry in new_entries:
+        if not isinstance(entry, dict):
+            continue
+        item = dict(entry)
+        if not item.get("id"):
+            item["id"] = f"tr-{uuid.uuid4()}"
+        if not item.get("created_at"):
+            item["created_at"] = now_iso
+        transcript.append(item)
+    if len(transcript) > 200:
+        transcript = transcript[-200:]
+    step0_state["conversation_transcript"] = transcript
+    return transcript
+
+
+def _update_project_step0_state(client, project_id, classification_result, current_state, idea_text=None):
     if not client or not project_id:
         return
     try:
-        state = current_state or {"round_count": 0, "off_topic_streak": 0, "last_label": None}
+        state = dict(current_state or {"round_count": 0, "off_topic_streak": 0, "last_label": None})
         label = classification_result.get("label")
         
         round_count = state.get("round_count", 0)
@@ -786,16 +807,44 @@ def _update_project_step0_state(client, project_id, classification_result, curre
         else:
             round_count = 0
 
-        new_state = {
-            "round_count": round_count,
-            "off_topic_streak": off_topic_streak,
-            "last_label": label,
-            "last_sub_case": classification_result.get("sub_case"),
-            "extracted_name": classification_result.get("extracted_name"),
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }
+        state["round_count"] = round_count
+        state["off_topic_streak"] = off_topic_streak
+        state["last_label"] = label
+        state["last_sub_case"] = classification_result.get("sub_case")
+        state["extracted_name"] = classification_result.get("extracted_name")
+        state["updated_at"] = datetime.now(timezone.utc).isoformat()
 
-        client.table("projects").update({"step0_state": new_state}).eq("id", project_id).execute()
+        # Append transcript entries for user idea and initial AI response
+        new_entries = []
+        if idea_text and str(idea_text).strip():
+            new_entries.append({
+                "role": "user",
+                "text": str(idea_text).strip(),
+                "kind": "idea_submitted"
+            })
+        if label == "READY":
+            new_entries.append({
+                "role": "ai",
+                "text": "Great! Your project idea looks clear and ready for architecture planning.",
+                "kind": "ready"
+            })
+        elif label == "TOO_VAGUE":
+            new_entries.append({
+                "role": "ai",
+                "text": classification_result.get("explanation") or "Please provide more details on what software you want to build.",
+                "kind": "contradiction_prompt"
+            })
+        elif label == "OFF_TOPIC":
+            new_entries.append({
+                "role": "ai",
+                "text": classification_result.get("explanation") or "That seems outside our software architecture focus. What system would you like to build?",
+                "kind": "contradiction_prompt"
+            })
+
+        if new_entries:
+            append_transcript_entries(state, new_entries)
+
+        client.table("projects").update({"step0_state": state}).eq("id", project_id).execute()
     except Exception as e:
         raise HTTPException(
             status_code=502,
@@ -845,7 +894,8 @@ async def get_draft_projects(
         raise HTTPException(status_code=503, detail="Project storage is unavailable.")
 
     try:
-        res = client.table("projects").select("*").eq("owner_id", user_id).eq("status", "draft").order("created_at", desc=True).execute()
+        # §2.5: Drop status='draft' filter so all uncompleted / in-progress drafts remain visible
+        res = client.table("projects").select("*").eq("owner_id", user_id).order("created_at", desc=True).execute()
         return {"drafts": res.data or []}
     except Exception as e:
         print(f"[Get Draft Projects Error] {e}")
@@ -888,6 +938,16 @@ async def get_project_state(
     lightweight_draft_data = project.get("lightweight_draft")
     last_contra = step0_state.get("last_contradiction_result") or {}
 
+    # §2.4: Fetch final plan state from final_plans table or project JSONB
+    final_plan_state = project.get("final_plan_state") or None
+    if client and not project_id.startswith("local-draft-"):
+        try:
+            fp_res = client.table("final_plans").select("*").eq("project_id", project_id).execute()
+            if fp_res and fp_res.data:
+                final_plan_state = fp_res.data[0]
+        except Exception as e_fp:
+            print(f"[Fetch Final Plan Warning in Project State] {e_fp}")
+
     return {
         "status": "ok",
         "project": {
@@ -902,6 +962,7 @@ async def get_project_state(
             "generation_state": project.get("generation_state") or {},
             "structure_state": project.get("structure_state") or {},
             "diagram_state": project.get("diagram_state") or {},
+            "final_plan_state": final_plan_state,
             "density_flags": project.get("density_flags") or dict(DEFAULT_DENSITY_FLAGS),
             "personas": personas_data,
             "nfrs": nfrs_data,
@@ -1018,7 +1079,7 @@ async def classify_idea(
             "explanation": "Greeting or minimal chit-chat detected.",
             "source": "prefilter"
         }
-        _update_project_step0_state(client, req.project_id, result_payload, req.step0_state)
+        _update_project_step0_state(client, req.project_id, result_payload, req.step0_state, idea_text=idea_text)
         return result_payload
 
     # A concrete domain plus a capability is sufficient to proceed. Do not let
@@ -1032,7 +1093,7 @@ async def classify_idea(
             "explanation": "A project domain and concrete capabilities were identified.",
             "source": "scope_prefilter"
         }
-        _update_project_step0_state(client, req.project_id, result_payload, req.step0_state)
+        _update_project_step0_state(client, req.project_id, result_payload, req.step0_state, idea_text=idea_text)
         return result_payload
 
     # 4. Groq API Call
@@ -1107,7 +1168,7 @@ Output strictly valid JSON with no markdown formatting:
                 "source": "groq"
             }
 
-            _update_project_step0_state(client, req.project_id, result_payload, req.step0_state)
+            _update_project_step0_state(client, req.project_id, result_payload, req.step0_state, idea_text=idea_text)
             return result_payload
 
     except httpx.TimeoutException:
@@ -1974,7 +2035,7 @@ If a genuine contradiction is found:
 
         # Update project step0_state and density_flags with contradiction resolution outcome
         try:
-            step0_state = project.get("step0_state") or {}
+            step0_state = dict(project.get("step0_state") or {})
             step0_state["last_contradiction_result"] = {
                 "found": found,
                 "explanation": explanation,
@@ -1987,6 +2048,23 @@ If a genuine contradiction is found:
                 step0_state["contradiction_unresolved"] = True
             elif not found:
                 step0_state["contradiction_unresolved"] = False
+
+            # Append transcript entries
+            contra_entries = []
+            if found and explanation:
+                contra_entries.append({
+                    "role": "ai",
+                    "text": explanation,
+                    "kind": "contradiction_prompt"
+                })
+            if resolved_answer and str(resolved_answer).strip():
+                contra_entries.append({
+                    "role": "user",
+                    "text": str(resolved_answer).strip(),
+                    "kind": "contradiction_resolved"
+                })
+            if contra_entries:
+                append_transcript_entries(step0_state, contra_entries)
 
             client.table("projects").update({
                 "step0_state": step0_state,
@@ -2096,6 +2174,13 @@ You MUST respond strictly with a valid JSON object matching this schema:
 
     inserted_questions = []
     if client and not project_id.startswith("local-draft-"):
+        # §1.1: Data hygiene - hard delete any existing unanswered rows for this project before inserting a fresh batch
+        try:
+            client.table("clarifying_questions").delete().eq("project_id", project_id).is_("answer", "null").execute()
+            client.table("clarifying_questions").delete().eq("project_id", project_id).eq("answer", "").execute()
+        except Exception as e_del:
+            print(f"[Clarifying Questions Cleanup Warning] {e_del}")
+
         for q_text in questions:
             try:
                 insert_res = client.table("clarifying_questions").insert({
@@ -2121,6 +2206,15 @@ You MUST respond strictly with a valid JSON object matching this schema:
                     status_code=502,
                     detail="Failed to persist clarifying question."
                 ) from e
+
+        # §1.5: Append clarifying questions to conversation_transcript
+        try:
+            step0_state = dict(project.get("step0_state") or {})
+            q_entries = [{"role": "ai", "text": q, "kind": "clarifying_question"} for q in questions]
+            append_transcript_entries(step0_state, q_entries)
+            client.table("projects").update({"step0_state": step0_state}).eq("id", project_id).execute()
+        except Exception as e_qtr:
+            print(f"[Clarifying Questions Transcript Warning] {e_qtr}")
     else:
         for q_text in questions:
             inserted_questions.append({
@@ -2151,11 +2245,17 @@ async def submit_clarifying_answers(
         raise HTTPException(status_code=400, detail="Answers list cannot be empty.")
 
     updated_count = 0
+    answer_entries = []
     for item in req.answers:
         q_id = item.question_id
         ans = (item.answer or "").strip()
         if not ans:
             continue
+        answer_entries.append({
+            "role": "user",
+            "text": ans,
+            "kind": "clarifying_answer"
+        })
         if client and not project_id.startswith("local-draft-"):
             try:
                 UUID(q_id)
@@ -2170,7 +2270,7 @@ async def submit_clarifying_answers(
     # Fold answers into project step0_state for downstream generation
     if client and not project_id.startswith("local-draft-"):
         try:
-            step0_state = project.get("step0_state") or {}
+            step0_state = dict(project.get("step0_state") or {})
             qa_list = []
             try:
                 records = client.table("clarifying_questions").select("id, question, answer").eq("project_id", project_id).order("created_at", desc=False).execute()
@@ -2181,6 +2281,10 @@ async def submit_clarifying_answers(
 
             step0_state["clarifying_qa"] = qa_list
             step0_state["clarifying_completed"] = True
+
+            # §1.5: Append clarifying answers to conversation_transcript in the exact same write
+            if answer_entries:
+                append_transcript_entries(step0_state, answer_entries)
 
             project_update = {"step0_state": step0_state}
             # V3.11: If a lightweight draft was already confirmed, invalidate it on edit
@@ -2246,8 +2350,13 @@ async def submit_personas(
     }
 
     if client and not project_id.startswith("local-draft-"):
-        step0_state = project.get("step0_state") or {}
+        step0_state = dict(project.get("step0_state") or {})
         step0_state["personas"] = persona_record
+        append_transcript_entries(step0_state, [{
+            "role": "user",
+            "text": answer,
+            "kind": "persona_capture"
+        }])
 
         project_update = {
             "personas": persona_record,
@@ -2340,8 +2449,13 @@ async def submit_nfrs(
     }
 
     if client and not project_id.startswith("local-draft-"):
-        step0_state = project.get("step0_state") or {}
+        step0_state = dict(project.get("step0_state") or {})
         step0_state["nfrs"] = nfr_record
+        append_transcript_entries(step0_state, [{
+            "role": "user",
+            "text": f"Scale: {scale}, Sensitivity: {data_sensitivity}, Availability: {availability}",
+            "kind": "nfr_capture"
+        }])
 
         project_update = {
             "nfrs": nfr_record,
@@ -2405,11 +2519,18 @@ async def edit_contradiction_resolution(
     client = get_supabase(token)
     project = get_owned_project(client, user_id, project_id)
 
-    step0_state = project.get("step0_state") or {}
-    last_contra = step0_state.get("last_contradiction_result") or {}
+    step0_state = dict(project.get("step0_state") or {})
+    last_contra = dict(step0_state.get("last_contradiction_result") or {})
     last_contra["resolved_answer"] = req.resolved_answer
     last_contra["checked_at"] = datetime.now(timezone.utc).isoformat()
     step0_state["last_contradiction_result"] = last_contra
+
+    if req.resolved_answer and str(req.resolved_answer).strip():
+        append_transcript_entries(step0_state, [{
+            "role": "user",
+            "text": str(req.resolved_answer).strip(),
+            "kind": "contradiction_resolved"
+        }])
 
     update_payload = {"step0_state": step0_state}
 
@@ -6768,6 +6889,15 @@ async def lock_final_plan(
     }
 
     client.table("final_plans").update(update_payload).eq("project_id", project_id).execute()
+    try:
+        merged_plan_state = dict(current_plan)
+        merged_plan_state.update(update_payload)
+        client.table("projects").update({
+            "final_plan_state": merged_plan_state,
+            "status": "final_locked"
+        }).eq("id", project_id).execute()
+    except Exception as e_pfp:
+        print(f"[Project Final Plan Sync Warning] {e_pfp}")
     gaps = (current_plan.get("consolidated_summary") or {}).get("cross_reference_gaps", [])
 
     return {

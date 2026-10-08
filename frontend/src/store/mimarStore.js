@@ -508,6 +508,36 @@ export const useMimarStore = create((set, get) => ({
               );
             });
             if (matchingDraft?.id) {
+              const s0 = matchingDraft.step0_state || {};
+              const genState = matchingDraft.generation_state || {};
+              const structState = matchingDraft.structure_state || {};
+              const diagState = matchingDraft.diagram_state || {};
+              const finalPlanState = matchingDraft.final_plan_state || {};
+
+              const hasProgress = Boolean(
+                s0.last_label ||
+                s0.clarifying_completed ||
+                matchingDraft.personas || s0.personas ||
+                matchingDraft.nfrs || s0.nfrs ||
+                (Array.isArray(genState.features) && genState.features.length > 0) ||
+                genState.features_locked ||
+                structState.status === "accepted" ||
+                Boolean(structState.accepted_structure) ||
+                diagState.status === "accepted" ||
+                Boolean(diagState.accepted_schema) ||
+                finalPlanState.status === "locked" ||
+                (matchingDraft.status && matchingDraft.status !== "draft")
+              );
+
+              if (hasProgress) {
+                currentProjectId = matchingDraft.id;
+                set({ projectId: currentProjectId });
+                get().setOperationRunning(false);
+                set({ activeController: null });
+                await get().loadProjectState(matchingDraft.id, token);
+                return { status: "resumed", resumed: true, projectId: currentProjectId };
+              }
+
               currentProjectId = matchingDraft.id;
               set({ projectId: currentProjectId });
             }
@@ -1341,22 +1371,22 @@ export const useMimarStore = create((set, get) => ({
       const last_contra = project.last_contradiction_result || step0_state.last_contradiction_result || {};
       const gen_state = project.generation_state || null;
 
-      // Extract clarifying answers
+      // §1.1: Extract clarifying answers without raw-row allCqAnswered scan
       const cqAnswers = {};
-      let allCqAnswered = clarifying_list.length > 0;
       for (const cq of clarifying_list) {
         if (cq.answer && cq.answer.trim()) {
           cqAnswers[cq.id] = cq.answer;
-        } else {
-          allCqAnswered = false;
         }
       }
 
+      // §1.1: Authoritative clarifying status: skipped -> completed -> ready -> idle
       let clarifyingStatus = "idle";
       if (density_flags.clarifying_questions === "skip") {
         clarifyingStatus = "skipped";
+      } else if (Boolean(step0_state.clarifying_completed)) {
+        clarifyingStatus = "completed";
       } else if (clarifying_list.length > 0) {
-        clarifyingStatus = allCqAnswered ? "completed" : "ready";
+        clarifyingStatus = "ready";
       }
 
       let personaStatus = "idle";
@@ -1378,33 +1408,68 @@ export const useMimarStore = create((set, get) => ({
         lightweightDraftStatus = (lightweight_draft.final_status === "accepted") ? "idle" : "reviewing";
       }
 
-      // Extract structure state
+      // Extract sub-states
       const struct_state = project.structure_state || {};
       const structData = struct_state.accepted_structure?.structure || struct_state.candidate_structure?.structure || null;
-      const isStructureAccepted = project.status === "structure_accepted" || struct_state.status === "accepted";
-      const isPlanAccepted = project.status === "features_accepted" || isStructureAccepted || Boolean(gen_state?.features_locked);
 
-      // Determine step0Status & active screen
-      let step0Status = "idle";
+      const diag_state = project.diagram_state || {};
+      const diagData = diag_state.accepted_schema || diag_state.candidate_draft || null;
+
+      const final_plan_state = project.final_plan_state || {};
+
+      // §2.1: Stage completion flags based strictly on authoritative sub-state objects
+      const stageComplete = {
+        interview: Boolean(
+          (Array.isArray(gen_state?.features) && gen_state.features.length > 0) ||
+          gen_state?.features_locked ||
+          struct_state.status === "accepted" ||
+          Boolean(struct_state.accepted_structure) ||
+          diag_state.status === "accepted" ||
+          Boolean(diag_state.accepted_schema) ||
+          final_plan_state.status === "locked"
+        ),
+        plan: Boolean(
+          gen_state?.features_locked ||
+          struct_state.status === "accepted" ||
+          Boolean(struct_state.accepted_structure) ||
+          diag_state.status === "accepted" ||
+          Boolean(diag_state.accepted_schema) ||
+          final_plan_state.status === "locked"
+        ),
+        structure: Boolean(
+          struct_state.status === "accepted" ||
+          Boolean(struct_state.accepted_structure) ||
+          diag_state.status === "accepted" ||
+          Boolean(diag_state.accepted_schema) ||
+          final_plan_state.status === "locked"
+        ),
+        diagram: Boolean(
+          diag_state.status === "accepted" ||
+          Boolean(diag_state.accepted_schema) ||
+          final_plan_state.status === "locked"
+        ),
+        // render collapsed: transient view of diagram, diagram completion advances past it per §2.1 note
+        final: Boolean(final_plan_state.status === "locked"),
+        mcp: Boolean(project.mcp_state?.status === "exported") // forward-compatibility for V7
+      };
+
+      // Ladder order: first screen whose stage is NOT complete determines active screen
+      const RESUME_SCREEN_ORDER = ["interview", "plan", "structure", "diagram", "final", "mcp"];
       let currentScreen = "interview";
-      let interviewDone = false;
-      let planGenerated = false;
+      for (const scr of RESUME_SCREEN_ORDER) {
+        if (!stageComplete[scr]) {
+          currentScreen = scr;
+          break;
+        }
+      }
 
-      if (isStructureAccepted) {
+      // Determine step0Status & active screen flags
+      let step0Status = "idle";
+      let interviewDone = stageComplete.interview;
+      let planGenerated = stageComplete.interview;
+
+      if (interviewDone) {
         step0Status = "ready";
-        interviewDone = true;
-        planGenerated = true;
-        currentScreen = "diagram";
-      } else if (isPlanAccepted) {
-        step0Status = "ready";
-        interviewDone = true;
-        planGenerated = true;
-        currentScreen = "structure";
-      } else if (gen_state && Array.isArray(gen_state.features) && gen_state.features.length > 0) {
-        step0Status = "ready";
-        interviewDone = true;
-        planGenerated = true;
-        currentScreen = "plan";
       } else if (step0_state.last_label === "READY") {
         if (clarifyingStatus === "ready") {
           step0Status = "clarifying";
@@ -1423,26 +1488,41 @@ export const useMimarStore = create((set, get) => ({
         step0Status = (step0_state.off_topic_streak >= 3) ? "off_topic_fallback" : "idle";
       }
 
-      // Build intelligent transcript messages
-      const msgs = [
-        {
-          id: "init-ai-1",
-          role: "ai",
-          text: "Tell me about the software you want to build. What problem does it solve and who is it for? Paste raw requirements, user stories, or a rough concept.",
-        },
-      ];
-      if (project.idea_text && project.idea_text.trim()) {
-        msgs.push({
-          id: "user-idea-" + Date.now(),
-          role: "user",
-          text: project.idea_text.trim(),
-        });
-        if (step0Status === "ready") {
-          msgs.push({
-            id: "ai-ready-" + Date.now(),
+      // §1.5: Rebuild transcript from step0_state.conversation_transcript if present
+      const transcript = Array.isArray(step0_state.conversation_transcript)
+        ? step0_state.conversation_transcript
+        : [];
+
+      let msgs = [];
+      if (transcript.length > 0) {
+        msgs = transcript.map((entry, idx) => ({
+          id: entry.id || `tr-${idx}`,
+          role: entry.role || "ai",
+          text: entry.text || "",
+          kind: entry.kind || null,
+          created_at: entry.created_at || null,
+        }));
+      } else {
+        msgs = [
+          {
+            id: "init-ai-1",
             role: "ai",
-            text: "Great! Your project idea looks clear and ready for architecture planning. Please configure your target fixed inputs below to proceed.",
+            text: "Tell me about the software you want to build. What problem does it solve and who is it for? Paste raw requirements, user stories, or a rough concept.",
+          },
+        ];
+        if (project.idea_text && project.idea_text.trim()) {
+          msgs.push({
+            id: "user-idea-" + Date.now(),
+            role: "user",
+            text: project.idea_text.trim(),
           });
+          if (step0Status === "ready") {
+            msgs.push({
+              id: "ai-ready-" + Date.now(),
+              role: "ai",
+              text: "Great! Your project idea looks clear and ready for architecture planning. Please configure your target fixed inputs below to proceed.",
+            });
+          }
         }
       }
 
@@ -1456,10 +1536,10 @@ export const useMimarStore = create((set, get) => ({
         currentScreen,
         interviewDone,
         planGenerated,
-        planAccepted: isPlanAccepted,
+        planAccepted: stageComplete.plan,
         structureData: structData,
         structureGenerated: Boolean(structData),
-        structureAccepted: isStructureAccepted,
+        structureAccepted: stageComplete.structure,
         structureAttempts: struct_state.attempts || [],
         structureDiffConflicts: struct_state.diff_conflicts || [],
         structureValidationResult: struct_state.validation_result || null,
@@ -1483,6 +1563,25 @@ export const useMimarStore = create((set, get) => ({
           conflicting_parts: last_contra.conflicting_parts || [],
           unresolved: Boolean(step0_state.contradiction_unresolved),
         },
+
+        // §2.4: Full rehydration of diagram state
+        diagramData: diagData,
+        diagramJsonAccepted: diag_state.status === "accepted",
+        diagramJsonGenerated: Boolean(diag_state.candidate_draft || diag_state.accepted_schema),
+        diagramRendered: Boolean(diag_state.mermaid_erd || diag_state.mermaid_architecture),
+        diagramAccepted: diag_state.status === "accepted",
+        mermaidErd: diag_state.mermaid_erd || null,
+        mermaidArchitecture: diag_state.mermaid_architecture || null,
+        diagramAttempts: diag_state.attempts || [],
+        diagramDiffConflicts: diag_state.diff_conflicts || [],
+        diagramValidationResult: diag_state.validation_result || null,
+        diagramSurvivedFixPass: Boolean(diag_state.survived_fix_pass),
+
+        // §2.4: Full rehydration of final plan state
+        finalPlanData: final_plan_state,
+        finalPlanGenerated: Boolean(final_plan_state.consolidated_summary || final_plan_state.status),
+        finalAccepted: final_plan_state.status === "locked",
+
         messages: msgs,
         operationRunning: false,
         activeController: null,
@@ -1861,13 +1960,20 @@ export const useMimarStore = create((set, get) => ({
 
     try {
       // 1. Prerequisite: Accept features on backend
-      await fetch(
+      const acceptRes = await fetch(
         `${backendUrl}/api/projects/${s.projectId}/accept-features`,
         {
           method: "POST",
           headers: authHeaders,
         },
-      ).catch((e) => console.warn("Accept features call warning:", e));
+      );
+      if (!acceptRes.ok) {
+        const errData = await acceptRes.json().catch(() => ({}));
+        const errMsg = errData.detail || errData.message || "Failed to accept plan features on backend.";
+        set({ operationRunning: false });
+        s.showToast(`⚠ Accept Plan failed: ${errMsg}`);
+        return;
+      }
 
       // 2. Generate dependency order
       const res = await fetch(
@@ -1884,6 +1990,9 @@ export const useMimarStore = create((set, get) => ({
       }
     } catch (err) {
       console.warn("Dependency order generation fallback:", err);
+      set({ operationRunning: false });
+      s.showToast(`⚠ Accept Plan failed: ${err.message}`);
+      return;
     }
 
     set({ planAccepted: true, operationRunning: false });
@@ -1990,15 +2099,24 @@ export const useMimarStore = create((set, get) => ({
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         };
-        await fetch(`${backendUrl}/api/projects/${s.projectId}/structure/accept`, {
+        const res = await fetch(`${backendUrl}/api/projects/${s.projectId}/structure/accept`, {
           method: "POST",
           headers: authHeaders,
           body: JSON.stringify({
             structure: s.structureData || {},
           }),
         });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = errData.detail || errData.message || "Failed to accept structure candidate.";
+          set({ operationRunning: false });
+          s.showToast(`⚠ Accept Structure failed: ${errMsg}`);
+          return;
+        }
       } catch (err) {
-        console.warn("Structure accept backend sync warning:", err);
+        set({ operationRunning: false });
+        s.showToast(`⚠ Accept Structure failed: ${err.message}`);
+        return;
       }
     }
 
@@ -2135,13 +2253,20 @@ export const useMimarStore = create((set, get) => ({
             security_data: s.diagramData?.security || null,
           }),
         });
-        if (res.ok) {
-          const accData = await res.json();
-          erdMermaid = accData.mermaid_erd;
-          archMermaid = accData.mermaid_architecture;
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = errData.detail || errData.message || "Failed to accept diagram schema.";
+          set({ operationRunning: false });
+          s.showToast(`⚠ Accept Diagram failed: ${typeof errMsg === 'object' ? JSON.stringify(errMsg) : errMsg}`);
+          return;
         }
+        const accData = await res.json();
+        erdMermaid = accData.mermaid_erd;
+        archMermaid = accData.mermaid_architecture;
       } catch (err) {
-        console.warn("Diagram accept backend sync warning:", err);
+        set({ operationRunning: false });
+        s.showToast(`⚠ Accept Diagram failed: ${err.message}`);
+        return;
       }
     }
 
@@ -2271,7 +2396,7 @@ export const useMimarStore = create((set, get) => ({
     s.showScreen("final");
   },
 
-  acceptFinalPlan: async () => {
+  acceptFinalPlan: async (sessionToken = null) => {
     const s = get();
     if (s.finalAccepted) return;
     const commentCount = Object.keys(s.finalComments).length;
@@ -2282,12 +2407,52 @@ export const useMimarStore = create((set, get) => ({
       return;
     }
     set({ operationRunning: true, operationLabel: "Dispatching to Agent…" });
+
+    const token = await getActiveSessionToken(sessionToken);
+
+    let backendUrl = "";
+    try {
+      backendUrl = getBackendApiUrl("").replace(/\/$/, "");
+    } catch (err) {
+      // Offline fallback
+    }
+
+    if (backendUrl && s.projectId) {
+      try {
+        const authHeaders = {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        };
+        const res = await fetch(`${backendUrl}/api/projects/${s.projectId}/final-plan/lock`, {
+          method: "POST",
+          headers: authHeaders,
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          let errMsg = errData.detail || errData.message || "Failed to lock final plan.";
+          if (typeof errMsg === "object" && errMsg.blockers) {
+            errMsg = `Plan lock blocked: ${errMsg.blockers.map(b => b.description || b.rule || "Constraint violation").join("; ")}`;
+          } else if (typeof errMsg === "object") {
+            errMsg = JSON.stringify(errMsg);
+          }
+          set({ operationRunning: false });
+          s.showToast(`⚠ Dispatch failed: ${errMsg}`);
+          return;
+        }
+      } catch (err) {
+        set({ operationRunning: false });
+        s.showToast(`⚠ Dispatch failed: ${err.message}`);
+        return;
+      }
+    }
+
     await sleep(650);
     set({ finalAccepted: true, operationRunning: false });
     s.showToast(
       "Plan fully validated and dispatched! Opening MCP Server connection hub.",
     );
     s.showScreen("mcp");
+    get().saveProjectState();
   },
 
   saveProjectState: () => {

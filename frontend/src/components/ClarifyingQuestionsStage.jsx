@@ -8,7 +8,10 @@ export default function ClarifyingQuestionsStage({
   isSubmitting = false,
   isCompleted = false,
 }) {
-  const [answers, setAnswers] = useState({});
+  // §1.3: Lazy initializer seeds answers from questions prop (q.answer)
+  const [answers, setAnswers] = useState(() =>
+    Object.fromEntries(questions.map((q) => [q.id, q.answer || ""]))
+  );
 
   const handleAnswerChange = (qId, val) => {
     setAnswers((prev) => ({
@@ -78,6 +81,20 @@ export default function ClarifyingQuestionsStage({
         >
           {questions.length} {questions.length === 1 ? "Question" : "Questions"}
         </span>
+        {isCompleted && (
+          <span
+            style={{
+              fontSize: "11px",
+              padding: "2px 6px",
+              borderRadius: "4px",
+              background: "rgba(34, 197, 94, 0.15)",
+              color: "#4ADE80",
+              border: "1px solid rgba(34, 197, 94, 0.3)",
+            }}
+          >
+            ✓ Answered &amp; Locked
+          </span>
+        )}
       </div>
 
       <p

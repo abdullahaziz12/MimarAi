@@ -324,9 +324,44 @@ export default function DraftsPanel({ isOpen, onClose }) {
                           fontSize: "11px",
                           color: "var(--ink-muted, #64748B)",
                           fontFamily: "var(--font-mono, monospace)",
+                          flexWrap: "wrap",
                         }}
                       >
                         <span>{formatDate(draft.created_at)}</span>
+                        {(() => {
+                          const gen_state = draft.generation_state || {};
+                          const struct_state = draft.structure_state || {};
+                          const diag_state = draft.diagram_state || {};
+                          const final_plan_state = draft.final_plan_state || {};
+
+                          let b = { label: "Interview", color: "#94A3B8", bg: "rgba(148, 163, 184, 0.15)" };
+                          if (final_plan_state.status === "locked") {
+                            b = { label: "Locked Plan", color: "#10B981", bg: "rgba(16, 185, 129, 0.15)" };
+                          } else if (diag_state.status === "accepted" || Boolean(diag_state.accepted_schema)) {
+                            b = { label: "Diagram Accepted", color: "#38BDF8", bg: "rgba(56, 189, 248, 0.15)" };
+                          } else if (struct_state.status === "accepted" || Boolean(struct_state.accepted_structure)) {
+                            b = { label: "Structure Accepted", color: "#A855F7", bg: "rgba(168, 85, 247, 0.15)" };
+                          } else if (Boolean(gen_state.features_locked)) {
+                            b = { label: "Plan Accepted", color: "#F59E0B", bg: "rgba(245, 158, 11, 0.15)" };
+                          } else if (Array.isArray(gen_state.features) && gen_state.features.length > 0) {
+                            b = { label: "Plan Generated", color: "#60A5FA", bg: "rgba(96, 165, 250, 0.15)" };
+                          }
+
+                          return (
+                            <span
+                              style={{
+                                color: b.color,
+                                background: b.bg,
+                                padding: "1px 6px",
+                                borderRadius: "3px",
+                                fontSize: "10px",
+                                fontWeight: 600,
+                              }}
+                            >
+                              {b.label}
+                            </span>
+                          );
+                        })()}
                         {isCurrent && (
                           <span
                             style={{

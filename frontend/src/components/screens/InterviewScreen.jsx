@@ -326,7 +326,7 @@ export default function InterviewScreen() {
     setRetryContradiction(null);
     const result = await classifyIdeaStep0(text, session?.access_token || null);
 
-    if (!result) return;
+    if (!result || result.status === "resumed" || result.resumed) return;
 
     if (result.status === "error") {
       let errText =
@@ -858,16 +858,23 @@ export default function InterviewScreen() {
                 />
               )}
 
-              {/* V3.3: Clarifying Questions Stage */}
-              {(step0Status === "clarifying" ||
-                (clarifyingQuestions &&
-                  clarifyingQuestions.length > 0 &&
-                  !["ready", "persona_capture", "nfr_capture"].includes(step0Status))) && (
+              {/* V3.3: Clarifying Questions Stage - Active Editable Form */}
+              {step0Status === "clarifying" && clarifyingQuestions && clarifyingQuestions.length > 0 && (
                 <ClarifyingQuestionsStage
                   questions={clarifyingQuestions}
                   onSubmit={handleClarifyingSubmit}
                   isSubmitting={isSubmittingClarifications || operationRunning}
-                  isCompleted={["ready", "persona_capture", "nfr_capture"].includes(step0Status)}
+                  isCompleted={false}
+                />
+              )}
+
+              {/* V3.3: Clarifying Questions Stage - Read-Only Completed View */}
+              {step0Status !== "clarifying" && clarifyingStatus === "completed" && clarifyingQuestions && clarifyingQuestions.length > 0 && (
+                <ClarifyingQuestionsStage
+                  questions={clarifyingQuestions}
+                  onSubmit={handleClarifyingSubmit}
+                  isSubmitting={false}
+                  isCompleted={true}
                 />
               )}
 
