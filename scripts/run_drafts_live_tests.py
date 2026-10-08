@@ -250,6 +250,12 @@ class DraftsLiveTester:
 
         passed = (status == 200 and isinstance(body, dict) and "drafts" in body)
         draft_count = len(body.get("drafts", [])) if passed else 0
+        if self.mode == "LIVE_REMOTE" and not self.custom_project_id and passed:
+            drafts = body.get("drafts", [])
+            if drafts and isinstance(drafts, list) and len(drafts) > 0:
+                self.test_project_id = drafts[0].get("id")
+                print(f"  [*] Dynamically bound to real user project: {self.test_project_id}")
+
         self.record_result(
             2,
             "Drafts Drawer Unfiltered Retrieval",
@@ -272,6 +278,7 @@ class DraftsLiveTester:
             "density_flag": "full",
             "max_questions": 2
         }
+        generated_q_id = None
         if self.mode == "LOCAL_ASGI":
             mock_sb = MagicMock()
             mock_cq = MagicMock()
@@ -289,6 +296,10 @@ class DraftsLiveTester:
                 status, body, lat = self._request("POST", f"/api/projects/{self.test_project_id}/clarifying-questions", cq_payload)
         else:
             status, body, lat = self._request("POST", f"/api/projects/{self.test_project_id}/clarifying-questions", cq_payload)
+            if status == 200 and isinstance(body, dict) and body.get("questions"):
+                qs = body.get("questions")
+                if isinstance(qs, list) and len(qs) > 0 and isinstance(qs[0], dict):
+                    generated_q_id = qs[0].get("id")
 
         passed = status in (200, 404)
         notes = "Generated questions successfully; previous unanswered orphan rows hard-deleted" if status == 200 else f"Project {self.test_project_id} handled safely"
@@ -301,7 +312,7 @@ class DraftsLiveTester:
             status,
             200 if status == 200 else status,
             lat,
-            True,
+            passed,
             notes,
             payload=cq_payload,
             response_body=body
@@ -310,7 +321,7 @@ class DraftsLiveTester:
         # ----------------------------------------------------------------------
         # Test 4: Clarifying Answers Submit & Authoritative Flag (Bugs 1.1, 1.3, 1.5)
         # ----------------------------------------------------------------------
-        sample_q_id = str(uuid.uuid4())
+        sample_q_id = generated_q_id or str(uuid.uuid4())
         ans_payload = {
             "answers": [
                 {"question_id": sample_q_id, "answer": "HIPAA compliance and cloud PostgreSQL required."}
